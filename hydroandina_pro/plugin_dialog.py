@@ -38,11 +38,12 @@ from .core import (delineation, morphometry, curve_number, tc_methods, dem_downl
                     quality_control, pmp_hershfield, direct_discharge_methods,
                     data_completion, areal_precipitation, water_yield, scour, soil_loss,
                     sediment_transport, debris_flow, climate_change, mean_flow_models, etp_methods,
-                    low_flows, phabsim, groundwater_flow, well_hydraulics)
+                    low_flows, phabsim, groundwater_flow, well_hydraulics, idf_curves)
 from .core.qgis_layer_utils import obtener_capa
 from .ui.hypsometric_canvas import HypsometricCanvas
 from .ui.hydrograph_canvas import HydrographCanvas
 from .ui.frequency_canvas import FrequencyCanvas
+from .ui.idf_canvas import IdfCanvas
 from .ui.pasteable_table import TablaPegable
 from .ui.cross_section_canvas import SeccionTransversalCanvas
 from .ui.cav_canvas import CavCanvas
@@ -298,6 +299,7 @@ class HydroAndinaProDialog(QDialog):
         self.mejor_ajuste_clave = None
         self.p24_disenio = {}
         self.periodos_retorno_actuales = []
+        self.idf_resultados = {}  # curvas/ecuaciones IDF derivadas de p24_disenio (pestaña 5)
         self.serie_qc_activa = None  # serie activa de la pestaña 6 (Precipitación Media Mensual)
         self.resultados_hidraulica_drenaje = {}  # nombre de estructura -> dict de resultados (pestaña 7)
         self.resultado_cav = {}  # curva Cota-Área-Volumen (pestaña 4)
@@ -2179,32 +2181,35 @@ class HydroAndinaProDialog(QDialog):
         self.tabla_entrada_manual.setMaximumHeight(16777215)  # sin límite (por defecto de Qt)
         v_manual.addWidget(self.tabla_entrada_manual)
 
+        # Los 4 botones se agregan a un QHBoxLayout sin ningún addStretch();
+        # QPushButton admite crecer horizontalmente por defecto (política
+        # Minimum, no Fixed), así que sin un tope explícito se repartían
+        # todo el ancho sobrante de la fila a partes iguales, viéndose
+        # mucho más anchos de lo que su texto necesita.
         h_botones_tabla = QHBoxLayout()
         btn_agregar_fila = QPushButton("Agregar fila")
         btn_agregar_fila.clicked.connect(lambda: self.tabla_entrada_manual.setRowCount(self.tabla_entrada_manual.rowCount() + 1))
+        limitar_ancho_boton(btn_agregar_fila)
         h_botones_tabla.addWidget(btn_agregar_fila)
 
         btn_quitar_fila = QPushButton("Quitar fila seleccionada")
         btn_quitar_fila.clicked.connect(self._on_quitar_fila_tabla_manual)
+        limitar_ancho_boton(btn_quitar_fila)
         h_botones_tabla.addWidget(btn_quitar_fila)
 
         btn_limpiar_tabla = QPushButton("Limpiar tabla")
         btn_limpiar_tabla.clicked.connect(lambda: self.tabla_entrada_manual.clearContents())
+        limitar_ancho_boton(btn_limpiar_tabla)
         h_botones_tabla.addWidget(btn_limpiar_tabla)
 
         btn_usar_tabla = QPushButton("Usar datos de esta tabla")
         btn_usar_tabla.clicked.connect(self._on_usar_serie_manual)
+        limitar_ancho_boton(btn_usar_tabla)
         h_botones_tabla.addWidget(btn_usar_tabla)
+        h_botones_tabla.addStretch()
 
         v_manual.addLayout(h_botones_tabla)
         v.addWidget(gb_manual)
-
-        _lbl_auto_7 = QLabel(
-            "Nota: el control de calidad y homogeneidad (Pettitt, Mann-Kendall, etc.) y la PMP de "
-            "Hershfield se movieron a la nueva pestaña \"6. Precipitación Media Mensual\"."
-        )
-        _lbl_auto_7.setWordWrap(True)
-        v.addWidget(_lbl_auto_7)
 
         gb_analisis = QGroupBox("2. Análisis de frecuencia")
         h_a = QHBoxLayout(gb_analisis)
@@ -2285,7 +2290,106 @@ class HydroAndinaProDialog(QDialog):
         self.canvas_comparacion_tr_cartesiano = FrequencyCanvas(self, width=6.5, height=4.8)
         v.addWidget(self.canvas_comparacion_tr_cartesiano)
 
+        # ---------------- 4. Curvas IDF ----------------
+        gb_idf = QGroupBox("4. Curvas Intensidad-Duración-Frecuencia (IDF)")
+        v_idf = QVBoxLayout(gb_idf)
+        lbl_idf_info = QLabel(
+            "Curvas IDF derivadas de las precipitaciones de diseño P24h(Tr) de arriba, para los "
+            "periodos de retorno ya establecidos, mediante el mismo escalamiento potencial de "
+            "Sherman P(d) = P24h·(d/1440min)^n usado para desagregar el hietograma en la pestaña 6 "
+            "(exponente n editable abajo). El plugin no cuenta con series sub-diarias (pluviograma) "
+            "para calibrar una curva IDF real observada en la zona; si dispone de una curva IDF "
+            "regional oficial (SENAMHI/ANA) para su cuenca, debe preferirla para un diseño definitivo."
+        )
+        lbl_idf_info.setWordWrap(True)
+        v_idf.addWidget(lbl_idf_info)
+
+        f_idf = QFormLayout()
+        f_idf.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.spin_exponente_idf = QDoubleSpinBox()
+        self.spin_exponente_idf.setRange(0.05, 0.50)
+        self.spin_exponente_idf.setSingleStep(0.01)
+        self.spin_exponente_idf.setValue(0.20)
+        f_idf.addRow("Exponente n de Sherman (mismo tipo que en la pestaña 6):", self.spin_exponente_idf)
+        v_idf.addLayout(f_idf)
+
+        self.btn_calcular_idf = QPushButton("Calcular curvas y ecuaciones IDF")
+        self.btn_calcular_idf.clicked.connect(self._on_calcular_idf)
+        limitar_ancho_boton(self.btn_calcular_idf)
+        v_idf.addWidget(self.btn_calcular_idf)
+
+        v_idf.addWidget(QLabel("<b>Ecuación potencial por periodo de retorno</b> (i = a·t^b, t en minutos):"))
+        self.tabla_ecuaciones_idf = QTableWidget(0, 5)
+        self.tabla_ecuaciones_idf.setHorizontalHeaderLabels(["Tr (años)", "Ecuación", "a", "b", "R²"])
+        aplicar_columna_elastica(self.tabla_ecuaciones_idf, indice_columna_larga=1)
+        v_idf.addWidget(self.tabla_ecuaciones_idf)
+
+        self.lbl_ecuacion_idf_combinada = QLabel("Ecuación IDF combinada: sin calcular.")
+        self.lbl_ecuacion_idf_combinada.setWordWrap(True)
+        self.lbl_ecuacion_idf_combinada.setStyleSheet("font-family: monospace;")
+        v_idf.addWidget(self.lbl_ecuacion_idf_combinada)
+
+        self.canvas_idf_log = IdfCanvas(self, width=7.6, height=5.2)
+        v_idf.addWidget(self.canvas_idf_log)
+
+        lbl_idf_cartesiano = QLabel(
+            "Mismas curvas IDF, en escala cartesiana (para ver la forma real, muy curvada -- se "
+            "aplanan rápido a duraciones largas -- que la escala log-log de arriba no deja apreciar):"
+        )
+        lbl_idf_cartesiano.setWordWrap(True)
+        v_idf.addWidget(lbl_idf_cartesiano)
+        self.canvas_idf_cartesiano = IdfCanvas(self, width=7.6, height=5.2)
+        v_idf.addWidget(self.canvas_idf_cartesiano)
+
+        v.addWidget(gb_idf)
+
         self._agregar_pestaña_con_scroll(tab, "5. Precipitación Máx 24h")
+
+    def _on_calcular_idf(self):
+        if not self.p24_disenio:
+            QMessageBox.warning(
+                self, "Falta el análisis de frecuencia",
+                "Calcule primero el análisis de frecuencia (sección 2, arriba en esta pestaña) para "
+                "obtener las precipitaciones de diseño P24h(Tr) de los periodos de retorno establecidos."
+            )
+            return
+        try:
+            exponente_n = self.spin_exponente_idf.value()
+            p24_por_tr = dict(self.p24_disenio)
+            datos_por_tr = idf_curves.tabla_idf(p24_por_tr, exponente_n)
+
+            ecuaciones_por_tr = {}
+            self.tabla_ecuaciones_idf.setRowCount(0)
+            for tr in sorted(p24_por_tr.keys()):
+                eq = idf_curves.ajustar_ecuacion_potencial(
+                    [d for d, i in datos_por_tr[tr]], [i for d, i in datos_por_tr[tr]]
+                )
+                ecuaciones_por_tr[tr] = eq
+                row = self.tabla_ecuaciones_idf.rowCount()
+                self.tabla_ecuaciones_idf.insertRow(row)
+                self.tabla_ecuaciones_idf.setItem(row, 0, QTableWidgetItem(f"{tr}"))
+                self.tabla_ecuaciones_idf.setItem(
+                    row, 1, QTableWidgetItem(f"i = {eq['a']:.3f} · t^{eq['b']:.4f}"))
+                self.tabla_ecuaciones_idf.setItem(row, 2, QTableWidgetItem(f"{eq['a']:.4f}"))
+                self.tabla_ecuaciones_idf.setItem(row, 3, QTableWidgetItem(f"{eq['b']:.4f}"))
+                self.tabla_ecuaciones_idf.setItem(row, 4, QTableWidgetItem(f"{eq['r2']:.5f}"))
+            ajustar_alto_tabla(self.tabla_ecuaciones_idf, filas_visibles_max=12)
+
+            combinada = idf_curves.ajustar_idf_combinada(p24_por_tr, exponente_n)
+            self.lbl_ecuacion_idf_combinada.setText(
+                "Ecuación IDF combinada (Tr y t a la vez, ajustada sobre todos los puntos de todas "
+                f"las curvas):\n{combinada['ecuacion_texto']}\nR² = {combinada['r2']:.5f}"
+            )
+
+            self.canvas_idf_log.plot_curvas_idf(datos_por_tr, ecuaciones_por_tr, escala_log=True)
+            self.canvas_idf_cartesiano.plot_curvas_idf(datos_por_tr, ecuaciones_por_tr, escala_log=False)
+
+            self.idf_resultados = {
+                "exponente_n": exponente_n, "p24_por_tr": p24_por_tr,
+                "ecuaciones_por_tr": ecuaciones_por_tr, "combinada": combinada,
+            }
+        except Exception as e:
+            QMessageBox.critical(self, "Error calculando las curvas IDF", str(e))
 
     def _on_examinar_csv_serie(self):
         ruta, _ = QFileDialog.getOpenFileName(self, "Seleccionar CSV de serie anual", "", "CSV (*.csv)")
@@ -2475,10 +2579,13 @@ class HydroAndinaProDialog(QDialog):
         h_datos_btn = QHBoxLayout()
         btn_usar_tabla_mensual = QPushButton("Usar datos de esta tabla")
         btn_usar_tabla_mensual.clicked.connect(self._on_usar_tabla_precip_mensual)
+        limitar_ancho_boton(btn_usar_tabla_mensual)
         h_datos_btn.addWidget(btn_usar_tabla_mensual)
         btn_usar_serie_anual = QPushButton("(alternativa) Usar la serie anual ya cargada en la pestaña 5")
         btn_usar_serie_anual.clicked.connect(self._on_usar_serie_anual_como_qc)
+        limitar_ancho_boton(btn_usar_serie_anual)
         h_datos_btn.addWidget(btn_usar_serie_anual)
+        h_datos_btn.addStretch()
         v_datos.addLayout(h_datos_btn)
 
         self.lbl_estado_precip_mensual = QLabel("Estado: sin datos cargados.")

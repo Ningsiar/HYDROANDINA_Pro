@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.2.41
+version=0.2.42
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,32 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.2.42: Pestaña "5. Precipitación Máx 24h" -- nueva sección "4. Curvas Intensidad-Duración-
+      Frecuencia (IDF)", para los periodos de retorno ya establecidos. Nuevo core/idf_curves.py: las
+      curvas IDF se DERIVAN de las precipitaciones de diseño P24h(Tr) ya calculadas, mediante el mismo
+      escalamiento potencial de Sherman P(d)=P24h·(d/1440min)^n ya usado en core/design_storm.py para el
+      hietograma de la pestaña 6 (exponente n editable, mismo tipo de parámetro) -- transparencia
+      explícita: el plugin no tiene series sub-diarias (pluviograma) para calibrar una curva IDF real
+      observada, solo la serie de P24h; se documenta como simplificación, igual que ya hace
+      design_storm.py. Se ajustan 2 tipos de ecuación por mínimos cuadrados en escala log-log: (1) una
+      ecuación potencial i=a·t^b por cada Tr (tabla con Tr/ecuación/a/b/R², una fila por periodo de
+      retorno), y (2) una ecuación IDF combinada de 3 parámetros i=K·Tr^m/t^n (las 9 curvas a la vez; se
+      omite deliberadamente el parámetro de retardo "c" de la forma clásica de 4 parámetros porque no es
+      identificable con los datos disponibles aquí). GRÁFICOS: nuevo ui/idf_canvas.py con las curvas
+      ordenadas y coloreadas de menor a mayor Tr (paleta viridis), en 2 versiones como el resto del
+      plugin -- log-log (presentación estándar de curvas IDF, rectas paralelas) y cartesiana (para ver
+      la forma real muy curvada que el log-log no deja apreciar). Verificado con datos sintéticos
+      realistas: el exponente b del ajuste potencial coincide EXACTO con n-1 (la fórmula es una potencia
+      pura por construcción, R²≈1), y la ecuación combinada aproxima los valores reales con <5% de error;
+      ambos gráficos renderizados con matplotlib real sin excepciones. De paso, corregido
+      matplotlib.cm.get_cmap() (removido en matplotlib >= 3.9) por matplotlib.colormaps[...], con
+      respaldo al método viejo si la versión de matplotlib empaquetada con QGIS es más antigua.
+      Además: eliminada la nota "el control de calidad... se movieron a la pestaña 6" (ya no aportaba,
+      a pedido); y corregidos otros 6 botones ("Agregar fila"/"Quitar fila seleccionada"/"Limpiar tabla"/
+      "Usar datos de esta tabla" x2/"(alternativa) Usar la serie anual...") que se estiraban a todo el
+      ancho de un QHBoxLayout sin límite -- mismo síntoma que los botones de QFormLayout corregidos en
+      la v0.2.38, pero causa distinta (QPushButton admite crecer horizontalmente por defecto; sin
+      addStretch() al final de la fila, el espacio sobrante se repartía entre ellos a partes iguales).
     - v0.2.41: Pestaña "4. Tiempo de concentración y Lag Time" -- 2 correcciones reportadas.
       (1) TABLA DE Tc: ahora se ordena siempre de menor a mayor Tc (antes aparecía en el orden interno
       de registro de los métodos en core/tc_methods.py, sin relación con su magnitud), con los métodos
