@@ -21,6 +21,7 @@ from qgis.core import (
 )
 from qgis.gui import QgsMapLayerComboBox, QgsMapToolEmitPoint
 from qgis.PyQt.QtCore import Qt
+from qgis.PyQt.QtGui import QFont
 from qgis.PyQt.QtWidgets import (
     QDialog, QTabWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox,
     QLabel, QLineEdit, QPushButton, QSpinBox, QDoubleSpinBox, QComboBox,
@@ -90,6 +91,19 @@ NOMBRES_PARAMETROS_MORFOMETRIA = {
     "Rf": "Razón de ajuste (longitud del cauce / perímetro)",
     "IS": "Índice de sinuosidad del cauce principal",
     "Sc": "Coeficiente de almacenamiento del cauce",
+    "Af": "Factor de asimetría",
+    # Grupo 3: cauce principal
+    "Lc": "Longitud del cauce principal",
+    "Zinicio": "Elevación de inicio del cauce (cabecera/naciente)",
+    "Zfin": "Elevación de fin del cauce (punto de salida)",
+    "Hc": "Desnivel del cauce principal",
+    "Se": "Pendiente media del cauce (entre extremos)",
+    "SLR": "Pendiente compensada — Regresión Lineal",
+    "STS": "Pendiente compensada — Taylor-Schwartz",
+    "Gc": "Gradiente del cauce principal",
+    # Grupo 4: pendiente media de la cuenca
+    "Scuenca_pct": "Pendiente media de la cuenca",
+    "Scuenca_deg": "Pendiente media de la cuenca",
     # Grupo 5: red de drenaje
     "Lt": "Longitud total de la red de drenaje",
     "Dd": "Densidad de drenaje",
@@ -99,6 +113,11 @@ NOMBRES_PARAMETROS_MORFOMETRIA = {
     "Lo": "Longitud de flujo superficial (overland flow)",
     "C": "Constante de mantenimiento del cauce",
     "If": "Número de infiltración",
+    "Nu": "Número de corrientes",
+    "Lm": "Longitud media de corrientes",
+    "Omega": "Orden de la corriente (Strahler)",
+    "Rb": "Razón de bifurcación (Strahler)",
+    "Jd": "Densidad de uniones",
     # Grupo 6: relieve y riesgo
     "Rr": "Relieve relativo",
     "Rh": "Razón de relieve de Schumm",
@@ -114,9 +133,13 @@ UNIDADES_PARAMETROS_MORFOMETRIA = {
     "A": "km²", "P": "km", "Lb": "km", "B": "km", "Zmax": "m s.n.m.", "Zmin": "m s.n.m.",
     "Zmed": "m s.n.m.", "Z50": "m s.n.m.", "H": "m",
     "Ff": "adimensional", "Re": "adimensional", "Rc": "adimensional", "Kc": "adimensional",
-    "Rf": "adimensional", "IS": "adimensional", "Sc": "adimensional",
+    "Rf": "adimensional", "IS": "adimensional", "Sc": "adimensional", "Af": "adimensional",
+    "Lc": "km", "Zinicio": "m s.n.m.", "Zfin": "m s.n.m.", "Hc": "m",
+    "Se": "m/m", "SLR": "m/m", "STS": "m/m", "Gc": "m/m",
+    "Scuenca_pct": "%", "Scuenca_deg": "°",
     "Lt": "km", "Dd": "km/km²", "Fs": "cauces/km²", "Dt": "cauces/km", "Id": "adimensional",
-    "Lo": "km", "C": "km²/km", "If": "adimensional",
+    "Lo": "km", "C": "km²/km", "If": "adimensional", "Nu": "cauces", "Lm": "km",
+    "Omega": "adimensional", "Rb": "adimensional", "Jd": "uniones/km²",
     "Rr": "m/km", "Rh": "adimensional", "Rn": "adimensional", "Oc": "adimensional",
     "Im": "m/km²", "Mel": "adimensional",
 }
@@ -155,6 +178,30 @@ INTERPRETACIONES_GENERALES_MORFOMETRIA = {
     "IS": "IS = Lc real / Lc en línea recta. IS ≤ 1.3 ⇒ cauce de baja sinuosidad (más recto, mayor "
           "energía/velocidad); IS > 1.3 ⇒ cauce sinuoso (más laminación natural de la crecida).",
     "Sc": "Coeficiente de almacenamiento potencial del cauce respecto al área y longitud total de la red.",
+    "Af": "Compara el área de la cuenca a cada lado del cauce principal; requiere digitalizar ambos "
+          "márgenes por separado, algo que este plugin no automatiza — déjelo en blanco o calcúlelo "
+          "aparte si lo necesita.",
+    "Lc": "Longitud del cauce principal, desde el punto de salida hasta la naciente; extraída "
+          "automáticamente de la red de drenaje delineada (Pestaña 1) cuando está disponible, o el "
+          "valor ingresado manualmente en esta pestaña como respaldo.",
+    "Zinicio": "Cota de la naciente/cabecera del cauce principal (extremo aguas arriba).",
+    "Zfin": "Cota del punto de salida/control del cauce principal (extremo aguas abajo, = Zmin).",
+    "Hc": "Hc = Zinicio − Zfin; desnivel a lo largo del cauce principal (equivalente a H del Grupo 1 "
+          "cuando el cauce principal define también el relieve total de la cuenca).",
+    "Se": "Se = Hc/Lc; pendiente media del cauce entre sus dos extremos (la aproximación más simple, "
+          "sensible a irregularidades puntuales del perfil).",
+    "SLR": "Pendiente del cauce ajustada por regresión lineal sobre todo el perfil longitudinal "
+           "muestreado (menos sensible que Se a un solo punto anómalo del perfil).",
+    "STS": "Pendiente compensada de Taylor-Schwartz: promedia la velocidad de tramos homogéneos del "
+           "perfil en vez de promediar pendientes directamente: STS = (Lc / Σ(li/√Si))². Suele ser el "
+           "valor más representativo para alimentar métodos de tiempo de concentración (Pestaña 4).",
+    "Gc": "Gradiente del cauce principal (= Se); Gc > 5% se considera régimen torrencial, típico de "
+          "quebradas andinas de fuerte pendiente con alto potencial de arrastre de sedimentos/detritos.",
+    "Scuenca_pct": "Pendiente media de todas las celdas del MDE dentro de la cuenca (no solo del "
+                   "cauce); Scuenca > 30% se considera muy escarpada. Alimenta directamente el método "
+                   "SCS Lag y otros de tiempo de concentración (Pestaña 4).",
+    "Scuenca_deg": "El mismo valor de pendiente media de la cuenca, expresado en grados sexagesimales "
+                   "en vez de porcentaje (tan(°) = pendiente en m/m).",
     "Lt": "Suma de longitudes de todos los tramos de la red de drenaje vectorizada dentro de la cuenca.",
     "Dd": "Dd = Lt/A. Dd < 0.5 km/km² ⇒ drenaje pobre (suelos muy permeables/vegetados); "
           "Dd > 3-4 km/km² ⇒ drenaje muy denso, típico de suelos poco permeables o terreno muy "
@@ -171,6 +218,19 @@ INTERPRETACIONES_GENERALES_MORFOMETRIA = {
          "de cauce (constante de mantenimiento del cauce, Schumm).",
     "If": "If = Dd·Fs; combina densidad y frecuencia de cauces en un solo índice de disección del "
           "terreno por la red de drenaje.",
+    "Nu": "Número de corrientes (cauces de orden 1, aproximado) ingresado por el usuario a partir de "
+          "la red de drenaje delineada (Pestaña 1); insumo directo de Fs, Dt e If.",
+    "Lm": "Lm = Lt/Nu; longitud promedio de cada corriente de la red.",
+    "Omega": "Orden jerárquico de Strahler del cauce de mayor orden en la red (1 = cauce sin "
+             "afluentes). Este plugin identifica el cauce principal como un único tramo continuo "
+             "(Ω = 1); una clasificación de orden completa por confluencias requiere digitalizar la "
+             "red de drenaje completa con topología de afluentes, no solo el cauce principal.",
+    "Rb": "Rb = N_órdenes(k) / N_órdenes(k+1); razón de bifurcación de Horton-Strahler entre órdenes "
+          "sucesivos (típicamente 3-5 en cuencas naturales). Requiere la red de drenaje completa "
+          "clasificada por orden, no disponible con el cauce principal único de este plugin.",
+    "Jd": "Jd = N° de confluencias / A; densidad de uniones de la red. Requiere la red de drenaje "
+          "completa con su topología de confluencias, no disponible con el cauce principal único de "
+          "este plugin.",
     "Rr": "Rr = H/√A; mide qué tan abrupto es el relieve en relación al tamaño de la cuenca "
           "(valores altos ⇒ cuencas de montaña de fuerte pendiente, típico del ámbito andino).",
     "Rh": "Rh = H/Lb; pendiente promedio a lo largo del eje mayor de la cuenca.",
@@ -1065,20 +1125,106 @@ class HydroAndinaProDialog(QDialog):
 
         self._agregar_pestaña_con_scroll(tab, "2. Morfometría y drenaje")
 
-    def _agregar_fila_morfo(self, nombre, simbolo, valor, interpretacion_dinamica=""):
+    def _agregar_fila_morfo(self, nombre, simbolo, valor, interpretacion_dinamica="", clave_lookup=None):
+        """
+        clave_lookup: clave a usar para buscar unidad/interpretación en
+        UNIDADES_PARAMETROS_MORFOMETRIA / INTERPRETACIONES_GENERALES_MORFOMETRIA,
+        si es distinta del texto que se muestra en la columna "Símbolo"
+        (caso de Scuenca: se muestra el mismo símbolo "Scuenca" en dos
+        filas -- % y ° -- pero cada una necesita su propia unidad, así
+        que se buscan con claves internas distintas "Scuenca_pct"/
+        "Scuenca_deg"). Si no se indica, se usa `simbolo` como antes.
+        """
+        clave = clave_lookup if clave_lookup is not None else simbolo
         row = self.tabla_morfo.rowCount()
         self.tabla_morfo.insertRow(row)
         self.tabla_morfo.setItem(row, 0, QTableWidgetItem(str(nombre)))
         self.tabla_morfo.setItem(row, 1, QTableWidgetItem(str(simbolo)))
         valor_str = f"{valor:.3f}" if isinstance(valor, float) else str(valor)
         self.tabla_morfo.setItem(row, 2, QTableWidgetItem(valor_str))
-        self.tabla_morfo.setItem(row, 3, QTableWidgetItem(UNIDADES_PARAMETROS_MORFOMETRIA.get(simbolo, "")))
-        interpretacion_general = INTERPRETACIONES_GENERALES_MORFOMETRIA.get(simbolo, "")
+        self.tabla_morfo.setItem(row, 3, QTableWidgetItem(UNIDADES_PARAMETROS_MORFOMETRIA.get(clave, "")))
+        interpretacion_general = INTERPRETACIONES_GENERALES_MORFOMETRIA.get(clave, "")
         if interpretacion_dinamica and interpretacion_general:
             texto_final = f"{interpretacion_dinamica} — {interpretacion_general}"
         else:
             texto_final = interpretacion_dinamica or interpretacion_general
         self.tabla_morfo.setItem(row, 4, QTableWidgetItem(texto_final))
+
+    def _agregar_titulo_grupo_morfo(self, titulo):
+        """Inserta una fila de encabezado de sección (en negrita, ocupando
+        las 5 columnas) dentro de tabla_morfo, para separar visualmente
+        los 6 grupos de parámetros morfométricos."""
+        row = self.tabla_morfo.rowCount()
+        self.tabla_morfo.insertRow(row)
+        item = QTableWidgetItem(titulo)
+        fuente = item.font()
+        fuente.setBold(True)
+        item.setFont(fuente)
+        self.tabla_morfo.setItem(row, 0, item)
+        self.tabla_morfo.setSpan(row, 0, 1, self.tabla_morfo.columnCount())
+
+    def _calcular_g3_g4(self, g1: dict):
+        """
+        Calcula los Grupos 3 (cauce principal) y 4 (pendiente de cuenca +
+        curva hipsométrica), compartido entre la Pestaña 2 (donde ambos
+        grupos se agregan a la tabla de resultados de morfometría) y la
+        Pestaña 4 (Tc, que además usa Se/S10-85 como insumo directo y
+        grafica la curva hipsométrica). Devuelve (g3 o None, g4 o None);
+        si algo falla se avisa con un QMessageBox.warning y se devuelve
+        None para ese grupo, sin interrumpir el resto del cálculo del
+        llamador (antes esta lógica solo existía, duplicable, dentro de
+        _on_calcular_tc).
+        """
+        g4 = None
+        if self.dem_clip_path:
+            try:
+                z_array = raster_stats.leer_array_valido(self.dem_clip_path)
+                slope_path = delineation.calcular_pendiente(QgsRasterLayer(self.dem_clip_path, "dem_clip"))
+                slope_array = raster_stats.leer_array_valido(slope_path)
+                g4 = morphometry.grupo4_pendiente_hipsometria(slope_array, z_array)
+            except Exception as e_g4:
+                QMessageBox.warning(self, "Pendiente media de la cuenca no disponible", str(e_g4))
+
+        g3 = None
+        if getattr(self, "red_drenaje_layer", None) is not None and getattr(self, "dem_layer", None) is not None \
+                and self.break_point_xy is not None:
+            try:
+                perfil = main_channel.extraer_perfil_cauce_principal(
+                    self.red_drenaje_layer, self.dem_layer, self.break_point_xy
+                )
+                # OJO con la convención: perfil["elevaciones_m"] está
+                # ordenado desde la SALIDA (índice 0, cota BAJA) hasta la
+                # NACIENTE (índice -1, cota ALTA). Pero
+                # grupo3_cauce_principal() calcula hc = z_inicio - z_fin
+                # esperando que "z_inicio" sea la NACIENTE (cota alta, de
+                # donde "inicia" el río) y "z_fin" la SALIDA (cota baja) —
+                # la convención inversa a la del array del perfil. Pasarlos
+                # en el orden del array daba hc y Se NEGATIVOS; se corrige
+                # aquí.
+                g3 = morphometry.grupo3_cauce_principal(
+                    lc_km=perfil["lc_km"],
+                    z_inicio=float(perfil["elevaciones_m"][-1]),  # naciente (alta)
+                    z_fin=float(perfil["elevaciones_m"][0]),      # salida (baja)
+                    perfil_distancias_m=perfil["distancias_m"],
+                    perfil_elevaciones_m=perfil["elevaciones_m"],
+                )
+                if g3["Se"] <= 0:
+                    raise ValueError(
+                        f"Se resultó no positivo ({g3['Se']}); revise que el punto de salida esté "
+                        "bien ubicado sobre el cauce (pestaña 1)."
+                    )
+            except Exception as e_perfil:
+                QMessageBox.warning(
+                    self, "Perfil del cauce principal no disponible",
+                    "No se pudo extraer automáticamente el perfil longitudinal del cauce principal "
+                    f"({e_perfil}); Lc/Zinicio/Zfin/Hc/Se/SLR/STS/Gc no estarán disponibles (para el "
+                    "cálculo de Tc en la pestaña 4 se usará la aproximación Se = H/Lc como respaldo). "
+                    "Revise que la pestaña 1 haya generado la red de drenaje y que el punto de salida "
+                    "esté definido."
+                )
+                g3 = None
+
+        return g3, g4
 
     def _on_calcular_morfometria(self):
         if self.cuenca_layer is None or self.dem_clip_path is None:
@@ -1127,10 +1273,13 @@ class HydroAndinaProDialog(QDialog):
             else:
                 z_min = z_min_muestreado
 
+            # ================= GRUPO 1: parámetros básicos =================
             g1 = morphometry.grupo1_basicos(area_m2, perimetro_m, lb_m, z_max, z_min, z_array)
+            self._agregar_titulo_grupo_morfo("1 — Parámetros básicos de la cuenca")
             for k, v in g1.items():
                 self._agregar_fila_morfo(NOMBRES_PARAMETROS_MORFOMETRIA.get(k, k), k, v)
 
+            # ================= GRUPO 2: forma e índices de forma =================
             lc_km = self.spin_lc_km.value()
             lt_km = self.spin_lt_km.value()
             g2 = morphometry.grupo2_forma(g1["A"], g1["Lb"], g1["P"], lc_km, lt_km)
@@ -1145,17 +1294,65 @@ class HydroAndinaProDialog(QDialog):
                 "Kc": g2["interpretacion"][3] if len(g2["interpretacion"]) > 3 else "",
                 "IS": g2["interpretacion"][4] if len(g2["interpretacion"]) > 4 else "",
             }
+            self._agregar_titulo_grupo_morfo("2 — Parámetros de forma e índices de forma")
             for k, val in g2.items():
                 if k == "interpretacion":
                     continue
                 self._agregar_fila_morfo(NOMBRES_PARAMETROS_MORFOMETRIA.get(k, k), k, val,
                                           interpretaciones_g2.get(k, ""))
+            # Factor de asimetría: requiere digitalizar ambos márgenes de la
+            # cuenca por separado (no automatizado en este plugin); se deja
+            # la fila con "—" en vez de omitirla, para que la estructura de
+            # 6 grupos quede siempre completa.
+            self._agregar_fila_morfo(NOMBRES_PARAMETROS_MORFOMETRIA["Af"], "Af", "—", clave_lookup="Af")
 
+            # ================= GRUPOS 3 y 4: cauce principal y pendiente =================
+            # Antes solo se calculaban al entrar a la Pestaña 4 (Tc); ahora
+            # se calculan también aquí (mismo helper compartido) para que
+            # la tabla de morfometría quede completa con los 6 grupos desde
+            # el primer cálculo, sin tener que visitar otra pestaña.
+            g3, g4 = self._calcular_g3_g4(g1)
+
+            self._agregar_titulo_grupo_morfo("3 — Parámetros del cauce principal")
+            if g3 is not None:
+                for simbolo in ("Lc", "Zinicio", "Zfin", "Hc", "Se", "SLR", "STS"):
+                    self._agregar_fila_morfo(NOMBRES_PARAMETROS_MORFOMETRIA[simbolo], simbolo, g3[simbolo])
+                self._agregar_fila_morfo(NOMBRES_PARAMETROS_MORFOMETRIA["Gc"], "Gc", g3["Gc"], g3["interpretacion"])
+            else:
+                for simbolo in ("Lc", "Zinicio", "Zfin", "Hc", "Se", "SLR", "STS", "Gc"):
+                    self._agregar_fila_morfo(NOMBRES_PARAMETROS_MORFOMETRIA[simbolo], simbolo, "—",
+                                              "No disponible: no se pudo extraer el perfil del cauce "
+                                              "(ver aviso anterior).")
+
+            self._agregar_titulo_grupo_morfo("4 — Pendiente media de la cuenca")
+            if g4 is not None:
+                self._agregar_fila_morfo("Pendiente media de la cuenca", "Scuenca", g4["S_cuenca_pct"],
+                                          g4["interpretacion"], clave_lookup="Scuenca_pct")
+                self._agregar_fila_morfo("Pendiente media de la cuenca", "Scuenca", g4["S_cuenca_deg"],
+                                          clave_lookup="Scuenca_deg")
+            else:
+                self._agregar_fila_morfo("Pendiente media de la cuenca", "Scuenca", "—", clave_lookup="Scuenca_pct")
+                self._agregar_fila_morfo("Pendiente media de la cuenca", "Scuenca", "—", clave_lookup="Scuenca_deg")
+
+            # ================= GRUPO 5: red de drenaje =================
             g5 = morphometry.grupo5_red_drenaje(lt_km, g1["A"], g1["P"], self.spin_n_cauces.value())
+            self._agregar_titulo_grupo_morfo("5 — Parámetros de la red de drenaje")
             for k, v in g5.items():
                 self._agregar_fila_morfo(NOMBRES_PARAMETROS_MORFOMETRIA.get(k, k), k, v)
+            # Orden de Strahler, razón de bifurcación y densidad de uniones
+            # requieren la red de drenaje completa clasificada por orden
+            # (topología de afluentes); este plugin solo digitaliza/extrae
+            # el cauce principal como un único tramo continuo, así que Ω se
+            # informa como 1 y Rb/Jd quedan en "—" (ver interpretación).
+            self._agregar_fila_morfo(NOMBRES_PARAMETROS_MORFOMETRIA["Omega"], "Ω", 1,
+                                      "Cauce principal identificado (un solo tramo continuo).",
+                                      clave_lookup="Omega")
+            self._agregar_fila_morfo(NOMBRES_PARAMETROS_MORFOMETRIA["Rb"], "Rb", "—", clave_lookup="Rb")
+            self._agregar_fila_morfo(NOMBRES_PARAMETROS_MORFOMETRIA["Jd"], "Jd", "—", clave_lookup="Jd")
 
+            # ================= GRUPO 6: relieve =================
             g6 = morphometry.grupo6_relieve_riesgo(g1["H"], g1["A"], g1["Lb"], g5["Dd"], g1["Zmed"])
+            self._agregar_titulo_grupo_morfo("6 — Parámetros de relieve")
             for k, v in g6.items():
                 if k in ("alerta_flujo_detritos", "mensaje_alerta", "Mel"):
                     continue  # 'Mel' se agrega explícitamente abajo, con su mensaje de alerta
@@ -1165,11 +1362,19 @@ class HydroAndinaProDialog(QDialog):
 
             # Guardar todo para exportación y para la pestaña 4 (Tc)
             self.morfometria_resultados = {"g1": g1, "g2": g2, "g5": g5, "g6": g6, "lc_km": lc_km}
+            if g3 is not None:
+                self.morfometria_resultados["g3"] = g3
+            if g4 is not None:
+                self.morfometria_resultados["g4"] = g4
 
-            # Recalcula el alto de la tabla ahora que tiene ~30 filas (se
-            # construyó con 0 filas y nunca recalculaba su alto, quedando
-            # con el alto por defecto de Qt para 0 filas).
-            ajustar_alto_tabla(self.tabla_morfo, filas_visibles_max=14)
+            # Recalcula el alto de la tabla ahora que tiene ~45-50 filas (6
+            # grupos completos + sus encabezados de sección): se construyó
+            # con 0 filas y nunca recalculaba su alto, quedando con el alto
+            # por defecto de Qt para 0 filas. Con un techo de 60 filas
+            # visibles, la tabla completa se ve sin scroll interno propio
+            # (el scroll de la pestaña, ya existente, se encarga del resto
+            # si la ventana es más chica que el contenido).
+            ajustar_alto_tabla(self.tabla_morfo, filas_visibles_max=60)
 
             if g6["alerta_flujo_detritos"]:
                 QMessageBox.warning(self, "Alerta de flujo de detritos", g6["mensaje_alerta"])
@@ -1674,16 +1879,14 @@ class HydroAndinaProDialog(QDialog):
         try:
             g1 = self.morfometria_resultados["g1"]
 
-            # --- Grupo 4 (pendiente media de cuenca + curva hipsométrica) ---
-            # Se calcula ANTES de armar los parámetros de Tc (antes se pedía
-            # un valor manual redundante que, si no se llenaba, quedaba en el
-            # mínimo del spinbox y producía Tc irreales/"0" en SCS Lag y FAA,
-            # los dos métodos que dependen de la pendiente de cuenca).
-            if self.dem_clip_path:
-                z_array = raster_stats.leer_array_valido(self.dem_clip_path)
-                slope_path = delineation.calcular_pendiente(QgsRasterLayer(self.dem_clip_path, "dem_clip"))
-                slope_array = raster_stats.leer_array_valido(slope_path)
-                g4 = morphometry.grupo4_pendiente_hipsometria(slope_array, z_array)
+            # Grupos 3 (cauce principal) y 4 (pendiente de cuenca +
+            # hipsometría): cálculo compartido con la Pestaña 2 (ver
+            # _calcular_g3_g4). Se recalculan aquí en vez de reutilizar los
+            # que ya haya guardado la Pestaña 2, para reflejar de inmediato
+            # cualquier cambio hecho en la Pestaña 1 desde entonces.
+            g3, g4 = self._calcular_g3_g4(g1)
+
+            if g4 is not None:
                 self.morfometria_resultados["g4"] = g4
                 self.spin_s_cuenca_pct.setValue(g4["S_cuenca_pct"])
                 self.canvas_hipsometrica.plot_curva(g4["curva_hipsometrica"])
@@ -1696,61 +1899,21 @@ class HydroAndinaProDialog(QDialog):
                     altitud_interp = float(np.interp(pct, xs, ys))
                     self.tabla_resumen_hipsometrica.setItem(1, col, QTableWidgetItem(f"{altitud_interp:.1f}"))
 
-            # --- Grupo 3 (cauce principal): perfil longitudinal REAL desde
-            # la red de drenaje ya delineada, en vez de la aproximación
-            # cruda Se = H/Lc usada en versiones anteriores. Si por algún
-            # motivo no se puede extraer (red no disponible, cuenca de un
-            # solo tramo, etc.), se cae de vuelta a la aproximación anterior
-            # con una advertencia explícita, en vez de fallar todo el cálculo.
-            se_real = None
-            s1085_real = None
-            lc_km_usado = self.morfometria_resultados["lc_km"]  # respaldo: el ingresado manualmente en la pestaña 2
-            if getattr(self, "red_drenaje_layer", None) is not None and getattr(self, "dem_layer", None) is not None \
-                    and self.break_point_xy is not None:
-                try:
-                    perfil = main_channel.extraer_perfil_cauce_principal(
-                        self.red_drenaje_layer, self.dem_layer, self.break_point_xy
-                    )
-                    # OJO con la convención: perfil["elevaciones_m"] está
-                    # ordenado desde la SALIDA (índice 0, cota BAJA) hasta
-                    # la NACIENTE (índice -1, cota ALTA). Pero
-                    # grupo3_cauce_principal() calcula hc = z_inicio - z_fin
-                    # esperando que "z_inicio" sea la NACIENTE (cota alta,
-                    # de donde "inicia" el río) y "z_fin" la SALIDA (cota
-                    # baja) — la convención inversa a la del array del
-                    # perfil. Pasarlos en el orden del array (como se hacía
-                    # antes) daba hc y Se NEGATIVOS. Se corrige aquí.
-                    g3 = morphometry.grupo3_cauce_principal(
-                        lc_km=perfil["lc_km"],
-                        z_inicio=float(perfil["elevaciones_m"][-1]),  # naciente (alta)
-                        z_fin=float(perfil["elevaciones_m"][0]),      # salida (baja)
-                        perfil_distancias_m=perfil["distancias_m"],
-                        perfil_elevaciones_m=perfil["elevaciones_m"],
-                    )
-                    self.morfometria_resultados["g3"] = g3
-                    se_real, s1085_real = g3["Se"], g3["S10_85"]
-                    # Se usa también la longitud REAL del cauce extraída
-                    # automáticamente (consistente con Se/S10-85, ambas
-                    # medidas sobre el mismo perfil), en vez del valor
-                    # ingresado manualmente en la pestaña 2, que puede
-                    # diferir y producir resultados inconsistentes entre
-                    # métodos que usan Lc y métodos que usan Se/S10-85.
-                    lc_km_usado = perfil["lc_km"]
-                    if se_real is not None and se_real <= 0:
-                        raise ValueError(
-                            f"Se resultó no positivo ({se_real}); revise que el punto de salida "
-                            "esté bien ubicado sobre el cauce (pestaña 1)."
-                        )
-                except Exception as e_perfil:
-                    QMessageBox.warning(
-                        self, "Perfil del cauce principal no disponible",
-                        "No se pudo extraer automáticamente el perfil longitudinal del cauce "
-                        f"principal ({e_perfil}); se usa la aproximación Se = H/Lc como respaldo. "
-                        "Revise que la pestaña 1 haya generado la red de drenaje y que el punto "
-                        "de salida esté definido."
-                    )
-
-            if se_real is None:
+            # Si el perfil real no estuvo disponible (g3 es None), se cae de
+            # vuelta a la aproximación Se = H/Lc, con Lc = el ingresado
+            # manualmente en la pestaña 2 (mismo respaldo que antes).
+            lc_km_usado = self.morfometria_resultados["lc_km"]
+            if g3 is not None:
+                self.morfometria_resultados["g3"] = g3
+                se_real, s1085_real = g3["Se"], g3["S10_85"]
+                # Se usa también la longitud REAL del cauce extraída
+                # automáticamente (consistente con Se/S10-85, ambas medidas
+                # sobre el mismo perfil), en vez del valor ingresado
+                # manualmente en la pestaña 2, que puede diferir y producir
+                # resultados inconsistentes entre métodos que usan Lc y
+                # métodos que usan Se/S10-85.
+                lc_km_usado = g3["Lc"]
+            else:
                 se_real = g1["H"] / (lc_km_usado * 1000.0)
                 s1085_real = se_real
 

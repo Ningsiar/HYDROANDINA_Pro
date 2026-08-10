@@ -274,10 +274,16 @@ def grupo5_red_drenaje(lt_km: float, area_km2: float, perimetro_km: float, n_cau
     lo = 1.0 / (2.0 * dd) if dd else float("nan")
     c = 1.0 / dd if dd else float("nan")
     iff = dd * fs
+    # Longitud media de corrientes: Lm = Lt/Nu. Nu es la cantidad de
+    # cauces ingresada por el usuario (Pestaña 2); se incluye también
+    # aquí en el diccionario de salida (antes solo existía como el valor
+    # crudo del spinbox, sin aparecer en los resultados de este grupo).
+    lm = lt_km / n_cauces if n_cauces else float("nan")
 
     return {
         "Lt": round(lt_km, 3), "Dd": round(dd, 3), "Fs": round(fs, 3), "Dt": round(dt, 3),
         "Id": round(idd, 3), "Lo": round(lo, 3), "C": round(c, 3), "If": round(iff, 3),
+        "Nu": n_cauces, "Lm": round(lm, 3),
     }
 
 

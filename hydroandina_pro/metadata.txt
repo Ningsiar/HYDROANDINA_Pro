@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.2.36
+version=0.2.37
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,27 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.2.37: Pestaña "2. Morfometría y drenaje" ampliada a los 6 grupos completos de parámetros
+      morfométricos, con encabezado en negrita por grupo dentro de la misma tabla ("1 — Parámetros
+      básicos de la cuenca", ..., "6 — Parámetros de relieve"). Antes solo se mostraban los Grupos 1, 2,
+      5 y 6 (~30 filas); los Grupos 3 (cauce principal: Lc, Zinicio, Zfin, Hc, Se, SLR, STS, Gc) y 4
+      (pendiente media de la cuenca, % y °) YA estaban implementados en core/morphometry.py y se
+      calculaban correctamente, pero solo al entrar a la Pestaña 4 (Tc) -- nunca se agregaban a la tabla
+      de esta pestaña. Se extrajo el cálculo de ambos grupos a un método compartido
+      (_calcular_g3_g4, reutilizado sin cambios de comportamiento por la Pestaña 4) y ahora se calculan
+      también aquí, apenas se pulsa "Calcular parámetros morfométricos". Parámetros nuevos agregados:
+      Af (factor de asimetría, "—": requiere digitalizar márgenes, no automatizado), Nu (número de
+      corrientes, ya existía como insumo pero no se mostraba como resultado) y Lm = Lt/Nu (longitud
+      media de corrientes, nuevo en core/morphometry.py), Ω (orden de Strahler, informado como 1 al
+      identificarse solo el cauce principal como tramo único), Rb y Jd (razón de bifurcación y densidad
+      de uniones, "—": requieren la red de drenaje completa clasificada por orden, no solo el cauce
+      principal). ALTO: se levantó el techo de alto interno de la tabla (14 filas visibles antes -> 60
+      ahora, sin techo real dado que la tabla completa tiene ~52 filas), para que se vea completa sin
+      scroll interno propio -- el scroll de la pestaña (ya existente desde antes) se encarga de la
+      página completa si la ventana es más chica que el contenido. Verificado con una prueba funcional
+      aislada (PyQt5 real): la fila de título de grupo aplica negrita y setSpan a las 5 columnas
+      correctamente, y las validaciones numéricas de Grupo 3/5 (Hc, Se, Lm) coinciden con los valores
+      calculados a mano de referencia.
     - v0.2.36: corrección de dos causas de fondo, no cubiertas por los ajustes puntuales de anchos/altos
       de la v0.2.33-35: (1) ALTO — varias tablas de resultados (tabla_distribuciones de "Pmax24h" con las
       9 distribuciones ajustadas, tabla_morfo con los ~30 parámetros de morfometría, tabla_desglose_cn_auto,
