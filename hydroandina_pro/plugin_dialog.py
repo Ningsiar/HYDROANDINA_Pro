@@ -2035,10 +2035,21 @@ class HydroAndinaProDialog(QDialog):
                 manning_n_sheet_flow=self.spin_n_manning_sheet.value(),
             )
             resultados = tc_methods.calcular_todos(params)
-            self.tc_resultados = resultados
+            # Se ordenan de menor a mayor Tc (los métodos con error, sin un
+            # Tc_horas válido, quedan al final). self.tc_resultados se
+            # guarda YA en este orden -- no solo la tabla -- porque
+            # _usar_qp_pestaña6/_on_autocompletar_caudales_directos ubican
+            # el método adoptado como
+            # list(self.tc_resultados.keys())[checkedId()], y ese índice
+            # debe seguir correspondiendo exactamente a la fila de la tabla.
+            resultados_ordenados = dict(
+                sorted(resultados.items(),
+                       key=lambda kv: kv[1]["Tc_horas"] if kv[1]["Tc_horas"] is not None else float("inf"))
+            )
+            self.tc_resultados = resultados_ordenados
 
             self.tabla_tc.setRowCount(0)
-            for nombre, datos in resultados.items():
+            for nombre, datos in resultados_ordenados.items():
                 row = self.tabla_tc.rowCount()
                 self.tabla_tc.insertRow(row)
 
@@ -2058,6 +2069,26 @@ class HydroAndinaProDialog(QDialog):
                     self.tabla_tc.setItem(row, 3, QTableWidgetItem(str(datos["Tc_horas"])))
                     self.tabla_tc.setItem(row, 4, QTableWidgetItem(str(datos["Tc_min"])))
                     self.tabla_tc.setItem(row, 5, QTableWidgetItem(str(datos["tlag_min"])))
+
+            # Fila final informativa con el promedio de los métodos sin
+            # error (sin radio button propio: es un valor de referencia,
+            # no un método adoptable como Tc de diseño).
+            validos = [d for d in resultados_ordenados.values() if not d["error"]]
+            if validos:
+                row = self.tabla_tc.rowCount()
+                self.tabla_tc.insertRow(row)
+                prom_tc_h = sum(d["Tc_horas"] for d in validos) / len(validos)
+                prom_tc_min = sum(d["Tc_min"] for d in validos) / len(validos)
+                prom_tlag_min = sum(d["tlag_min"] for d in validos) / len(validos)
+                item_nombre = QTableWidgetItem(f"Promedio ({len(validos)} métodos)")
+                fuente = item_nombre.font()
+                fuente.setBold(True)
+                item_nombre.setFont(fuente)
+                self.tabla_tc.setItem(row, 1, item_nombre)
+                self.tabla_tc.setItem(row, 2, QTableWidgetItem("—"))
+                self.tabla_tc.setItem(row, 3, QTableWidgetItem(f"{prom_tc_h:.3f}"))
+                self.tabla_tc.setItem(row, 4, QTableWidgetItem(f"{prom_tc_min:.1f}"))
+                self.tabla_tc.setItem(row, 5, QTableWidgetItem(f"{prom_tlag_min:.1f}"))
 
         except Exception as e:
             QMessageBox.critical(self, "Error calculando Tc", str(e))

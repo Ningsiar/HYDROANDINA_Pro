@@ -61,6 +61,28 @@ class HypsometricCanvas(FigureCanvas):
         x_unico, indices_unicos = np.unique(x, return_index=True)
         y_unico = y[indices_unicos]
 
+        if x_unico.size < 2:
+            # Cota prácticamente uniforme en toda la cuenca (posible con un
+            # MDE muy grueso sobre una cuenca muy chica, o de relieve casi
+            # nulo): no hay suficiente variación de área acumulada para
+            # interpolar una curva. Antes esto hacía fallar
+            # PchipInterpolator con una excepción sin capturar ("x must
+            # contain at least 2 elements"); ahora se informa en el propio
+            # gráfico en vez de romper el cálculo.
+            self.ax.text(
+                0.5, 0.5,
+                "Cota casi uniforme en toda la cuenca:\nno hay variación suficiente para "
+                "trazar la curva hipsométrica.",
+                ha="center", va="center", transform=self.ax.transAxes, fontsize=9.5,
+                color="#B3261E", wrap=True,
+            )
+            self.ax.set_xlabel("Área acumulada (%)")
+            self.ax.set_ylabel("Altitud (m s.n.m.)")
+            self.ax.set_title(titulo, pad=12)
+            self.fig.tight_layout()
+            self.draw()
+            return
+
         x_denso = np.linspace(x_unico.min(), x_unico.max(), 300)
         try:
             from scipy.interpolate import PchipInterpolator

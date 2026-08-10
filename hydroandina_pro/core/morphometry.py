@@ -244,12 +244,18 @@ def grupo4_pendiente_hipsometria(slope_array_pct: np.ndarray, z_array: np.ndarra
     s_media_pct = float(np.mean(slope_array_pct)) if slope_array_pct.size else float("nan")
     s_media_deg = float(np.degrees(np.arctan(np.mean(slope_array_pct) / 100.0))) if slope_array_pct.size else float("nan")
 
-    # --- curva hipsométrica: 20 intervalos de elevación, % área acumulada ---
+    # --- curva hipsométrica: 20 intervalos de elevación (21 bordes), % área acumulada ---
     z_min, z_max = float(np.min(z_array)), float(np.max(z_array))
     bordes = np.linspace(z_min, z_max, n_bins + 1)
     total_celdas = z_array.size
     curva = []
-    for i in range(n_bins):
+    # OJO: bordes tiene n_bins+1 valores (0..n_bins); iterar solo
+    # range(n_bins) (0..n_bins-1) deja fuera bordes[n_bins] = z_max, es
+    # decir, la cota más alta de la cuenca NUNCA se agregaba a la curva
+    # -- se veía "cortada" antes de llegar al 0% de área acumulada (la
+    # cumbre). Se corrige iterando range(n_bins + 1) para incluir también
+    # ese último borde.
+    for i in range(n_bins + 1):
         umbral = bordes[i]
         area_sobre_umbral = float(np.sum(z_array >= umbral)) / total_celdas * 100.0
         elevacion_relativa = (umbral - z_min) / (z_max - z_min) * 100.0 if z_max > z_min else 0.0

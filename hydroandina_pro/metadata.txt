@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.2.40
+version=0.2.41
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,31 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.2.41: Pestaña "4. Tiempo de concentración y Lag Time" -- 2 correcciones reportadas.
+      (1) TABLA DE Tc: ahora se ordena siempre de menor a mayor Tc (antes aparecía en el orden interno
+      de registro de los métodos en core/tc_methods.py, sin relación con su magnitud), con los métodos
+      que dieran error al final (sin un Tc válido para ordenar); se agregó una fila final en negrita con
+      el <b>promedio</b> de Tc_horas/Tc_min/tlag_min de todos los métodos sin error (sin radio button
+      propio: es un valor de referencia, no un método adoptable como Tc de diseño). Se actualizó también
+      self.tc_resultados para que quede en este mismo orden (no solo la tabla), porque el radio button
+      seleccionado usa list(tc_resultados.keys())[fila] para saber qué método se adoptó -- de haberse
+      ordenado solo la tabla sin el diccionario, el radio button de una fila habría terminado
+      seleccionando el Tc de OTRO método distinto al mostrado en esa fila. Verificado con datos
+      sintéticos (6 métodos con 1 con error) que el orden, el promedio y el mapeo fila->método quedan
+      correctos. (2) CURVA HIPSOMÉTRICA -- se encontraron y corrigieron 2 bugs reales, verificados con
+      matplotlib real antes/después: (a) en core/morphometry.py, grupo4_pendiente_hipsometria() generaba
+      21 bordes de cota (n_bins+1) pero solo recorría 20 (range(n_bins) en vez de range(n_bins+1)),
+      dejando SIEMPRE fuera de la curva el borde más alto (Zmax) -- la curva quedaba "cortada" antes de
+      llegar al vértice superior (0% de área acumulada), coincidiendo exactamente con "problemas de
+      cotas" y "aparece una parte parcial" reportados; reproducido con un MDE sintético (curva llegaba
+      solo a 4320.7 m cuando el Zmax real era 4484.9 m) y confirmado corregido (ya llega a los 4484.9 m
+      reales, área acumulada 0.00% en la cumbre). (b) en ui/hypsometric_canvas.py, una cuenca de cota
+      casi/perfectamente uniforme (MDE muy grueso sobre una cuenca muy chica, o relieve casi nulo)
+      colapsaba a menos de 2 puntos únicos de área acumulada tras eliminar duplicados, y
+      PchipInterpolator lanzaba una excepción sin capturar (ValueError: "x must contain at least 2
+      elements") -- coincide con "esta generando errores"; reproducido con una cuenca sintética de cota
+      perfectamente plana y confirmado el crash real antes del fix; ahora se detecta ese caso y se
+      muestra un aviso en el propio gráfico en vez de fallar.
     - v0.2.40: Pestaña "8. Hidráulica y Drenaje" -- se agregó gráfico a las 4 estructuras que no tenían
       ninguno (antes solo Canales/Vados/Cunetas y Alcantarilla tenían un dibujo de la sección): Enrocado
       (RipRap) con un esquema del talud protegido, capa de roca a espesor ≈2×D50 y rocas esquemáticas
