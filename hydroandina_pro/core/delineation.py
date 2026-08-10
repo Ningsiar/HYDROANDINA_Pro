@@ -1,0 +1,217 @@
+# -*- coding: utf-8 -*-
+"""
+core/delineation.py
+
+Orquesta la cadena de preprocesamiento hidrológico del MDE usando
+algoritmos ya existentes en QGIS (GRASS/GDAL vía `processing.run`); aquí
+NO se reimplementa D8 ni acumulación de flujo desde cero.
+
+Cadena (dividida en 3 funciones independientes, para permitir el ajuste
+del punto de salida a la red de drenaje ENTRE el cálculo del flujo y la
+delineación de la cuenca — ver core/pour_point_snap.py):
+
+  A. calcular_flujo(): relleno de sumideros -> dirección/acumulación de
+     flujo -> ráster de cauces (grass7:r.fill.dir, grass7:r.watershed).
+  B. delinear_desde_punto(): delineación de la cuenca desde el punto de
+     salida YA AJUSTADO al cauce -> vectorización -> suavizado
+     (grass7:r.water.outlet, gdal:polygonize, native:smoothgeometry).
+  C. extraer_y_recortar_red(): vectorización y recorte de la red de
+     drenaje completa a la cuenca (grass7:r.thin, grass7:r.to.vect,
+     native:clip).
+
+NOTA DE COMPATIBILIDAD (verificado en julio 2026): SAGA ya no viene
+integrado por defecto en el núcleo de QGIS desde la 3.30 (requiere el
+plugin comunitario "Processing Saga NextGen Provider"). Para no
+introducir esa dependencia externa, toda la cadena usa únicamente
+algoritmos GRASS (empaquetados con QGIS por defecto).
+
+NOTA: "0.25 iteraciones offset" de la especificación original se
+interpreta como ITERATIONS=1, OFFSET=0.25 (native:smoothgeometry espera
+un entero >=1 de iteraciones y un offset continuo 0-0.5 por separado).
+
+NOTA DE ROBUSTEZ #1 (v0.2.2): los algoritmos `native:*` con salida tipo
+sink, con "TEMPORARY_OUTPUT", devuelven a veces un ID interno de capa
+(no una ruta) que causó dos bugs distintos. Se corrigió generando rutas
+de archivo GeoPackage EXPLÍCITAS con `QgsProcessingUtils.generateTempFilename()`
+para smoothgeometry y clip, de modo que TODAS las salidas de la cadena
+son siempre archivos reales en disco.
+
+NOTA DE ROBUSTEZ #2 (v0.2.3, esta versión): reporte de "El punto de
+salida cae fuera de la extensión del ráster de cauces" incluso con el
+punto ya ajustado ("snap") a una celda de cauce válida del propio
+ráster de cauces calculado. La causa más probable es que la "región"
+interna de GRASS (una configuración de extensión/resolución de trabajo
+que GRASS aplica a TODOS sus rásteres de salida, independientemente del
+extent real del ráster de entrada) no coincidiera exactamente con la
+extensión real del MDE en algún paso de la cadena (p. ej. por defecto,
+QGIS calcula la región de forma automática en cada llamada a un
+algoritmo GRASS individual, y pueden acumularse pequeñas discrepancias
+de redondeo entre pasos sucesivos: r.fill.dir -> r.watershed ->
+r.water.outlet). Se corrige fijando explícitamente
+`GRASS_REGION_PARAMETER` (formato "xmin,xmax,ymin,ymax", documentado en
+la referencia de RQGIS/QGIS) a la extensión real del MDE de entrada en
+absolutamente TODAS las llamadas a algoritmos `grass7:*` de la cadena,
+en vez de dejar que cada paso la determine de forma independiente.
+"""
+import processing
+from qgis.core import QgsProcessingUtils
+
+
+def _region_string(dem_layer) -> str:
+    """
+    Construye el string de región de GRASS ("xmin,xmax,ymin,ymax") a
+    partir de la extensión real del MDE de entrada, para fijarla
+    explícitamente en cada algoritmo grass7:* de la cadena y evitar que
+    pasos sucesivos recalculen (y potencialmente desajusten) la región
+    de forma independiente.
+    """
+    ext = dem_layer.extent()
+    return f"{ext.xMinimum()},{ext.xMaximum()},{ext.yMinimum()},{ext.yMaximum()}"
+
+
+def calcular_flujo(dem_layer, umbral_acumulacion=25, context=None, feedback=None):
+    """
+    Relleno de sumideros + dirección y acumulación de flujo D8 + ráster
+    de cauces. Devuelve dict con 'raster_direccion', 'raster_acumulacion',
+    'raster_cauces' (todas rutas de archivo reales) y 'region' (el string
+    de región de GRASS ya calculado, para reutilizar en los pasos
+    siguientes de la cadena sin recalcularlo).
+    """
+    region = _region_string(dem_layer)
+
+    feedback.pushInfo("1/3 Rellenando sumideros (grass7:r.fill.dir)...")
+    relleno = processing.run(
+        "grass7:r.fill.dir",
+        {"input": dem_layer, "format": 0, "output": "TEMPORARY_OUTPUT",
+         "direction": "TEMPORARY_OUTPUT", "areas": "TEMPORARY_OUTPUT",
+         "GRASS_REGION_PARAMETER": region},
+        context=context, feedback=feedback, is_child_algorithm=True,
+    )["output"]
+
+    feedback.pushInfo("2/3 y 3/3 Dirección y acumulación de flujo (grass7:r.watershed)...")
+    watershed = processing.run(
+        "grass7:r.watershed",
+        {
+            "elevation": relleno,
+            "threshold": umbral_acumulacion,
+            "drainage": "TEMPORARY_OUTPUT",
+            "accumulation": "TEMPORARY_OUTPUT",
+            "stream": "TEMPORARY_OUTPUT",
+            "GRASS_REGION_PARAMETER": region,
+        },
+        context=context, feedback=feedback, is_child_algorithm=True,
+    )
+
+    return {
+        "raster_direccion": watershed["drainage"],
+        "raster_acumulacion": watershed["accumulation"],
+        "raster_cauces": watershed["stream"],
+        "region": region,
+    }
+
+
+def delinear_desde_punto(raster_direccion, punto_xy, region, context=None, feedback=None,
+                          smooth_iterations=1, smooth_offset=0.25):
+    """
+    Delimita la cuenca aguas arriba de punto_xy=(x,y) usando el ráster de
+    dirección de flujo ya calculado por calcular_flujo(). Se recomienda
+    ajustar antes el punto con core.pour_point_snap.snap_a_cauce() usando
+    raster_cauces, para evitar cuencas vacías por un punto mal ubicado.
+
+    region: el string de región devuelto por calcular_flujo(), para
+        fijar la misma región de GRASS en este paso (ver nota de
+        robustez #2 en el docstring del módulo).
+
+    Devuelve la RUTA de archivo (.gpkg) del polígono de cuenca suavizado.
+    """
+    x, y = punto_xy
+
+    feedback.pushInfo("Delimitando la cuenca desde el punto de salida (grass7:r.water.outlet)...")
+    cuenca_raster = processing.run(
+        "grass7:r.water.outlet",
+        {"input": raster_direccion, "coordinates": f"{x},{y}", "output": "TEMPORARY_OUTPUT",
+         "GRASS_REGION_PARAMETER": region},
+        context=context, feedback=feedback, is_child_algorithm=True,
+    )["output"]
+
+    feedback.pushInfo("Vectorizando el polígono de la cuenca (gdal:polygonize)...")
+    poligono_bruto = processing.run(
+        "gdal:polygonize",
+        {"INPUT": cuenca_raster, "BAND": 1, "FIELD": "cuenca", "OUTPUT": "TEMPORARY_OUTPUT"},
+        context=context, feedback=feedback, is_child_algorithm=True,
+    )["OUTPUT"]
+
+    feedback.pushInfo(f"Suavizando geometría (native:smoothgeometry, iteraciones={smooth_iterations}, offset={smooth_offset})...")
+    ruta_cuenca_suavizada = QgsProcessingUtils.generateTempFilename("cuenca_suavizada.gpkg")
+    cuenca_suavizada = processing.run(
+        "native:smoothgeometry",
+        {"INPUT": poligono_bruto, "ITERATIONS": smooth_iterations, "OFFSET": smooth_offset,
+         "MAX_ANGLE": 180, "OUTPUT": ruta_cuenca_suavizada},
+        context=context, feedback=feedback, is_child_algorithm=True,
+    )["OUTPUT"]
+
+    return cuenca_suavizada
+
+
+def extraer_y_recortar_red(raster_cauces, ruta_cuenca_vector, region, context=None, feedback=None):
+    """
+    Vectoriza el ráster de cauces completo y, si se provee una cuenca,
+    lo recorta a ella. Si ruta_cuenca_vector es None, devuelve la red
+    completa sin recortar (útil para el Paso A de la pestaña 1, donde
+    se genera la red ANTES de delimitar ninguna cuenca).
+    Devuelve la RUTA de archivo (.gpkg) de la red resultante.
+    """
+    feedback.pushInfo("Vectorizando la red de drenaje...")
+    cauces_delgados = processing.run(
+        "grass7:r.thin", {"input": raster_cauces, "output": "TEMPORARY_OUTPUT",
+                          "GRASS_REGION_PARAMETER": region},
+        context=context, feedback=feedback, is_child_algorithm=True,
+    )["output"]
+    red_vector = processing.run(
+        "grass7:r.to.vect", {"input": cauces_delgados, "type": 0, "output": "TEMPORARY_OUTPUT",
+                             "GRASS_REGION_PARAMETER": region},
+        context=context, feedback=feedback, is_child_algorithm=True,
+    )["output"]
+
+    if ruta_cuenca_vector is None:
+        # Sin cuenca: devolver la red completa sin recortar
+        ruta_red_completa = QgsProcessingUtils.generateTempFilename("red_drenaje_completa.gpkg")
+        processing.run(
+            "native:savefeatures", {"INPUT": red_vector, "OUTPUT": ruta_red_completa},
+            context=context, feedback=feedback, is_child_algorithm=True,
+        )
+        return {"red_drenaje_vector": ruta_red_completa}
+
+    feedback.pushInfo("Recortando la red de drenaje a la cuenca...")
+    ruta_red_recortada = QgsProcessingUtils.generateTempFilename("red_drenaje_recortada.gpkg")
+    red_recortada = processing.run(
+        "native:clip", {"INPUT": red_vector, "OVERLAY": ruta_cuenca_vector, "OUTPUT": ruta_red_recortada},
+        context=context, feedback=feedback, is_child_algorithm=True,
+    )["OUTPUT"]
+
+    return red_recortada
+
+
+def clip_dem_a_cuenca(dem_layer, cuenca_vector_layer, context=None, feedback=None):
+    """Recorta y enmascara el MDE al polígono de cuenca (para estadísticas
+    zonales, curva hipsométrica, pendiente media, etc.)."""
+    return processing.run(
+        "gdal:cliprasterbymasklayer",
+        {"INPUT": dem_layer, "MASK": cuenca_vector_layer, "CROP_TO_CUTLINE": True,
+         "OUTPUT": "TEMPORARY_OUTPUT"},
+        context=context, feedback=feedback, is_child_algorithm=True,
+    )["OUTPUT"]
+
+
+def calcular_pendiente(dem_recortado, context=None, feedback=None):
+    """Pendiente celda-a-celda en porcentaje (gdal:slope, SLOPE_FORMAT=1).
+
+    Puede llamarse en modo standalone (context=None), en cuyo caso
+    devuelve directamente la ruta del ráster de pendiente generado, o
+    encadenado dentro de otro algoritmo pasando context/feedback.
+    """
+    params = {"INPUT": dem_recortado, "AS_PERCENT": True, "OUTPUT": "TEMPORARY_OUTPUT"}
+    if context is not None:
+        return processing.run("gdal:slope", params, context=context, feedback=feedback,
+                               is_child_algorithm=True)["OUTPUT"]
+    return processing.run("gdal:slope", params, feedback=feedback)["OUTPUT"]

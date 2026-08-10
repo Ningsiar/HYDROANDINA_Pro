@@ -1,0 +1,259 @@
+[general]
+name=HydroAndes Pro
+qgisMinimumVersion=3.28
+description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
+version=0.2.35
+author=Msc. Ing. Ningsiar Lima Usnayo
+email=ningsiar.lima@unsaac.edu.pe
+
+about=Plugin de análisis hidrológico e hidráulico integral orientado a cuencas de fuerte pendiente de los Andes peruanos, desarrollado por el Msc. Ing. Ningsiar Braulio Lima Usnayo, M.Sc. Hydrology and Water Research Management, Mg (C). Ing. Civil con mención en Hidráulica y Medio Ambiente, Ph.D. (c) Computational Hydraulics, para CORPORATIVO CONSTRUCTIVO LIMA BERLIN SRL.
+
+    Funcionalidades:
+    - Delineación de cuencas desde un MDE, con selección interactiva del punto de quiebre (break point) en el lienzo, ajuste automático al cauce y reproyección a la zona UTM local. Descarga del MDE desde OpenTopography (API Key) o desde ASF Vertex/Copernicus GLO-30 (token de NASA Earthdata Login), como fuentes alternativas.
+    - Preprocesamiento hidrológico del MDE (relleno de sumideros, dirección y acumulación de flujo D8) mediante algoritmos GRASS encadenados, con región GRASS fijada explícitamente en cada paso.
+    - Cálculo de más de 30 parámetros morfométricos e hidrológicos organizados en 6 grupos (básicos, forma, cauce principal, pendiente/curva hipsométrica, red de drenaje, relieve/riesgo de flujo de detritos), con unidades e interpretación ampliada para cada parámetro. El perfil longitudinal del cauce principal (Grupo 3, pendiente Se/S10-85) se extrae automáticamente de la red de drenaje delineada (camino de mayor longitud desde el punto de salida), en vez de una aproximación.
+    - Modelo de número de curva SCS (AMC I/II/III): matriz de uso de suelo editable orientada a coberturas altoandinas, o cálculo automático a partir de Uso y Cobertura de Suelo (ESA WorldCover 10 m vía STAC/AWS) cruzado con Grupos Hidrológicos de Suelo (HYSOGs250m u otro ráster A/B/C/D indicado por el usuario), con tabla de desglose de áreas y CN ponderado.
+    - Análisis de frecuencia de precipitación máxima en 24 horas: ajuste de 9 distribuciones de probabilidad (Normal, Log-Normal 2P y 3P, Gumbel, Log-Gumbel, Gamma 2P, Gamma 3P/Pearson III, Log-Pearson III, GEV), prueba de bondad de ajuste de Kolmogorov-Smirnov, tabla y gráfico comparativo de Pmax24h vs. periodo de retorno entre todas las distribuciones, periodo de retorno personalizado ("T-Diseño"), y adquisición de datos desde series manuales (CSV, tabla editable con pegado estilo Excel) o extracción de grillas PISCOp (NetCDF).
+    - Generación de hietogramas de diseño mediante curva IDF genérica (bloques alternos) o patrones adimensionales SCS Tipo I/IA/II/III.
+    - Estimación de caudales de crecida por transformación lluvia-escorrentía mediante 3 métodos: SCS (triangular), Snyder, y Clark (área-tiempo + embalse lineal).
+    - 14 métodos de tiempo de concentración (Kirpich, Témez, Giandotti, SCS Lag, Kerby, Passini, Ventura-Heras, Bransby-Williams, Johnstone-Cross, California Culverts Practice, Ven Te Chow, FAA, Espey-Winslow y Snyder), con todos sus parámetros específicos (n de Kerby, Ct de Snyder, phi/fracción impermeable de Espey-Winslow, alpha de Ventura-Heras, etc.) editables en la interfaz.
+    - Hidráulica y Drenaje: dimensionamiento de canales abiertos por máxima eficiencia hidráulica (Rectangular, Triangular, Trapezoidal, Parabólico, Gutter/cuneta vial HEC-22, Irregular), alcantarillas (circular/cajón), enrocado de protección (RipRap, ecuación de Isbash), sumideros, cunetas de coronación, y verificación hidráulica básica (borde libre) de pontones, puentes y defensas ribereñas, con conexión directa al caudal de diseño (pestaña de Caudales) y a la pendiente de la morfometría.
+    - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
+
+    Historial de versiones:
+    - v0.2.35: extendida la corrección de anchos/altos de tabla de la v0.2.34 a TODAS las pestañas, de la
+      2 a la 19. TABLAS: se corrigieron las 6 tablas restantes con encabezado completo en modo Stretch
+      (tabla_cn y tabla_amc en Pestaña 3, tabla_desglose_cn_auto en Pestaña 3, tabla_resumen_hipsometrica
+      en Pestaña 2, tabla_p24_tr en Pestaña 5, tabla_resumen_qc en Pestaña 6), cambiadas a
+      ResizeToContents. Se dejaron intactas (ya estaban bien diseñadas de una revisión previa) las tablas
+      con estrategia mixta: columnas cortas en ancho Fijo + una sola columna de texto largo en Stretch
+      para absorber el espacio sobrante (tabla_morfo, tabla_tc, tabla_distribuciones) — ese patrón ya
+      cumple el objetivo de no exceder el ancho de ventana sin necesidad de cambios. ALTURAS: se moderaron
+      3 alturas mínimas de tabla desproporcionadamente grandes frente al resto del plugin: tabla_tc
+      (520→260px), tabla_entrada_manual (650→360px), tabla_precip_mensual (400→300px). GRÁFICOS: se
+      revisaron las pestañas 1-9 con el mismo detector automático de canvases lado a lado usado en la
+      v0.2.34 — no se encontraron casos adicionales (los canvases existentes ya usan anchos de 6-6.5",
+      dentro de la ventana de 980px). Con esto, ninguna tabla ni gráfico del plugin (pestañas 1 a 19)
+      excede el ancho de la ventana de trabajo.
+    - v0.2.34: CORRECCIÓN DE TABLAS Y GRÁFICOS en las pestañas 10 a 19 (Socavación, Pérdida en Suelos,
+      Sedimentos, Flujos Hiperconcentrados, Cambio Climático, Caudales Medios, Caudales Mínimos, PHABSIM,
+      Flujo Subterráneo, Hidráulica de Pozos). TABLAS: se reemplazó el modo de ancho de columnas Stretch
+      (que repartía todo el ancho de la ventana entre pocas columnas, dejándolas gigantes) por
+      ResizeToContents en las 19 tablas afectadas + el caso especial de tabla_parametros_qm (antes
+      estiraba solo la columna de nombre de parámetro) — ahora cada columna se ajusta a su propio
+      contenido/encabezado. GRÁFICOS: se eliminaron los 5 casos donde 2 gráficos se ubicaban lado a lado
+      en una misma fila (Socavación, Pérdida en Suelos, Sedimentos, Cambio Climático, Caudales Medios),
+      cuyo ancho combinado (hasta ~1360px) excedía la ventana de trabajo (980px) — se reordenaron en
+      filas independientes (uno debajo del otro) sin reducir su tamaño individual, siguiendo la
+      instrucción de "reordenar en fila, no en ancho". Verificado: ningún canvas individual del plugin
+      supera 7.6" (760px), y no queda ningún QHBoxLayout con 2+ gráficos desde la pestaña 10 en adelante.
+    - v0.2.33: CORRECCIÓN GLOBAL DE PROPORCIONES DE INTERFAZ en las 20 pestañas (1-19 más Créditos):
+      los combos, spinboxes y campos de texto ya no se estiran a todo el ancho de la ventana dentro de
+      los formularios (QFormLayout) — se aplicó setFieldGrowthPolicy(FieldsStayAtSizeHint) a los 49
+      formularios del plugin (script de reemplazo verificado: 49/49), de modo que cada campo se ajusta a
+      su contenido en vez de ocupar el ancho disponible. Se agregó además una hoja de estilos global con
+      un ancho máximo de seguridad (340px combos/spinboxes, 380px campos de texto) para los casos donde
+      el sizeHint natural del widget siga siendo grande. Las tablas (QTableWidget/TablaPegable) NO se ven
+      afectadas — siguen usando Stretch para ocupar el ancho disponible, que es el comportamiento correcto
+      para ellas. Corrige la desproporción visible en capturas de pantalla donde un combo o spinbox
+      ocupaba prácticamente toda la fila.
+    - v0.2.32: nueva pestaña "19. Hidráulica de Pozos": régimen permanente (Thiem confinado, con modo
+      directo Q->s y modo inverso de calibración T desde 2 pozos de observación; Dupuit-Thiem para
+      acuíferos libres, mismos 2 modos con K); régimen variable con la ecuación de THEIS completa,
+      incluyendo la función de pozo W(u) calculada con las aproximaciones racionales de Abramowitz &
+      Stegun -- VALIDADA contra scipy.special.exp1 (integral exponencial E1, matemáticamente idéntica a
+      W(u)) con error ~0.00000% en un rango de u de 0.001 a 20; simplificación de Cooper-Jacob con
+      ajuste automático de la recta s vs. log(t) (mínimos cuadrados) para obtener T y S desde datos de
+      campo, recuperando exactamente parámetros sintéticos en la prueba; pérdidas de carga en el pozo
+      por ensayo de bombeo escalonado (sw=B·Q+C·Q², con cálculo de eficiencia del pozo); radio de
+      influencia por Sichardt, Kusakin, Theis y prueba de bombeo, con selección automática de la "mejor
+      propuesta" siguiendo la jerarquía de exactitud de la bibliografía (prueba de bombeo real > Theis >
+      fórmulas empíricas). Gráficos de alto impacto: curva de descenso-tiempo, ajuste Cooper-Jacob con t0
+      marcado, ensayo escalonado, y comparación de radios de influencia con el recomendado resaltado.
+    - v0.2.31: nueva pestaña "18. Flujo Subterráneo": Ley de Darcy (velocidad de Darcy, caudal, velocidad
+      lineal promedio real en poros); flujo 1D entre dos puntos (confinado con Transmisividad, y no
+      confinado/libre con la ecuación de Dupuit-Forchheimer); SOLVER 2D REAL de flujo subterráneo en
+      régimen permanente por diferencias finitas de 5 puntos (Gauss-Seidel con sobre-relajación SOR),
+      con conductancias direccionales correctas (T·dy/dx y T·dx/dy) para mallas con celdas no cuadradas,
+      condiciones de borde Dirichlet (carga fija) configurables por lado de la malla, fuentes/sumideros
+      (pozos, recarga) en celdas arbitrarias, y bordes sin flujo (Neumann cero) por defecto. Cálculo del
+      campo de velocidades de Darcy (vx,vy) a partir del gradiente de cargas resuelto. Comparación de
+      cargas simuladas vs. observadas en pozos (RMSE). Gráficos de alto impacto: mapa de cargas
+      piezométricas con isolíneas y vectores de flujo, curva de convergencia del solver, y dispersión de
+      calibración. VALIDADO: el solver reprodujo la solución analítica de flujo 1D uniforme con error
+      ~4.6e-9 m, y generó un cono de depresión simétrico (error de simetría ~5e-8 m) ante un pozo de
+      bombeo de prueba. Nota de transparencia: no reemplaza a MODFLOW/FEFLOW para modelos 3D transitorios
+      y heterogéneos; la hidráulica de pozos específica (Thiem, Theis, radio de influencia) se deja para
+      el módulo "Hidráulica de Pozos".
+    - v0.2.30: Pestaña "17. Caudal Ecológico - PHABSIM": se agregaron 12 curvas HSI de referencia
+      orientativa adicionales (total 21), organizadas por ecosistema: Manglares de Tumbes (Pez diablo/
+      Pámpano, Robalo, Cornuda/Lisa, juveniles de pargo/mero en refugio), Lago Titicaca (Carachi, Ispi
+      -especie pelágica-, Suche bentónico, Pejerrey introducido), Ríos altoandinos (Suche/Mauri
+      Trichomycterus spp., Preñadilla/Bagre trepador Astroblepus spp.) y Ríos de la costa (Lisa Mugil
+      cephalus, Taimo/Zúngaro costero). Advertencia ampliada en pantalla documentando 2 limitaciones
+      metodológicas propias de estas plantillas: (1) para especies lénticas/pelágicas como el Ispi, la
+      velocidad es poco discriminante en aguas abiertas del lago; (2) para especies estuarinas/de manglar,
+      la escala de sustrato tipo Brusven (1-8) no captura bien la cobertura vegetal/raíces de mangle.
+    - v0.2.29: Pestaña "17. Caudal Ecológico - PHABSIM": se agregaron 5 curvas HSI de referencia
+      orientativa adicionales (total 9): Salmón adulto reproductor (con nota de que la especie no está
+      establecida en ríos naturales del Perú), Camarón de río (Cryphiops caementarius, ríos de la costa
+      peruana), Paiche (Arapaima gigas, cochas/aguas quietas amazónicas), Paco (Piaractus brachypomus,
+      bosque inundable amazónico) y Carachama genérica (Loricariidae, con nota de alta variabilidad entre
+      géneros). Advertencia ampliada en pantalla indicando que, para estas especies en particular, la
+      bibliografía primaria con curvas HSI publicadas es escasa, y remitiendo a IIAP/IMARPE/estudios
+      ANA-SENACE de proyectos específicos como fuentes a consultar para una curva validada.
+    - v0.2.28: Pestaña "17. Caudal Ecológico - PHABSIM": se agregaron 4 curvas HSI de REFERENCIA
+      ORIENTATIVA cargables con un botón (Trucha arcoíris adulto, Trucha arcoíris juvenil/alevín,
+      genérico reófilo de aguas rápidas, genérico de pozas/aguas lentas) como plantillas de forma típica
+      por gremio ecológico, con advertencia explícita en pantalla de que son ilustrativas y NO datos
+      validados de ninguna especie/cuenca -- deben reemplazarse con campo o bibliografía específica
+      revisada por un biólogo antes de un uso definitivo.
+    - v0.2.27: nueva pestaña "17. Caudal Ecológico - PHABSIM" (metodología USGS). Módulo hidráulico:
+      ajuste potencial tirante(Q)=c·Q^d y velocidad(Q)=c·Q^d por estación del transecto, a partir de
+      caudales de calibración medidos en campo (mínimo 2, recomendado ≥3: bajo/medio/alto). Módulo de
+      hábitat: curvas HSI de velocidad, profundidad y sustrato ingresadas por el usuario (sin curvas
+      precargadas de ninguna especie, para no presentar datos biológicos sin validación de un biólogo/
+      ecólogo). Cálculo del Área Útil Ponderada WUA = Σ(ancho_i·Iv·Id·Is)·1000 (m²/km) para un rango de
+      caudales; identificación automática del caudal óptimo (pico de WUA), el caudal ecológico de estiaje
+      por umbral porcentual configurable, y el punto de inflexión de la curva (para cuando mantener el
+      óptimo no es viable en época seca). Gestor de múltiples estaciones del transecto (mismo patrón que
+      Socavación/Sedimentos). Gráficos de alto impacto: curvas HSI, curva Caudal-WUA con los 3 puntos
+      notables etiquetados, y composición del hábitat por estación en el caudal seleccionado. Cuadro
+      resumen final con los requisitos normativos ANA (línea base hidrológica, justificación de especie,
+      firmas multidisciplinarias).
+    - v0.2.26: nueva pestaña "16. Caudales Mínimos": Curva de Duración de Caudales (persistencia
+      empírica de Weibull, extracción interpolada de cualquier percentil como Q95/Q75); método de
+      Tennant/Montana (caudal ecológico como % del Qma, con clasificación de calidad de hábitat y
+      escala visual); análisis de frecuencia de caudales mínimos anuales por Weibull (regresión en papel
+      probabilístico) y Gumbel de mínimos (momentos, derivación por reflexión desde Gumbel de máximos —
+      se corrigió un error de signo detectado en pruebas, que hacía crecer el caudal con el periodo de
+      retorno en vez de decrecer; verificado numéricamente tras el fix); transferencia por cuenca
+      homóloga (relación de áreas) para cuencas sin información. Comparación final entre todos los
+      métodos calculados adoptando el MÍNIMO como criterio conservador (a diferencia de socavación, que
+      adopta el máximo), con gráficos de alto impacto por sección y cuadro resumen final HTML. Nota de
+      que Gumbel de mínimos puede dar valores no realistas en periodos de retorno muy altos (limitación
+      conocida de la distribución no acotada) y de ajustar el % ecológico según la normativa vigente.
+    - v0.2.25: Pestaña "15. Caudales Medios (Qm)" completada fielmente al Manual Técnico de RS MINERVE
+      (CREALP/HydroCosmos, v2.25) a partir del PDF de referencia. Snow-SD reescrito con las ecuaciones
+      oficiales B.1-B.10 (coeficiente grado-día estacional S', separación líquido/sólido, recongelamiento
+      CFR, curva de agotamiento por ThetaCri). Se agregaron 3 modelos nuevos: Runoff (SWMM) -- reservorio
+      no lineal ec. E.1-E.3, resuelto de forma IMPLÍCITA (bisección) para estabilidad numérica; GSM --
+      nieve Snow-SD + submodelo de fusión glaciar con reservorios lineales (ec. F.1-F.17); SOCONT --
+      nieve Snow-SD + reservorio de infiltración GR3 + escorrentía SWMM (ec. G.1-G.18). SWMM y SOCONT
+      producen su salida directamente en m³/s (usan su propia superficie A como parámetro físico), a
+      diferencia de los demás modelos que trabajan en lámina mm/paso convertida con el área de cuenca.
+      Nuevo core/etp_methods.py: Turc, McGuinness-Bordne y Oudin (ecs. A.9-A.17 del manual; Oudin no
+      requiere datos externos, calcula la radiación extraterrestre analíticamente) y ETP Uniforme, con
+      botón de cálculo directo sobre la tabla de la serie. La tabla de entrada ahora usa Año/Mes/Día
+      (paso configurable mensual/diario/otro) para soportar el coeficiente estacional de nieve y Oudin.
+      Los 10 indicadores de desempeño del Capítulo 3 del manual reemplazan las métricas simplificadas
+      anteriores: Nash, Nash-ln, Pearson, Kling-Gupta (revisado 2012), Bias Score, RRMSE, Relative Volume
+      Bias, Normalized Peak Error, Peirce Skill Score y Overall Accuracy (estos 2 últimos con tabla de
+      contingencia por umbral, por defecto el caudal medio observado). El calibrador Nelder-Mead sigue
+      minimizando 1-Nash y ahora reporta los 10 indicadores. Verificado con prueba end-to-end (Oudin ->
+      SOCONT -> calibración) y con la corrección de estabilidad numérica de SWMM confirmada por prueba
+      unitaria antes/después del fix.
+    - v0.2.24: nueva pestaña "15. Caudales Medios (Qm)". Modelos conceptuales precipitación-escorrentía
+      implementados con motor propio: Lutz Scholz (simplificado, balance por almacenamientos), GR2M
+      (Mouelhi et al.), GR4J (Perrin et al., con hidrogramas unitarios SH1/SH2 y almacenamiento de
+      ruteo), HBV (mensual simplificado, con rutina de nieve grado-día), SAC-SMA (simplificado, zonas
+      superior/inferior) y SNOW-SD (grado-día + curva de agotamiento areal de nieve). Selector de modelo
+      con tabla de parámetros editable (valor inicial + límites min/máx para calibración). Serie de
+      entrada pegable tipo Excel (Paso, P, ETP, T media opcional, Q obs opcional). CALIBRADOR GENÉRICO
+      (simplex de Nelder-Mead implementado sin dependencias externas) que funciona con cualquiera de los
+      6 modelos, minimizando 1-NSE contra los aforos ingresados; métricas NSE/RMSE/PBIAS/R². Gráficos de
+      alto impacto: hidrograma simulado vs. observado, dispersión con línea 1:1, y parámetros antes/
+      después de la calibración. TRANSPARENCIA explícita: SOCONT, GSM y SWMM NO se implementan como
+      motores numéricos en esta versión (SWMM requiere su propio motor de cálculo; SOCONT y GSM requieren
+      documentación oficial específica no disponible con la fidelidad necesaria) — ver nota en
+      core/mean_flow_models.py. Cuadro resumen final HTML.
+    - v0.2.23: nueva pestaña "14. Cambio Climático - Escenarios". Panel de referencia CMIP6 (definiciones
+      estándar de los 4 escenarios SSP-RCP con su forzamiento radiativo a 2100, y los experimentos núcleo
+      DECK). Herramienta de DELTA-CHANGE: aplica anomalías mensuales de precipitación (%) y temperatura
+      (°C) de los 4 escenarios SSP-RCP a una serie base observada pegada tipo Excel, con gráficos de
+      régimen mensual (histórico vs. los 4 futuros) y de cambio anual proyectado por escenario (barras
+      etiquetadas). Herramienta de CORRECCIÓN DE SESGO / escalamiento estadístico: escalamiento lineal
+      (multiplicativo para precipitación, aditivo para temperatura) y mapeo de cuantiles empírico, para
+      corregir series de un modelo climático (GCM/RCM) contra observaciones locales, con gráfico
+      comparativo observado/modelo crudo/modelo corregido. TRANSPARENCIA explícita en el módulo: no
+      descarga ni procesa NetCDF de ESGF -- aplica los deltas/series que el usuario ya obtuvo de un
+      informe CMIP6/CORDEX o del IPCC WGI Interactive Atlas. Cuadro resumen final HTML.
+    - v0.2.22: nueva pestaña "13. Flujos Hiperconcentrados/Lodos/Detritos" (clasificación por Cv: fluvial
+      <20%, hiperconcentrado 20-45%, lodos 45-55%, detritos >=55%; reología de Bingham directa o por
+      estimación empírica de Julien y Lan 1991; factor de amplificación por sedimento BF=1/(1-Cv) y
+      caudal de mezcla; resistencia de O'Brien y Julien -resuelve tirante/velocidad de equilibrio por
+      bisección- y velocidad crítica de Takahashi para detritos maduros). Gráficos de alto impacto:
+      barra de clasificación con la Cv marcada, curva de reología de Bingham (τy anotado), y comparación
+      de tirante/velocidad entre métodos con el recomendado resaltado. Cuadro resumen final con la
+      "mejor propuesta" (regla de selección por tipo de flujo: Takahashi para detritos maduros,
+      O'Brien-Julien como método general para hiperconcentrado/lodos, en vez de un simple máximo/promedio
+      ya que ambos métodos parten de hipótesis físicas distintas). Nota de que el cálculo es de
+      validación preliminar y el diseño definitivo requiere modelación 2D (FLO-2D/HEC-RAS/RAMMS).
+    - v0.2.21: nueva pestaña "12. Sedimentos en Suspensión y Transporte" (inicio del movimiento τ0 vs.
+      τ crítico de Shields por Van Rijn; carga de FONDO por Meyer-Peter y Müller, Einstein-Brown y
+      Bagnold; carga en SUSPENSIÓN por perfil de Rouse/Lane y Kalinske integrado numéricamente junto a
+      un perfil logarítmico de velocidad; carga TOTAL por Engelund y Hansen, Yang y Ackers y White).
+      Gestor de múltiples secciones (GIS con línea de 2 clics sobre el MDE, o tabla manual pegable de
+      estación/elevación/velocidad), propiedades del sedimento (D50, ρs, velocidad de caída calculada
+      por Van Rijn o manual). Gráficos de alto impacto: sección CON y SIN transporte de sedimentos activo
+      (tasa de transporte en eje secundario con etiqueta de máximo), comparación entre métodos de fondo y
+      de carga total (barras con etiquetas), y perfil vertical de Rouse (concentración y velocidad vs.
+      profundidad). Einstein-Brown incluye advertencia automática cuando Psi<1 (fuera del rango confiable
+      de la aproximación asintótica). Cuadro resumen final HTML con el estado del inicio de movimiento y
+      el método gobernante por sección.
+    - v0.2.20: nueva pestaña "11. Pérdida en Suelos" (USLE/RUSLE, A = R·K·LS·C·P). Factor R por método
+      directo, Wischmeier-Smith (P anual) o Fournier Modificado (P mensual pegable tipo Excel); factor K
+      por nomograma de Wischmeier-Smith (%limo+arena muy fina, %arcilla, %materia orgánica, estructura,
+      permeabilidad) o directo; factor LS por Wischmeier-McCool (longitud de pendiente) o Moore-Burch
+      (área de contribución específica, para espacialización SIG) o directo; factor C por tabla de
+      cobertura o desde NDVI; factor P por tabla de prácticas de conservación. Gestor de múltiples zonas/
+      parcelas de estudio (mismo patrón que Socavación) con comparación entre zonas. ESPACIALIZACIÓN SIG
+      real: genera un ráster de LS (Moore-Burch) a partir de la pendiente y acumulación de flujo D8 del
+      MDE ya delimitado en la Pestaña 1, lo combina con R/K/C/P en un ráster final de pérdida de suelo
+      clasificado por severidad (agregado al lienzo de QGIS), con estadísticas de área por clase. Gráficos
+      de alto impacto: descomposición de factores por zona, comparación entre zonas coloreada por clase de
+      severidad, y mapa clasificado del ráster con leyenda de área por clase. Cuadro resumen final HTML.
+    - v0.2.19: nueva pestaña "10. Socavación" (general, por contracción y local, suelos cohesivos y no
+      cohesivos). Curva granulométrica pegable tipo Excel con cálculo automático de D16/D35≈D36/D50/D65/
+      D84/D90 y Dm (o ingreso manual); socavación general por Lischtvan-Lebediev (vertical por vertical,
+      cohesivo/no cohesivo), Lacey, Blench y Neill-Kellerhals; socavación local en pilares por CSU/HEC-RAS
+      y Froehlich (forma de pila, ángulo de ataque, acorazamiento); socavación por contracción de Laursen
+      (agua clara/lecho móvil, con criterio automático de Shields). Gestor de múltiples secciones
+      transversales (como en la Pestaña 1 para cuencas), cada una con datos de origen GIS (línea trazada
+      de 2 clics sobre el MDE) o tabla manual pegable (estación, elevación, velocidad); gráficos de alto
+      impacto de la sección CON y SIN socavación (con fosa local sobrepuesta), curva granulométrica
+      anotada y comparación de profundidad de socavación entre métodos (barras con etiquetas), más un
+      cuadro resumen final con el método gobernante (criterio conservador: máximo) por sección.
+    - v0.2.18: dos nuevos métodos de Tc (Izzard, 1946 y Onda Cinemática NRCS TR-55 — flujo laminar), elevando el total a 16 métodos; columnas de la tabla de Tc con anchos proporcionales a su contenido (Método/Autor-Año en Stretch; Adoptar/Tc h/Tc min/tlag angostas y fijas).
+    - v0.2.17: splash de introducción a resolución nativa (960x540, igual que el video original; antes se había reducido a 480px para aligerar el archivo) y audio normalizado a un volumen alto (loudnorm, de -28dB a -13dB promedio) sin distorsión.
+    - v0.2.16: splash de introducción reescrito para reproducir un GIF animado (QMovie, parte de QtGui, sin dependencias de códecs) en vez de un video .mp4 vía QMediaPlayer/QVideoWidget (QtMultimedia) — esto último requiere que la build de Qt de QGIS traiga instalado el backend de códecs de video, algo que no todas las instalaciones incluyen, y era la causa más probable de que el video no se reprodujera; el audio del video original se conserva como pista separada (splash_audio.wav) reproducida de forma "best-effort" vía QSoundEffect, sin afectar la animación si el audio no está disponible.
+    - v0.2.15: nueva pestaña "6. Precipitación Media Mensual" (tabla Excel-style para datos mensuales, completación/extensión por Fourier y Wavelet, los 14 tests de control de calidad reorganizados en 4 categorías con gráfico propio para cada uno, y cuadro resumen final); pestañas renumeradas (7=Caudales Máximos SCS/Clark/Témez/Creager/MacMath, 8=Hidráulica y Drenaje, 9=Módulos Avanzados, 10=Exportar/Reportes); gráfico de barras comparando Qp de los 5 métodos de caudal máximo en la pestaña 7; corregida la superposición de leyendas/etiquetas con el título en todos los gráficos del plugin (hidrograma, hipsométrica, ajuste de distribuciones, comparación Tr, C-A-V, secciones transversales).
+    - v0.2.14: 11 tests estadísticos adicionales en la pestaña 5 (Spearman's Rho, Regresión Lineal, Distribución Free CUSUM, Cumulative Deviation/Buishand, Worsley Likelihood Ratio, Rank-Sum, Student's t, Median Crossing, Turning Points, Rank Difference, Autocorrelación), organizados en las 4 categorías estándar (Tendencias, Cambio en media/mediana, Diferencia entre 2 periodos, Aleatoriedad); nueva pestaña "8. Módulos Avanzados" con Completación de Datos (IDW, Regresión Múltiple, Random Forest, Vector Regional), Precipitación Areal (IDW, RBF, Kriging Ordinario; Thiessen documentado), y Oferta Hídrica (Budyko/Fu, balance mensual simplificado tipo GR2M, y estructura general de Lutz Scholz con coeficientes regionales a cargo del usuario, ya que las tablas originales de ANA/PLAN MERIS no se pudieron verificar con certeza suficiente en este entorno).
+    - v0.2.13: control de calidad y homogeneidad de series (Pettitt, Mann-Kendall + pendiente de Sen, curva de doble masa) en la pestaña 5, antes del análisis de frecuencia; Precipitación Máxima Probable (PMP 24h) por el método de Hershfield; curva Cota-Área-Volumen (C-A-V) en la pestaña 4, útil para estudios de embalses/presas; fórmulas de caudal máximo directo Témez, Mac Math y Creager en la pestaña 6, como verificación cruzada del caudal SCS/Snyder/Clark.
+    - v0.2.12: nueva pestaña única "8. Exportar / Reportes" (penúltima, justo antes de Créditos) que centraliza TODAS las exportaciones antes dispersas entre pestañas: reporte Word completo, exportación de archivos nativos/editables (SHP/KML/GeoJSON/TIF/XLSX/CSV), proyecto portable, y exportación de la curva hipsométrica a PNG.
+    - v0.2.11: reporte técnico completo en Word (.docx, requiere python-docx) cubriendo las 7 pestañas con texto descriptivo, tablas y los gráficos ya generados; "Guardar proyecto portable" que copia todas las capas con rutas relativas, guarda el proyecto QGIS (.qgz), el reporte Word, un Excel completo y un JSON con todos los resultados de la sesión, listo para copiar a otra máquina y abrirse sin romper enlaces; botones de minimizar y maximizar habilitados en la ventana del plugin (antes solo tenía botón de cerrar, como todo QDialog de Qt por defecto).
+    - v0.2.10: pestaña 5, tablas de distribuciones y de comparación Tr ajustadas al contenido (antes demasiado anchas/con scroll horizontal innecesario) y nuevo gráfico Pmax24h vs Tr en escala cartesiana (además del de escala logarítmica); pestaña 6, el parseo del hietograma ahora acepta coma, punto y coma, espacios o saltos de línea como separador (antes exigía coma estricta y fallaba con "Hietograma inválido" ante cualquier otro formato); splash de introducción corregido para reproducir recién en showEvent (no antes de que la ventana esté visible) y con registro de diagnóstico en el panel de mensajes de QGIS (categoría "HydroAndes Pro") si algo falla.
+    - v0.2.9: integración con el plugin de terceros "Curve Number Generator" (ESA & ORNL) como método recomendado para automatizar el CN en la pestaña 3 (descubrimiento dinámico del algoritmo, sin asumir nombres de parámetros no verificados); pestaña 4 renombrada a "Tiempo de concentración y Lag Time" y su tabla de resultados ahora se ve completa sin scroll interno; tabla de datos manuales de la pestaña 5 (1b) con más alto para ver las 30 filas; hidrograma de la pestaña 6 suavizado (interpolación PCHIP a paso de tiempo fino); nuevo gráfico de la sección transversal (con relación de escala 1:1 y etiquetas de dimensiones) para canales y alcantarillas en la pestaña 7; todos los gráficos de todas las pestañas con una proporción más equilibrada (antes muy alargados en X).
+    - v0.2.8: pantalla de introducción al abrir el plugin: reproduce un video de portada de 10 s (con su propio audio), con la marca de agua original de la esquina inferior derecha cubierta; se puede omitir con un clic o cualquier tecla; diseñada para nunca bloquear la apertura del plugin si el video/QtMultimedia no está disponible en la instalación de QGIS.
+    - v0.2.7: nueva pestaña "Hidráulica y Drenaje" (canales por máxima eficiencia hidráulica, alcantarillas, enrocado/RipRap, sumideros, cunetas de coronación, vados/badenes, y verificación de borde libre de pontones/puentes/defensas ribereñas); descarga de MDE alternativa desde ASF Vertex/Copernicus GLO-30; cálculo automático de CN a partir de LULC (ESA WorldCover) y Grupos Hidrológicos de Suelo; extracción automática del perfil longitudinal real del cauce principal para el cálculo de Tc (corrige un bug de signo que producía "0"/errores de dominio matemático en varios métodos); 4 distribuciones de probabilidad adicionales (Log-Normal 3P, Log-Gumbel, Gamma 2P, Gamma 3P/Pearson III) con tabla y gráfico comparativo Pmax24h vs. Tr y periodo de retorno personalizado ("T-Diseño"); curva hipsométrica con eje de altitud real (m s.n.m.), suavizado, marcas cada 10% de área acumulada, tabla resumen y exportación a PNG; pestañas 1-5 ahora con desplazamiento (scroll) para no comprimir gráficos ni tablas; columnas Símbolo/Valor/Unidad angostadas e Interpretación ampliada en la tabla de morfometría; unidades e interpretación ampliada para todos los parámetros morfométricos; renombrado del plugin a "HydroAndes Pro".
+    - v0.2.6: Pestaña 5 (Precipitación Máx 24h) ahora permite también ingresar o pegar directamente los datos de P24 (mm) en una tabla editable, con soporte de copiar/pegar estilo Excel (Ctrl+C/Ctrl+V de un rango de dos columnas: año y P24), como alternativa a cargar un CSV o extraer de PISCOp.
+    - v0.2.5: corregida la columna "Parámetro" de la tabla de morfometría (Pestaña 2), que mostraba el símbolo abreviado repetido (p. ej. "A", "P", "Lb") en vez del nombre descriptivo completo (p. ej. "Área de la cuenca", "Perímetro de la cuenca"); también se eliminó una fila duplicada del índice de Melton.
+    - v0.2.4: la ventana del plugin ahora se oculta automáticamente al activar la selección del punto de salida en el lienzo (para no tapar el mapa), y reaparece sola al hacer clic o al cancelar la selección (Escape, cambio de herramienta).
+    - v0.2.3: fijación explícita de la región de GRASS (GRASS_REGION_PARAMETER) a la extensión real del MDE en todos los pasos grass7:* de la cadena de delineación, para evitar discrepancias de extensión entre pasos sucesivos; validación temprana (antes de ejecutar la cadena completa) de que el punto de salida cae dentro de la extensión del MDE, con mensaje inmediato y las coordenadas exactas si no es así.
+    - v0.2.2: ajuste automático ("snap") del punto de salida a la celda de cauce más cercana antes de delinear, eliminando la causa más frecuente de cuencas vacías (break point mal ubicado); refactorización de la cadena de delineación en 3 pasos independientes para permitir este ajuste; eliminación total de la ambigüedad "ID de capa vs. ruta de archivo" que causó dos bugs distintos en versiones anteriores (ahora todas las salidas de la cadena son siempre archivos reales en disco, vía QgsProcessingUtils.generateTempFilename).
+    - v0.2.1: diagnóstico específico cuando la cuenca delineada queda vacía (causa más frecuente de fallas posteriores en la cadena de delineación, antes confundida con un problema de instalación de GRASS/GDAL); datos de autor y repositorio actualizados.
+    - v0.2.0: corrección del bug de delineación ('NoneType' object has no attribute 'source', originado en salidas de algoritmos GDAL/GRASS no registradas como sink); nueva pestaña de Precipitación Máxima 24h con análisis de frecuencia y enlace directo a la pestaña de caudales; selector de método de desagregación temporal (IDF vs. SCS Tipo I/II/III); métodos de Tc Snyder y Espey-Winslow añadidos; compatibilidad verificada con QGIS 4.0 (Qt6).
+    - v0.1.0: versión inicial con delineación, morfometría, número de curva, tiempo de concentración (12 métodos) y estimación de caudales SCS/Snyder/Clark.
+
+tracker=https://github.com/Ningsiar/HYDROANDINA_Pro/issues
+repository=https://github.com/Ningsiar/HYDROANDINA_Pro.git
+homepage=https://github.com/Ningsiar/HYDROANDINA_Pro
+
+tags=hidrologia,hydrology,hidraulica,hydraulics,cuencas,watershed,morfometria,MDE,DEM,curve number,tiempo de concentracion,Andes,flujo de detritos,hec-hms,hec-ras,precipitacion,PISCO,SCS,caudales,canales,alcantarillas,riprap
+
+category=Analysis
+icon=icon.png
+experimental=True
+deprecated=False
+server=False
+hasProcessingProvider=no
