@@ -24,7 +24,7 @@ plugin_dialog.py para corregir dos problemas recurrentes de la interfaz:
 Ambas funciones son puro PyQt (sin lógica de negocio de ningún módulo de
 core/), para poder llamarlas desde cualquier pestaña sin duplicar código.
 """
-from qgis.PyQt.QtWidgets import QTableWidget, QHeaderView
+from qgis.PyQt.QtWidgets import QTableWidget, QHeaderView, QPushButton
 
 
 def ajustar_alto_tabla(tabla: QTableWidget, filas_visibles_max: int = 12, alto_minimo: int = 70) -> None:
@@ -84,6 +84,22 @@ def limitar_ancho_tabla(tabla: QTableWidget, ancho_maximo: int = 900) -> None:
     principal").
     """
     tabla.setMaximumWidth(ancho_maximo)
+
+
+def limitar_ancho_boton(boton: QPushButton, margen_px: int = 24) -> None:
+    """
+    Limita el ancho máximo de `boton` al que necesita su propio texto
+    (sizeHint) más un margen, para el caso de botones agregados como
+    única fila de un QFormLayout: `form.addRow(boton)` (sin una etiqueta
+    de la izquierda) los agrega con QFormLayout.SpanningRole en vez de
+    FieldRole, así que el setFieldGrowthPolicy(FieldsStayAtSizeHint) que
+    ya tienen los 49 formularios del plugin (desde la v0.2.33) NO les
+    aplica -- Qt los estira a todo el ancho de la fila por defecto,
+    viéndose desproporcionadamente grandes/gruesos frente al resto de la
+    interfaz. Debe llamarse después de crear el botón (su sizeHint ya
+    depende del texto final).
+    """
+    boton.setMaximumWidth(boton.sizeHint().width() + margen_px)
 
 
 def aplicar_columna_elastica(tabla: QTableWidget, indice_columna_larga: int, anchos_fijos: dict = None) -> None:

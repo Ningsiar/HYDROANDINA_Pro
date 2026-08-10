@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.2.37
+version=0.2.38
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,31 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.2.38: Pestaña "3. Número de Curva SCS" -- corregidos 2 problemas de proporción reportados con
+      captura de pantalla. (1) La matriz "Uso de suelo" (tabla_cn) se veía desproporcionadamente ancha,
+      más que la propia ventana (con scroll horizontal visible): la v0.2.36 le había puesto la columna
+      "Uso de suelo" en modo Stretch pensando que evitaba el desborde, pero Stretch reparte TODO el
+      espacio sobrante del viewport a esa columna (mucho más de lo que su texto necesita), en vez de
+      ajustarse a su contenido -- se revirtió a ResizeToContents (ancho ~640px en total, cómodo dentro
+      de la ventana de 980px, verificado con PyQt5 real). (2) Los botones "Generar CN automáticamente..."
+      y "Obtener LULC + HSG automáticamente..." se veían igual de desproporcionados (ocupando casi todo
+      el ancho de la ventana, más gruesos de lo normal): causa raíz distinta -- un botón agregado solo,
+      sin etiqueta, a un QFormLayout.addRow(boton) se agrega con SpanningRole en vez de FieldRole, así
+      que el setFieldGrowthPolicy(FieldsStayAtSizeHint) que ya tienen los 49 formularios del plugin
+      (desde la v0.2.33) NO le aplica -- Qt lo estira a todo el ancho de la fila por defecto. Se
+      encontraron 15 botones con este mismo patrón en 10 pestañas distintas (Pestaña 1: generar red/
+      delimitar cuenca; Pestaña 3: los 2 de CN automático; Pestaña 4: generar hietograma; y uno en cada
+      una de Flujos Hiperconcentrados, Caudales Medios, Caudales Mínimos x2, PHABSIM, Flujo Subterráneo
+      x2, Hidráulica de Pozos x3) -- se corrigieron los 15 con un nuevo helper limitar_ancho_boton()
+      (ui/table_utils.py) que acota el ancho máximo del botón a su propio sizeHint (proporcional a su
+      texto), no solo los 2 visibles en la captura de esta pestaña.
+      NUEVA FUNCIONALIDAD solicitada: columna "% cuenca" agregada a la matriz de uso de suelo (entre
+      CN-D y Área) y botón "Distribuir área por %" que calcula el Área (km²) de cada fila como
+      Área_total_Pestaña2 × %/100, usando el Área de la cuenca ya calculada en el Grupo 1 de la Pestaña
+      2 (morfometría) -- evita tener que calcular el área de cada cobertura a mano. Avisa si los %
+      ingresados no suman ~100%. Verificado con PyQt5 real (ancho de tabla y de botón) y con la
+      aritmética de reparto (suma de áreas = área total, caso de referencia con 7 coberturas sumando
+      100%).
     - v0.2.37: Pestaña "2. Morfometría y drenaje" ampliada a los 6 grupos completos de parámetros
       morfométricos, con encabezado en negrita por grupo dentro de la misma tabla ("1 — Parámetros
       básicos de la cuenca", ..., "6 — Parámetros de relieve"). Antes solo se mostraban los Grupos 1, 2,

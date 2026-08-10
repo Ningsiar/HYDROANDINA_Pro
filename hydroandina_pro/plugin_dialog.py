@@ -57,7 +57,8 @@ from .ui.low_flow_canvas import LowFlowCanvas
 from .ui.phabsim_canvas import PhabsimCanvas
 from .ui.groundwater_canvas import GroundwaterCanvas
 from .ui.well_canvas import WellCanvas
-from .ui.table_utils import ajustar_alto_tabla, aplicar_columna_elastica, limitar_ancho_tabla
+from .ui.table_utils import (ajustar_alto_tabla, aplicar_columna_elastica, limitar_ancho_tabla,
+                              limitar_ancho_boton)
 
 
 def utm_epsg_for_lonlat(lon: float, lat: float) -> int:
@@ -541,6 +542,7 @@ class HydroAndinaProDialog(QDialog):
 
         self.btn_generar_red = QPushButton("Paso A: Generar red de drenaje (Stream Network)")
         self.btn_generar_red.clicked.connect(self._on_generar_red_drenaje)
+        limitar_ancho_boton(self.btn_generar_red)
         f4.addRow(self.btn_generar_red)
 
         f4.addRow(QLabel(
@@ -565,6 +567,7 @@ class HydroAndinaProDialog(QDialog):
 
         self.btn_run_delineation = QPushButton("Paso B: Delimitar cuenca desde el break point")
         self.btn_run_delineation.clicked.connect(self._on_run_delineation)
+        limitar_ancho_boton(self.btn_run_delineation)
         f4.addRow(self.btn_run_delineation)
 
         self.lbl_estado_tab1 = QLabel("Estado: en espera de MDE + break point.")
@@ -1396,8 +1399,13 @@ class HydroAndinaProDialog(QDialog):
             "de un diseño definitivo."
         ))
 
-        self.tabla_cn = QTableWidget(len(curve_number.TABLA_USOS_ANDINOS_DEFAULT), 6)
-        self.tabla_cn.setHorizontalHeaderLabels(["Uso de suelo", "CN-A", "CN-B", "CN-C", "CN-D", "Área (km²)"])
+        # Columnas: Uso de suelo, CN-A..D, % cuenca (nueva, editable) y
+        # Área (km²) -- el % permite distribuir el Área total ya calculada
+        # en la Pestaña 2 (Morfometría) en vez de tener que calcular a mano
+        # cuántos km² representa cada cobertura.
+        self.tabla_cn = QTableWidget(len(curve_number.TABLA_USOS_ANDINOS_DEFAULT), 7)
+        self.tabla_cn.setHorizontalHeaderLabels(
+            ["Uso de suelo", "CN-A", "CN-B", "CN-C", "CN-D", "% cuenca", "Área (km²)"])
         for i, uso in enumerate(curve_number.TABLA_USOS_ANDINOS_DEFAULT):
             self.tabla_cn.setItem(i, 0, QTableWidgetItem(uso.nombre))
             self.tabla_cn.setItem(i, 1, QTableWidgetItem(str(uso.cn_a)))
@@ -1405,15 +1413,38 @@ class HydroAndinaProDialog(QDialog):
             self.tabla_cn.setItem(i, 3, QTableWidgetItem(str(uso.cn_c)))
             self.tabla_cn.setItem(i, 4, QTableWidgetItem(str(uso.cn_d)))
             self.tabla_cn.setItem(i, 5, QTableWidgetItem("0.0"))
+            self.tabla_cn.setItem(i, 6, QTableWidgetItem("0.0"))
         # "Uso de suelo" tiene nombres largos (hasta ~49 caracteres, p.ej.
-        # "Pastos naturales (ichu / ratio pobre-degradado)"); en
-        # ResizeToContents puro esa columna sumada a las otras 5 puede
-        # superar el ancho de la ventana. Se le da esa columna en Stretch
-        # (absorbe el espacio sobrante) y el resto queda angosto y fijo.
-        aplicar_columna_elastica(self.tabla_cn, indice_columna_larga=0,
-                                  anchos_fijos={1: 55, 2: 55, 3: 55, 4: 55, 5: 95})
+        # "Pastos naturales (ichu / ratio pobre-degradado)"), pero su ancho
+        # NATURAL (ResizeToContents) ya cabe cómodo en la ventana (~700px
+        # en total con las demás columnas) -- no hace falta que absorba el
+        # espacio sobrante. La v0.2.36 le había puesto Stretch pensando que
+        # ayudaba, pero eso la hacía ocupar TODO el ancho disponible del
+        # viewport (mucho más de lo que su contenido necesita), viéndose
+        # desproporcionada; se vuelve a ResizeToContents, con las columnas
+        # numéricas en un ancho fijo angosto acorde a su contenido.
+        cabecera_cn = self.tabla_cn.horizontalHeader()
+        cabecera_cn.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        for col, ancho in ((1, 55), (2, 55), (3, 55), (4, 55), (5, 70), (6, 95)):
+            cabecera_cn.setSectionResizeMode(col, QHeaderView.Fixed)
+            self.tabla_cn.setColumnWidth(col, ancho)
         ajustar_alto_tabla(self.tabla_cn, filas_visibles_max=10)
         v.addWidget(self.tabla_cn)
+
+        h_dist_pct = QHBoxLayout()
+        self.btn_distribuir_area_pct = QPushButton(
+            "Distribuir área por % (usa el Área total ya calculada en la Pestaña 2)"
+        )
+        self.btn_distribuir_area_pct.clicked.connect(self._on_distribuir_area_por_porcentaje)
+        h_dist_pct.addWidget(self.btn_distribuir_area_pct)
+        v.addLayout(h_dist_pct)
+        self.lbl_estado_distribucion_pct = QLabel(
+            "Ingrese el % de la cuenca que ocupa cada uso de suelo en la columna \"% cuenca\" "
+            "(no hace falta que sumen exactamente 100%; se avisa si se desvían mucho) y pulse el "
+            "botón para calcular el Área (km²) de cada fila automáticamente."
+        )
+        self.lbl_estado_distribucion_pct.setWordWrap(True)
+        v.addWidget(self.lbl_estado_distribucion_pct)
 
         h = QHBoxLayout()
         h.addWidget(QLabel("Grupo hidrológico dominante para la ponderación simple:"))
@@ -1456,6 +1487,7 @@ class HydroAndinaProDialog(QDialog):
             "Generar CN automáticamente (ESA WorldCover + HYSOGs250m)"
         )
         self.btn_calc_cn_generator.clicked.connect(self._on_calcular_cn_generator_plugin)
+        limitar_ancho_boton(self.btn_calc_cn_generator)
         f_cng.addRow(self.btn_calc_cn_generator)
 
         self.lbl_estado_cn_generator = QLabel("Estado: sin calcular.")
@@ -1493,6 +1525,7 @@ class HydroAndinaProDialog(QDialog):
             "Obtener LULC + HSG automáticamente y calcular CN ponderado"
         )
         self.btn_calc_cn_automatico.clicked.connect(self._on_calcular_cn_automatico)
+        limitar_ancho_boton(self.btn_calc_cn_automatico)
         f_auto_cn.addRow(self.btn_calc_cn_automatico)
 
         self.lbl_estado_cn_auto = QLabel("Estado: sin calcular.")
@@ -1627,6 +1660,46 @@ class HydroAndinaProDialog(QDialog):
             self.lbl_estado_cn_auto.setText("Estado: error (ver mensaje).")
             QMessageBox.critical(self, "Error obteniendo CN automático", str(e))
 
+    def _on_distribuir_area_por_porcentaje(self):
+        """
+        Lee el % de la cuenca asignado a cada uso de suelo (columna "%
+        cuenca") y calcula el Área (km²) de cada fila como
+        Área_total_pestaña2 * % / 100, sobrescribiendo la columna "Área
+        (km²)". El Área total se toma de self.morfometria_resultados
+        (Grupo 1, calculado en la Pestaña 2) -- si todavía no se calculó
+        la morfometría, se avisa y no se hace nada.
+        """
+        g1 = self.morfometria_resultados.get("g1") if self.morfometria_resultados else None
+        if not g1:
+            QMessageBox.warning(
+                self, "Falta el área de la cuenca",
+                "Calcule primero los parámetros morfométricos en la Pestaña 2 (Grupo 1: Área de la "
+                "cuenca) antes de distribuir el área por porcentaje aquí."
+            )
+            return
+        area_total_km2 = g1["A"]
+        try:
+            suma_pct = 0.0
+            for row in range(self.tabla_cn.rowCount()):
+                item_pct = self.tabla_cn.item(row, 5)
+                texto_pct = item_pct.text().strip() if item_pct else ""
+                pct = float(texto_pct) if texto_pct else 0.0
+                suma_pct += pct
+                area_fila = area_total_km2 * pct / 100.0
+                self.tabla_cn.setItem(row, 6, QTableWidgetItem(f"{area_fila:.4f}"))
+        except ValueError as e:
+            QMessageBox.critical(self, "Error en la columna \"% cuenca\"",
+                                  f"Revise que todas las celdas de % tengan valores numéricos válidos.\n{e}")
+            return
+
+        aviso_suma = ""
+        if abs(suma_pct - 100.0) > 1.0:
+            aviso_suma = f" Atención: los % ingresados suman {suma_pct:.1f}%, no 100% -- revise la matriz."
+        self.lbl_estado_distribucion_pct.setText(
+            f"Área distribuida: {area_total_km2:.4f} km² (Pestaña 2) repartida según el % de cada fila "
+            f"(suma de %: {suma_pct:.1f}%).{aviso_suma}"
+        )
+
     def _on_calcular_cn(self):
         try:
             usos = []
@@ -1636,7 +1709,7 @@ class HydroAndinaProDialog(QDialog):
                 cn_b = int(self.tabla_cn.item(row, 2).text())
                 cn_c = int(self.tabla_cn.item(row, 3).text())
                 cn_d = int(self.tabla_cn.item(row, 4).text())
-                area = float(self.tabla_cn.item(row, 5).text())
+                area = float(self.tabla_cn.item(row, 6).text())
                 usos.append(curve_number.UsoSuelo(nombre, cn_a, cn_b, cn_c, cn_d, area))
 
             grupo = self.combo_grupo_hidrologico.currentText()
@@ -2847,6 +2920,7 @@ class HydroAndinaProDialog(QDialog):
 
         self.btn_generar_hietograma = QPushButton("Generar hietograma")
         self.btn_generar_hietograma.clicked.connect(self._on_generar_hietograma_automatico)
+        limitar_ancho_boton(self.btn_generar_hietograma)
         f_auto.addRow(self.btn_generar_hietograma)
 
         v.addWidget(gb_auto)
@@ -5625,6 +5699,7 @@ class HydroAndinaProDialog(QDialog):
         f_clasif.addRow("Peso específico del agua γw (N/m³):", self.spin_gamma_w_flujo)
         btn_clasificar = QPushButton("Clasificar flujo")
         btn_clasificar.clicked.connect(self._on_clasificar_flujo)
+        limitar_ancho_boton(btn_clasificar)
         f_clasif.addRow(btn_clasificar)
         v.addWidget(gb_clasif)
         self.canvas_clasificacion_flujo = DebrisFlowCanvas(width=7.2, height=3.2)
@@ -6122,6 +6197,7 @@ class HydroAndinaProDialog(QDialog):
         f_etp.addRow("CoeffETP — coeficiente corrector multiplicativo:", self.spin_coeff_etp_qm)
         btn_calcular_etp_qm = QPushButton("Calcular columna ETP con el método seleccionado")
         btn_calcular_etp_qm.clicked.connect(self._on_calcular_etp_qm)
+        limitar_ancho_boton(btn_calcular_etp_qm)
         f_etp.addRow(btn_calcular_etp_qm)
         v.addWidget(gb_etp)
 
@@ -6376,6 +6452,7 @@ class HydroAndinaProDialog(QDialog):
         f_tennant.addRow("Caudal medio anual Qma (m³/s):", self.spin_qma_tennant)
         btn_qma_desde_cdc = QPushButton("Usar el promedio de la serie de la sección 1")
         btn_qma_desde_cdc.clicked.connect(self._on_usar_qma_desde_cdc)
+        limitar_ancho_boton(btn_qma_desde_cdc)
         f_tennant.addRow(btn_qma_desde_cdc)
         self.spin_pct_estiaje_tennant = QDoubleSpinBox(); self.spin_pct_estiaje_tennant.setRange(1, 100); self.spin_pct_estiaje_tennant.setDecimals(0); self.spin_pct_estiaje_tennant.setValue(10)
         f_tennant.addRow("% Qma en época de estiaje (Perú: típico 10%):", self.spin_pct_estiaje_tennant)
@@ -6383,6 +6460,7 @@ class HydroAndinaProDialog(QDialog):
         f_tennant.addRow("% Qma en época normal:", self.spin_pct_normal_tennant)
         btn_calcular_tennant = QPushButton("Calcular Tennant/Montana")
         btn_calcular_tennant.clicked.connect(self._on_calcular_tennant)
+        limitar_ancho_boton(btn_calcular_tennant)
         f_tennant.addRow(btn_calcular_tennant)
         v.addWidget(gb_tennant)
         self.canvas_tennant = LowFlowCanvas(width=7.4, height=3.2)
@@ -6425,6 +6503,7 @@ class HydroAndinaProDialog(QDialog):
         f_homologa.addRow("Área de la cuenca homóloga (km²):", self.spin_area_homologa)
         btn_calcular_homologa = QPushButton("Calcular por transferencia de áreas")
         btn_calcular_homologa.clicked.connect(self._on_calcular_transferencia_homologa)
+        limitar_ancho_boton(btn_calcular_homologa)
         f_homologa.addRow(btn_calcular_homologa)
         v.addWidget(gb_homologa)
 
@@ -6897,6 +6976,7 @@ class HydroAndinaProDialog(QDialog):
         f_darcy.addRow("Porosidad efectiva ne:", self.spin_porosidad_darcy)
         btn_calcular_darcy = QPushButton("Calcular")
         btn_calcular_darcy.clicked.connect(self._on_calcular_darcy)
+        limitar_ancho_boton(btn_calcular_darcy)
         f_darcy.addRow(btn_calcular_darcy)
         self.texto_resultado_darcy = QLabel("—")
         f_darcy.addRow("Resultado:", self.texto_resultado_darcy)
@@ -6921,6 +7001,7 @@ class HydroAndinaProDialog(QDialog):
         f_1d.addRow("Ancho del frente de flujo (m):", self.spin_ancho_1d)
         btn_calcular_1d = QPushButton("Calcular Q")
         btn_calcular_1d.clicked.connect(self._on_calcular_flujo_1d)
+        limitar_ancho_boton(btn_calcular_1d)
         f_1d.addRow(btn_calcular_1d)
         self.texto_resultado_1d = QLabel("—")
         f_1d.addRow("Resultado:", self.texto_resultado_1d)
@@ -7172,6 +7253,7 @@ class HydroAndinaProDialog(QDialog):
         f_perm.addRow("s2 (descenso en r2, confinado) o h2 (nivel en r2, libre):", self.spin_s2_h2_permanente)
         btn_calcular_permanente = QPushButton("Calcular")
         btn_calcular_permanente.clicked.connect(self._on_calcular_regimen_permanente)
+        limitar_ancho_boton(btn_calcular_permanente)
         f_perm.addRow(btn_calcular_permanente)
         self.texto_resultado_permanente = QLabel("—")
         f_perm.addRow("Resultado:", self.texto_resultado_permanente)
@@ -7193,6 +7275,7 @@ class HydroAndinaProDialog(QDialog):
         f_theis.addRow("Tiempo máximo a graficar (s):", self.spin_t_max_theis)
         btn_calcular_theis = QPushButton("Graficar curva de descenso (Theis)")
         btn_calcular_theis.clicked.connect(self._on_calcular_theis)
+        limitar_ancho_boton(btn_calcular_theis)
         f_theis.addRow(btn_calcular_theis)
         v.addWidget(gb_theis)
 
@@ -7254,6 +7337,7 @@ class HydroAndinaProDialog(QDialog):
         f_radio.addRow("s medido en un pozo de observación a distancia r (sección 1, m):", self.spin_s_prueba_radio)
         btn_calcular_radios = QPushButton("Calcular y comparar radios de influencia")
         btn_calcular_radios.clicked.connect(self._on_calcular_radios_influencia)
+        limitar_ancho_boton(btn_calcular_radios)
         f_radio.addRow(btn_calcular_radios)
         v.addWidget(gb_radio)
         self.canvas_comparacion_radios = WellCanvas(width=7.6, height=4.4)
