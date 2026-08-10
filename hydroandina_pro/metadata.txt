@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.2.39
+version=0.2.40
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,33 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.2.40: Pestaña "8. Hidráulica y Drenaje" -- se agregó gráfico a las 4 estructuras que no tenían
+      ninguno (antes solo Canales/Vados/Cunetas y Alcantarilla tenían un dibujo de la sección): Enrocado
+      (RipRap) con un esquema del talud protegido, capa de roca a espesor ≈2×D50 y rocas esquemáticas
+      dibujadas con geometría de desplazamiento perpendicular correcta (offset a lo largo de la normal
+      unitaria a la línea del talud, verificado visualmente con matplotlib real -- la primera versión
+      tenía un error de trigonometría que dejaba la capa fuera de lugar, corregido antes de integrarlo);
+      Sumideros con un esquema de la ventana de captación (L, y, caudal interceptado); Pontón/Puente y
+      Defensa Ribereña (2 gráficos: borde libre + talud de enrocado) con un esquema vertical del nivel de
+      agua vs. la cota de la estructura, coloreado en verde/rojo según cumpla o no el borde libre mínimo
+      -- los 3 métodos nuevos de graficado se agregaron a ui/cross_section_canvas.py, reutilizando la
+      clase existente en vez de crear una nueva. CUADRO RESUMEN: agregado a la Pestaña 8 (no tenía
+      ninguno) y a la Pestaña 7 "Caudales Máximos" (tampoco tenía) -- ambos con un QTextBrowser que se
+      actualiza automáticamente después de cada cálculo (sin necesidad de un botón aparte), siguiendo el
+      mismo patrón ya usado en las otras 10 pestañas que sí tenían cuadro resumen (Socavación, Pérdida en
+      Suelos, Sedimentos, Flujos Hiperconcentrados, Cambio Climático, Caudales Medios, Caudales Mínimos,
+      PHABSIM, Flujo Subterráneo, Hidráulica de Pozos). El resumen de Hidráulica y Drenaje acumula TODAS
+      las estructuras calculadas en la sesión (no solo la visible en el selector en ese momento), leyendo
+      el diccionario ya existente self.resultados_hidraulica_drenaje -- que también comparte con la
+      Pestaña 7 (Témez/Mac Math/Creager), así que esa entrada aparece en ambos resúmenes. Verificado con
+      matplotlib+PyQt5 reales (renderizado de los 3 gráficos nuevos a PNG e inspección visual) y con la
+      lógica de armado del HTML del resumen contra datos de ejemplo de las 7 estructuras + caudales
+      directos (incluye booleanos "cumple" y valores None sin fallar). Nota de alcance: se revisaron
+      también las pestañas "9. Módulos Avanzados" (completación de datos / precipitación areal / oferta
+      hídrica) y se confirmó que tampoco tiene un cuadro resumen unificado -- a diferencia de Hidráulica y
+      Drenaje y Caudales, sus 3 sub-herramientas son independientes entre sí (no comparten una estructura
+      de resultados natural para un resumen único), así que se deja pendiente de una decisión explícita
+      en vez de forzar un resumen poco cohesivo.
     - v0.2.39: causa raíz encontrada de por qué la Pestaña 3 (y en realidad casi todo el plugin) seguía
       necesitando scroll horizontal después de la v0.2.38: 44 de las 161 etiquetas descriptivas (QLabel)
       del plugin -- casi siempre el párrafo de introducción al inicio de cada pestaña, o los textos de

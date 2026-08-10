@@ -3081,7 +3081,48 @@ class HydroAndinaProDialog(QDialog):
         v_dir.addWidget(self.canvas_comparacion_qmax)
         v.addWidget(gb_directos)
 
+        v.addWidget(QLabel("<b>Cuadro resumen final:</b>"))
+        self.texto_resumen_caudales = QTextBrowser()
+        self.texto_resumen_caudales.setMinimumHeight(140)
+        v.addWidget(self.texto_resumen_caudales)
+        self._actualizar_texto_resumen_caudales()
+
         self._agregar_pestaña_con_scroll(tab, "7. Caudales Máximos SCS/Clark/Témez/Creager/MacMath")
+
+    def _actualizar_texto_resumen_caudales(self):
+        """Cuadro resumen de la Pestaña 7: caudal pico por el método de
+        transformación lluvia-escorrentía elegido (SCS/Snyder/Clark) y,
+        si ya se calcularon, los 3 métodos directos (Témez/Mac Math/
+        Creager) como verificación cruzada. Se llama automáticamente al
+        calcular cualquiera de los dos."""
+        html = "<h3>Cuadro resumen final — Caudales máximos</h3>"
+        hay_algo = False
+        if self.hidrograma_resultado:
+            hay_algo = True
+            r = self.hidrograma_resultado
+            html += (
+                f"<p><b>Transformación lluvia-escorrentía ({r.get('metodo', '')})</b><br>"
+                f"Caudal pico Qp = <b>{r['caudal_pico_m3s']} m³/s</b> &nbsp;|&nbsp; "
+                f"Tiempo pico Tp = {r['tiempo_pico_h']} h</p><hr>"
+            )
+        directos = self.resultados_hidraulica_drenaje.get("Caudales directos (Témez/Mac Math/Creager)")
+        if directos:
+            hay_algo = True
+            html += (
+                "<p><b>Métodos directos (verificación cruzada)</b><br>"
+                f"Témez = {directos['Temez_Q_m3s']} m³/s &nbsp;|&nbsp; "
+                f"Mac Math = {directos['MacMath_Q_m3s']} m³/s &nbsp;|&nbsp; "
+                f"Creager = {directos['Creager_Q_m3s']} m³/s</p><hr>"
+            )
+        if not hay_algo:
+            html += "<p style='color:#666666'>Aún no se ha calculado ningún caudal en esta pestaña.</p>"
+        else:
+            html += (
+                "<p style='color:#666666'>NOTA: los métodos directos son una verificación cruzada de "
+                "orden de magnitud, no reemplazan la transformación lluvia-escorrentía completa "
+                "(SCS/Snyder/Clark) como caudal de diseño.</p>"
+            )
+        self.texto_resumen_caudales.setHtml(html)
 
     def _on_cambiar_metodo_desagregacion(self):
         es_idf = self.combo_metodo_desagregacion.currentIndex() == 0
@@ -3178,6 +3219,9 @@ class HydroAndinaProDialog(QDialog):
                 nombres_metodos.insert(0, str(metodo_hidrograma))
                 valores_metodos.insert(0, qp_scs)
             self.canvas_comparacion_qmax.plot_comparacion_metodos(nombres_metodos, valores_metodos)
+            self._actualizar_texto_resumen_caudales()
+            if hasattr(self, "texto_resumen_hidraulica"):
+                self._actualizar_texto_resumen_hidraulica()
         except direct_discharge_methods.DirectDischargeError as e:
             QMessageBox.warning(self, "No se pudo calcular", str(e))
 
@@ -3268,6 +3312,7 @@ class HydroAndinaProDialog(QDialog):
                 resultado["tiempos_h"], resultado["caudal_m3s"], metodo_ui,
                 resultado["caudal_pico_m3s"], resultado["tiempo_pico_h"],
             )
+            self._actualizar_texto_resumen_caudales()
 
         except Exception as e:
             QMessageBox.critical(self, "Error calculando el hidrograma", str(e))
@@ -3312,6 +3357,18 @@ class HydroAndinaProDialog(QDialog):
         self.stack_estructura.addWidget(self._pagina_defensa_ribereña())
         v.addWidget(self.stack_estructura)
 
+        # Cuadro resumen: acumula TODAS las estructuras calculadas en esta
+        # pestaña en esta sesión (no solo la que está visible en el
+        # QStackedWidget en este momento), para tener de un vistazo todos
+        # los parámetros obtenidos sin tener que ir estructura por
+        # estructura. Se actualiza automáticamente al calcular cada una
+        # (ver _actualizar_texto_resumen_hidraulica).
+        v.addWidget(QLabel("<b>Cuadro resumen final — todas las estructuras calculadas en esta sesión:</b>"))
+        self.texto_resumen_hidraulica = QTextBrowser()
+        self.texto_resumen_hidraulica.setMinimumHeight(160)
+        v.addWidget(self.texto_resumen_hidraulica)
+        self._actualizar_texto_resumen_hidraulica()
+
         self._agregar_pestaña_con_scroll(tab, "8. Hidráulica y Drenaje")
 
     def _fila_fuente_datos(self, layout: QFormLayout, prefijo: str):
@@ -3347,6 +3404,55 @@ class HydroAndinaProDialog(QDialog):
         spin = getattr(self, f"spin_{prefijo}_s", None)
         if spin is not None:
             spin.setValue(s_pct / 100.0)  # de % a m/m
+
+    def _actualizar_texto_resumen_hidraulica(self):
+        """Reconstruye el cuadro resumen HTML de la Pestaña 8 (Hidráulica y
+        Drenaje) a partir de self.resultados_hidraulica_drenaje -- un
+        diccionario compartido con la Pestaña 7 (Caudales directos), así
+        que también puede incluir esa entrada si ya se calculó. Se llama
+        automáticamente después de cada cálculo de cualquier estructura,
+        para no depender de que el usuario pulse un botón aparte."""
+        etiquetas = {
+            "forma": "Forma", "n": "Manning n", "S": "Pendiente S (m/m)",
+            "Q_m3s": "Q (m³/s)", "Q_o_spread": "Q (m³/s)",
+            "tirante_normal_m": "Tirante normal (m)", "area_m2": "Área (m²)",
+            "perimetro_m": "Perímetro (m)", "radio_hidraulico_m": "Radio hidráulico (m)",
+            "ancho_superior_m": "Ancho superior (m)", "velocidad_m_s": "Velocidad (m/s)",
+            "energia_especifica_m": "Energía específica (m)", "numero_froude": "Número de Froude",
+            "tipo_flujo": "Tipo de flujo", "tirante_critico_m": "Tirante crítico (m)",
+            "pendiente_critica": "Pendiente crítica (m/m)", "b_m": "b (m)", "z": "z (H:V)", "T_m": "T (m)",
+            "subtipo": "Subtipo", "tirante_m": "Tirante (m)", "caudal_m3_s": "Caudal (m³/s)",
+            "porcentaje_lleno_area": "% de área llena", "porcentaje_lleno_altura": "% de altura llena",
+            "V_m_s": "Velocidad de diseño (m/s)", "peso_esp_roca_kN_m3": "Peso esp. de roca (kN/m³)",
+            "D50_m": "D50 (m)", "D50_cm": "D50 (cm)", "gravedad_especifica_roca": "Gravedad específica de la roca",
+            "L_m": "L (m)", "y_m": "Tirante (m)", "Cw": "Coeficiente de vertedero Cw",
+            "caudal_interceptado_m3_s": "Caudal interceptado (m³/s)", "cota_agua_m": "Cota de agua (m s.n.m.)",
+            "cota_estructura_m": "Cota de estructura (m s.n.m.)", "cota_corona_m": "Cota de corona (m s.n.m.)",
+            "borde_libre_disponible_m": "Borde libre disponible (m)", "cumple": "¿Cumple?",
+            "Temez_Q_m3s": "Q Témez (m³/s)", "MacMath_Q_m3s": "Q Mac Math (m³/s)",
+            "Creager_Q_m3s": "Q Creager (m³/s)",
+            "Qp_SCS_Snyder_Clark_m3s": "Qp SCS/Snyder/Clark (m³/s) [referencia]",
+            "spread_T_m": "Ancho de inundación T (m)", "tirante_borde_m": "Tirante en el borde (m)",
+        }
+
+        html = "<h3>Cuadro resumen final — Hidráulica y Drenaje</h3>"
+        if not self.resultados_hidraulica_drenaje:
+            html += "<p style='color:#666666'>Aún no se ha calculado ninguna estructura en esta sesión.</p>"
+        for nombre, r in self.resultados_hidraulica_drenaje.items():
+            partes = []
+            for clave, valor in r.items():
+                if clave == "tipo":
+                    continue
+                etiqueta = etiquetas.get(clave, clave.replace("_", " ").strip())
+                if isinstance(valor, float):
+                    valor_str = f"{valor:.4g}"
+                elif isinstance(valor, bool):
+                    valor_str = "Sí" if valor else "No"
+                else:
+                    valor_str = str(valor)
+                partes.append(f"{etiqueta} = {valor_str}")
+            html += f"<p><b>{nombre}</b><br>" + " &nbsp;|&nbsp; ".join(partes) + "</p><hr>"
+        self.texto_resumen_hidraulica.setHtml(html)
 
     # ---------------- Página: Canales (y Vados/Cunetas, mismo motor) ----------------
     def _pagina_canales(self, titulo: str) -> QWidget:
@@ -3488,6 +3594,7 @@ class HydroAndinaProDialog(QDialog):
                     "n": n, "S": s, "Q_o_spread": q,
                     **{k: v for k, v in res.items() if k != "advertencia"},
                 }
+                self._actualizar_texto_resumen_hidraulica()
                 return
             else:  # Irregular
                 tabla_puntos = getattr(self, f"tabla_{prefijo}_puntos")
@@ -3539,6 +3646,7 @@ class HydroAndinaProDialog(QDialog):
                 "tirante_critico_m": r.tirante_critico_m, "pendiente_critica": r.pendiente_critica,
                 **r.geometria,
             }
+            self._actualizar_texto_resumen_hidraulica()
         except Exception as e:
             lbl.setText(f"ERROR: {e}")
 
@@ -3616,6 +3724,7 @@ class HydroAndinaProDialog(QDialog):
                 "n": n, "S": s, "tirante_m": y,
                 **{k: v for k, v in r.items() if k != "advertencia"},
             }
+            self._actualizar_texto_resumen_hidraulica()
         except Exception as e:
             self.lbl_alcant_resultado.setText(f"ERROR: {e}")
 
@@ -3648,6 +3757,9 @@ class HydroAndinaProDialog(QDialog):
         lbl.setStyleSheet("font-family: monospace;")
         v.addWidget(lbl)
 
+        self.canvas_enrocado = SeccionTransversalCanvas(pagina)
+        v.addWidget(self.canvas_enrocado)
+
         def calcular():
             try:
                 expuesta = combo_exposicion.currentIndex() == 0
@@ -3658,10 +3770,12 @@ class HydroAndinaProDialog(QDialog):
                     f"Coeficiente de Isbash C = {r['coeficiente_isbash']}\n\n"
                     f"NOTA: {r['nota']}"
                 )
+                self.canvas_enrocado.plot_riprap_talud(spin_v.value(), r["D50_m"])
                 self.resultados_hidraulica_drenaje["Enrocado (RipRap)"] = {
                     "tipo": "Enrocado (RipRap)", "V_m_s": spin_v.value(), "peso_esp_roca_kN_m3": spin_peso.value(),
                     "D50_m": r["D50_m"], "D50_cm": r["D50_cm"], "gravedad_especifica_roca": r["gravedad_especifica_roca"],
                 }
+                self._actualizar_texto_resumen_hidraulica()
             except Exception as e:
                 lbl.setText(f"ERROR: {e}")
 
@@ -3695,6 +3809,9 @@ class HydroAndinaProDialog(QDialog):
         lbl.setStyleSheet("font-family: monospace;")
         v.addWidget(lbl)
 
+        self.canvas_sumidero = SeccionTransversalCanvas(pagina)
+        v.addWidget(self.canvas_sumidero)
+
         def calcular():
             try:
                 r = hydraulic_structures.sumidero_capacidad_vertedero(spin_l.value(), spin_y.value(), spin_cw.value())
@@ -3702,10 +3819,12 @@ class HydroAndinaProDialog(QDialog):
                     f"Caudal interceptado = {r['caudal_interceptado_m3_s']} m³/s\n\n"
                     f"ADVERTENCIA: {r['advertencia']}"
                 )
+                self.canvas_sumidero.plot_ventana_sumidero(spin_l.value(), spin_y.value(), r["caudal_interceptado_m3_s"])
                 self.resultados_hidraulica_drenaje["Sumidero"] = {
                     "tipo": "Sumidero", "L_m": spin_l.value(), "y_m": spin_y.value(), "Cw": spin_cw.value(),
                     "caudal_interceptado_m3_s": r["caudal_interceptado_m3_s"],
                 }
+                self._actualizar_texto_resumen_hidraulica()
             except Exception as e:
                 lbl.setText(f"ERROR: {e}")
 
@@ -3740,6 +3859,10 @@ class HydroAndinaProDialog(QDialog):
         lbl.setStyleSheet("font-family: monospace;")
         v.addWidget(lbl)
 
+        canvas_bl = SeccionTransversalCanvas(pagina)
+        v.addWidget(canvas_bl)
+        setattr(self, f"canvas_bl_{nombre_estructura}", canvas_bl)  # referencia con nombre único (Pontón/Puente)
+
         def calcular():
             try:
                 r = hydraulic_structures.verificar_borde_libre(
@@ -3751,11 +3874,14 @@ class HydroAndinaProDialog(QDialog):
                     f"(mínimo requerido = {r['borde_libre_minimo_requerido_m']} m)   [{estado}]\n"
                     f"{r['mensaje']}\n\nNOTA: {r['nota']}"
                 )
+                canvas_bl.plot_borde_libre(spin_cota_agua.value(), spin_cota_estructura.value(),
+                                            spin_bl_min.value(), nombre_estructura, r["cumple"])
                 self.resultados_hidraulica_drenaje[nombre_estructura] = {
                     "tipo": nombre_estructura, "cota_agua_m": spin_cota_agua.value(),
                     "cota_estructura_m": spin_cota_estructura.value(),
                     "borde_libre_disponible_m": r["borde_libre_disponible_m"], "cumple": r["cumple"],
                 }
+                self._actualizar_texto_resumen_hidraulica()
             except Exception as e:
                 lbl.setText(f"ERROR: {e}")
 
@@ -3794,6 +3920,11 @@ class HydroAndinaProDialog(QDialog):
         lbl.setStyleSheet("font-family: monospace;")
         v.addWidget(lbl)
 
+        self.canvas_defensa_bl = SeccionTransversalCanvas(pagina)
+        v.addWidget(self.canvas_defensa_bl)
+        self.canvas_defensa_riprap = SeccionTransversalCanvas(pagina)
+        v.addWidget(self.canvas_defensa_riprap)
+
         def calcular():
             try:
                 r_bl = hydraulic_structures.verificar_borde_libre(
@@ -3806,12 +3937,16 @@ class HydroAndinaProDialog(QDialog):
                     f"Enrocado de protección: D50 = {r_rip['D50_m']} m ({r_rip['D50_cm']} cm)\n\n"
                     f"NOTA: {r_bl['nota']}\n{r_rip['nota']}"
                 )
+                self.canvas_defensa_bl.plot_borde_libre(spin_cota_agua.value(), spin_cota_corona.value(),
+                                                         spin_bl_min.value(), "Defensa Ribereña (corona)", r_bl["cumple"])
+                self.canvas_defensa_riprap.plot_riprap_talud(spin_v.value(), r_rip["D50_m"])
                 self.resultados_hidraulica_drenaje["Defensa Ribereña"] = {
                     "tipo": "Defensa Ribereña", "cota_agua_m": spin_cota_agua.value(),
                     "cota_corona_m": spin_cota_corona.value(),
                     "borde_libre_disponible_m": r_bl["borde_libre_disponible_m"], "cumple": r_bl["cumple"],
                     "D50_m": r_rip["D50_m"], "D50_cm": r_rip["D50_cm"],
                 }
+                self._actualizar_texto_resumen_hidraulica()
             except Exception as e:
                 lbl.setText(f"ERROR: {e}")
 
