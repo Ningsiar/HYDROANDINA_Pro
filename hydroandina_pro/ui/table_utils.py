@@ -24,7 +24,7 @@ plugin_dialog.py para corregir dos problemas recurrentes de la interfaz:
 Ambas funciones son puro PyQt (sin lógica de negocio de ningún módulo de
 core/), para poder llamarlas desde cualquier pestaña sin duplicar código.
 """
-from qgis.PyQt.QtWidgets import QTableWidget, QHeaderView, QPushButton
+from qgis.PyQt.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView, QPushButton
 
 
 def ajustar_alto_tabla(tabla: QTableWidget, filas_visibles_max: int = 12, alto_minimo: int = 70) -> None:
@@ -125,3 +125,61 @@ def aplicar_columna_elastica(tabla: QTableWidget, indice_columna_larga: int, anc
             tabla.setColumnWidth(col, anchos_fijos[col])
         else:
             cabecera.setSectionResizeMode(col, QHeaderView.ResizeToContents)
+
+
+def crear_tabla_parametros(con_comentario: bool = True) -> QTableWidget:
+    """
+    Crea una QTableWidget vacía con el formato estándar de "cuadro de
+    resultado" del plugin: Parámetro | Valor | Unidad [| Comentario].
+    Reemplaza el patrón anterior (un único QLabel de texto plano
+    multilínea, con estilo font-family: monospace) usado en ~14 pestañas
+    distintas para mostrar los resultados de un cálculo -- mismo espíritu
+    que las tablas Parámetro/Símbolo/Valor/Unidad ya usadas en
+    tabla_morfo (Pestaña 2), pero sin columna de símbolo (los resultados
+    de estas páginas no tienen un símbolo algebraico corto por parámetro).
+
+    con_comentario=False omite la 4ta columna, para resultados sin
+    necesidad de una nota/advertencia por fila.
+    """
+    n_cols = 4 if con_comentario else 3
+    tabla = QTableWidget(0, n_cols)
+    encabezados = ["Parámetro", "Valor", "Unidad"] + (["Comentario"] if con_comentario else [])
+    tabla.setHorizontalHeaderLabels(encabezados)
+    cabecera = tabla.horizontalHeader()
+    cabecera.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+    cabecera.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+    cabecera.setSectionResizeMode(2, QHeaderView.Fixed)
+    tabla.setColumnWidth(2, 90)
+    if con_comentario:
+        # "Comentario" es la única columna de texto potencialmente largo
+        # (advertencias, notas); se lleva el espacio sobrante -- mismo
+        # patrón que aplicar_columna_elastica().
+        cabecera.setSectionResizeMode(3, QHeaderView.Stretch)
+    return tabla
+
+
+def poblar_tabla_parametros(tabla: QTableWidget, filas, filas_visibles_max: int = 16) -> None:
+    """
+    Llena `tabla` (creada con crear_tabla_parametros) con `filas`: una
+    tupla (parametro, valor, unidad) o (parametro, valor, unidad,
+    comentario) por fila -- el comentario se ignora si `tabla` no tiene
+    4ta columna. `valor` puede ser cualquier tipo: los float se formatean
+    con 4 cifras significativas (:.4g), el resto con str().
+
+    Recalcula también el alto de la tabla (ver ajustar_alto_tabla) para
+    que se vea completa sin scroll interno, hasta `filas_visibles_max`.
+    """
+    tabla.setRowCount(0)
+    tiene_comentario = tabla.columnCount() > 3
+    for fila in filas:
+        parametro, valor, unidad = fila[0], fila[1], fila[2]
+        comentario = fila[3] if len(fila) > 3 else ""
+        row = tabla.rowCount()
+        tabla.insertRow(row)
+        tabla.setItem(row, 0, QTableWidgetItem(str(parametro)))
+        valor_str = f"{valor:.4g}" if isinstance(valor, float) else str(valor)
+        tabla.setItem(row, 1, QTableWidgetItem(valor_str))
+        tabla.setItem(row, 2, QTableWidgetItem(str(unidad)))
+        if tiene_comentario:
+            tabla.setItem(row, 3, QTableWidgetItem(str(comentario)))
+    ajustar_alto_tabla(tabla, filas_visibles_max=filas_visibles_max)

@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.2.42
+version=0.2.43
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,24 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.2.43: formato unificado "cuadro de resultado" (Parámetro | Valor | Unidad | Comentario) en TODAS
+      las pestañas que antes mostraban resultados como un único QLabel de texto plano multilínea (estilo
+      font-family: monospace) -- 15 resultados distintos convertidos: en Hidráulica y Drenaje (Canales,
+      Alcantarilla, Enrocado, Sumidero, Pontón, Puente, Defensa Ribereña), Curva C-A-V, Hidrograma de
+      crecida (Qp/Tp), Completación mensual (Fourier/Wavelet), Control de Calidad (los 14 tests
+      estadísticos + doble masa), PMP Hershfield, Caudales directos (Témez/Mac Math/Creager),
+      Completación de datos (IDW/Regresión/Random Forest/Vector Regional), Precipitación areal
+      (IDW/RBF/Kriging) y Oferta hídrica (Budyko/balance mensual/Lutz Scholz). Nuevo
+      crear_tabla_parametros()/poblar_tabla_parametros() en ui/table_utils.py, reutilizado en las 15
+      conversiones -- misma tabla de resultados donde antes había un párrafo de texto, con su alto
+      recalculado automáticamente (ver ajustar_alto_tabla, ya usado en el resto del plugin). Además:
+      la columna "Parámetros" de tabla_distribuciones (Pestaña 5) ahora muestra el símbolo griego real de
+      cada parámetro estadístico (μ, σ, α, β, ξ, κ...) con una descripción entre paréntesis de qué
+      representa, en vez del nombre en código (mu, sigma, alpha...) -- el mapeo es específico por
+      distribución (no global) porque "alpha"/"u" significan cosas distintas según la distribución (p.ej.
+      alpha es forma en la Gamma pero escala en Gumbel y GEV); verificado contra un ajuste real de las 9
+      distribuciones con datos sintéticos, confirmando que las 17 claves de parámetro usadas en el código
+      quedan todas mapeadas.
     - v0.2.42: Pestaña "5. Precipitación Máx 24h" -- nueva sección "4. Curvas Intensidad-Duración-
       Frecuencia (IDF)", para los periodos de retorno ya establecidos. Nuevo core/idf_curves.py: las
       curvas IDF se DERIVAN de las precipitaciones de diseño P24h(Tr) ya calculadas, mediante el mismo

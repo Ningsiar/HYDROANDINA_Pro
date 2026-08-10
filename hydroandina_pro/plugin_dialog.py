@@ -59,7 +59,7 @@ from .ui.phabsim_canvas import PhabsimCanvas
 from .ui.groundwater_canvas import GroundwaterCanvas
 from .ui.well_canvas import WellCanvas
 from .ui.table_utils import (ajustar_alto_tabla, aplicar_columna_elastica, limitar_ancho_tabla,
-                              limitar_ancho_boton)
+                              limitar_ancho_boton, crear_tabla_parametros, poblar_tabla_parametros)
 
 
 def utm_epsg_for_lonlat(lon: float, lat: float) -> int:
@@ -127,6 +127,31 @@ NOMBRES_PARAMETROS_MORFOMETRIA = {
     "Oc": "Coeficiente orográfico",
     "Im": "Índice de masividad de Richter",
     "Mel": "Número de rugosidad de Melton (riesgo de flujo de detritos)",
+}
+
+# Símbolo griego + descripción breve de cada parámetro de las 9
+# distribuciones de probabilidad ajustadas en la Pestaña 5 (columna
+# "Parámetros" de tabla_distribuciones), indexado por (clave de la
+# distribución -- las mismas de core.frequency_analysis.
+# DISTRIBUCIONES_DISPONIBLES --, clave interna del parámetro en
+# DistribucionAjustada.parametros). Antes se mostraban tal cual las
+# claves en código ("mu", "sigma", "alpha"...) sin indicar qué
+# representa cada una -- y "alpha"/"u" significan cosas DISTINTAS según
+# la distribución (p.ej. alpha es forma en Gamma, pero escala en Gumbel
+# y GEV), así que el mapeo es por distribución, no global.
+SIMBOLOS_PARAMETROS_DISTRIBUCION = {
+    "normal": {"mu": "μ (media)", "sigma": "σ (desviación estándar)"},
+    "lognormal2": {"mu_log": "μ (media de ln X)", "sigma_log": "σ (desv. estándar de ln X)"},
+    "lognormal3": {"x0": "x₀ (límite inferior)", "mu_log": "μ (media de ln(X−x₀))",
+                   "sigma_log": "σ (desv. estándar de ln(X−x₀))"},
+    "gumbel": {"u": "u (posición/moda)", "alpha": "α (escala)"},
+    "loggumbel": {"u_log": "u (posición de ln X)", "alpha_log": "α (escala de ln X)"},
+    "gamma2": {"alpha": "α (forma)", "beta": "β (escala)"},
+    "gamma3_pearson3": {"media": "x̄ (media)", "s": "S (desviación estándar)",
+                         "sesgo": "Cs (coeficiente de asimetría)"},
+    "logpearson3": {"media_log10": "x̄ (media de log₁₀X)", "s_log10": "S (desv. estándar de log₁₀X)",
+                     "sesgo_log10": "Cs (sesgo de log₁₀X)"},
+    "gev": {"xi": "ξ (posición)", "alpha": "α (escala)", "kappa": "κ (forma)"},
 }
 
 # Unidad de cada parámetro, para la columna "Unidad" de la tabla de la
@@ -1913,9 +1938,8 @@ class HydroAndinaProDialog(QDialog):
         self.btn_calcular_cav.clicked.connect(self._on_calcular_cav)
         h_cav.addWidget(self.btn_calcular_cav)
         v_cav.addLayout(h_cav)
-        self.lbl_resultado_cav = QLabel("Resultado: sin calcular.")
-        self.lbl_resultado_cav.setWordWrap(True)
-        v_cav.addWidget(self.lbl_resultado_cav)
+        self.tabla_resultado_cav = crear_tabla_parametros()
+        v_cav.addWidget(self.tabla_resultado_cav)
         self.canvas_cav = CavCanvas(self)
         v_cav.addWidget(self.canvas_cav)
         v.addWidget(gb_cav)
@@ -1944,12 +1968,12 @@ class HydroAndinaProDialog(QDialog):
             )
             self.resultado_cav = resultado
             self.canvas_cav.plot_cav(resultado["curva"])
-            self.lbl_resultado_cav.setText(
-                f"Cota mín. = {resultado['z_min']} m s.n.m.   Cota máx. = {resultado['z_max']} m s.n.m.\n"
-                f"Área total = {resultado['area_total_m2'] / 1e6:.4f} km²   "
-                f"Volumen total embalsable = {resultado['volumen_total_m3'] / 1e6:.4f} hm³\n"
-                f"{resultado['nota']}"
-            )
+            poblar_tabla_parametros(self.tabla_resultado_cav, [
+                ("Cota mínima", resultado["z_min"], "m s.n.m."),
+                ("Cota máxima", resultado["z_max"], "m s.n.m."),
+                ("Área total", resultado["area_total_m2"] / 1e6, "km²"),
+                ("Volumen total embalsable", resultado["volumen_total_m3"] / 1e6, "hm³", resultado["nota"]),
+            ])
         except Exception as e:
             QMessageBox.critical(self, "Error calculando la curva C-A-V", str(e))
 
@@ -2492,10 +2516,9 @@ class HydroAndinaProDialog(QDialog):
             return
         try:
             r = funcion_test(datos)
-            texto = f"[{nombre}]\n" + "\n".join(f"  {k}: {v}" for k, v in r.items() if k != "nota")
-            if "nota" in r:
-                texto += f"\n  NOTA: {r['nota']}"
-            self.lbl_resultado_qc.setText(texto)
+            poblar_tabla_parametros(self.tabla_resultado_qc, [
+                (k, v, "") for k, v in r.items() if k != "nota"
+            ] + ([("Nota", r["nota"], "")] if "nota" in r else []))
 
             indice_marca = r.get("posicion_quiebre_candidata")
             linea_tendencia = None
@@ -2532,10 +2555,10 @@ class HydroAndinaProDialog(QDialog):
             mitad = len(datos) // 2
             periodo1, periodo2 = datos[:mitad], datos[mitad:]
             r = funcion_test(periodo1, periodo2)
-            texto = (f"[{nombre}] (periodo 1: primeros {len(periodo1)} datos; "
-                      f"periodo 2: últimos {len(periodo2)} datos)\n")
-            texto += "\n".join(f"  {k}: {v}" for k, v in r.items())
-            self.lbl_resultado_qc.setText(texto)
+            poblar_tabla_parametros(self.tabla_resultado_qc, [
+                ("Periodo 1", f"primeros {len(periodo1)} datos", ""),
+                ("Periodo 2", f"últimos {len(periodo2)} datos", ""),
+            ] + [(k, v, "") for k, v in r.items()])
 
             self.canvas_qc.plot_dos_periodos(periodo1, periodo2, nombre)
 
@@ -2615,10 +2638,8 @@ class HydroAndinaProDialog(QDialog):
         btn_wavelet.clicked.connect(self._on_completar_wavelet)
         h_comp_btn.addWidget(btn_wavelet)
         v_comp.addLayout(h_comp_btn)
-        self.lbl_resultado_completacion_mensual = QLabel("Resultado: sin calcular.")
-        self.lbl_resultado_completacion_mensual.setWordWrap(True)
-        self.lbl_resultado_completacion_mensual.setStyleSheet("font-family: monospace;")
-        v_comp.addWidget(self.lbl_resultado_completacion_mensual)
+        self.tabla_resultado_completacion_mensual = crear_tabla_parametros()
+        v_comp.addWidget(self.tabla_resultado_completacion_mensual)
         v.addWidget(gb_completacion)
 
         gb_calidad = QGroupBox("3. Control de calidad y homogeneidad")
@@ -2691,10 +2712,8 @@ class HydroAndinaProDialog(QDialog):
         h4.addWidget(btn_autocorr)
         v_cal.addLayout(h4)
 
-        self.lbl_resultado_qc = QLabel("Resultado: sin calcular.")
-        self.lbl_resultado_qc.setWordWrap(True)
-        self.lbl_resultado_qc.setStyleSheet("font-family: monospace;")
-        v_cal.addWidget(self.lbl_resultado_qc)
+        self.tabla_resultado_qc = crear_tabla_parametros()
+        v_cal.addWidget(self.tabla_resultado_qc)
 
         self.canvas_qc = QcCanvas(self)
         v_cal.addWidget(self.canvas_qc)
@@ -2713,10 +2732,8 @@ class HydroAndinaProDialog(QDialog):
         self.btn_calcular_pmp = QPushButton("Calcular PMP (Hershfield)")
         self.btn_calcular_pmp.clicked.connect(self._on_calcular_pmp)
         v_pmp.addWidget(self.btn_calcular_pmp)
-        self.lbl_resultado_pmp = QLabel("Resultado: sin calcular.")
-        self.lbl_resultado_pmp.setWordWrap(True)
-        self.lbl_resultado_pmp.setStyleSheet("font-family: monospace;")
-        v_pmp.addWidget(self.lbl_resultado_pmp)
+        self.tabla_resultado_pmp = crear_tabla_parametros()
+        v_pmp.addWidget(self.tabla_resultado_pmp)
         v.addWidget(gb_pmp)
 
         v.addWidget(QLabel("<b>5. Cuadro resumen</b> — todos los tests ejecutados en esta sesión:"))
@@ -2775,10 +2792,12 @@ class HydroAndinaProDialog(QDialog):
                 n_periodos_extension=self.spin_fourier_extension.value(),
             )
             self.serie_qc_activa = r["serie_completada"]
-            self.lbl_resultado_completacion_mensual.setText(
-                f"[Fourier] R² estacional = {r['r2_ajuste_estacional']}  ({r['n_armonicos']} armónicos)\n"
-                f"Extensión ({self.spin_fourier_extension.value()} meses): {r['extension']}\n{r['nota']}"
-            )
+            poblar_tabla_parametros(self.tabla_resultado_completacion_mensual, [
+                ("R² estacional (Fourier)", r["r2_ajuste_estacional"], "adim."),
+                ("N° de armónicos", r["n_armonicos"], ""),
+                (f"Extensión ({self.spin_fourier_extension.value()} meses)",
+                 ", ".join(str(v) for v in r["extension"]), "mm", r["nota"]),
+            ])
             self.canvas_qc.plot_serie_con_marca(self.serie_qc_activa, "Serie completada/extendida (Fourier)")
         except data_completion.DataCompletionError as e:
             QMessageBox.warning(self, "No se pudo completar", str(e))
@@ -2790,7 +2809,9 @@ class HydroAndinaProDialog(QDialog):
         try:
             r = data_completion.completar_extender_wavelet(self.serie_qc_activa)
             self.serie_qc_activa = r["serie_completada"]
-            self.lbl_resultado_completacion_mensual.setText(f"[Wavelet] {r.get('nota', '')}")
+            poblar_tabla_parametros(self.tabla_resultado_completacion_mensual, [
+                ("Método", "Wavelet", "", r.get("nota", "")),
+            ])
             self.canvas_qc.plot_serie_con_marca(self.serie_qc_activa, "Serie completada (Wavelet)")
         except data_completion.DataCompletionError as e:
             QMessageBox.warning(self, "No se pudo completar", str(e))
@@ -2812,12 +2833,13 @@ class HydroAndinaProDialog(QDialog):
             return
         try:
             r = quality_control.test_pettitt(datos)
-            self.lbl_resultado_qc.setText(
-                f"[Pettitt] Punto de cambio en la posición {r['indice_cambio']} "
-                f"(U={r['U_max']}, p≈{r['p_valor_aprox']})\n"
-                f"Media antes = {r['media_antes']}   Media después = {r['media_despues']}\n"
-                f"{r['interpretacion']}"
-            )
+            poblar_tabla_parametros(self.tabla_resultado_qc, [
+                ("Punto de cambio (posición)", r["indice_cambio"], ""),
+                ("Estadístico U máx.", r["U_max"], ""),
+                ("p (aproximado)", r["p_valor_aprox"], ""),
+                ("Media antes", r["media_antes"], ""),
+                ("Media después", r["media_despues"], "", r["interpretacion"]),
+            ])
             self.canvas_qc.plot_serie_con_marca(
                 datos, "Prueba de Pettitt", indice_marca=r["indice_cambio"],
                 etiqueta_marca=f"Quiebre (pos. {r['indice_cambio']})"
@@ -2836,10 +2858,12 @@ class HydroAndinaProDialog(QDialog):
         try:
             mk = quality_control.test_mann_kendall(datos)
             sen = quality_control.pendiente_sen(datos)
-            self.lbl_resultado_qc.setText(
-                f"[Mann-Kendall] S={mk['S']}  Z={mk['Z']}  p={mk['p_valor']}  -> tendencia {mk['tendencia']}\n"
-                f"[Sen] {sen['interpretacion']}"
-            )
+            poblar_tabla_parametros(self.tabla_resultado_qc, [
+                ("Mann-Kendall S", mk["S"], ""),
+                ("Mann-Kendall Z", mk["Z"], ""),
+                ("Mann-Kendall p", mk["p_valor"], "", f"Tendencia: {mk['tendencia']}"),
+                ("Pendiente de Sen", sen["pendiente_por_periodo"], "por periodo", sen["interpretacion"]),
+            ])
             media_serie = float(np.mean(datos))
             n = len(datos)
             intercepto_sen = media_serie - sen["pendiente_por_periodo"] * (n + 1) / 2.0
@@ -2863,11 +2887,11 @@ class HydroAndinaProDialog(QDialog):
             if texto_ref:
                 serie_ref = [float(x.strip()) for x in texto_ref.split(",") if x.strip()]
             r = quality_control.curva_doble_masa(datos, serie_ref)
-            texto = f"[Doble masa] método: {r['metodo']}\n"
-            if r["advertencia"]:
-                texto += r["advertencia"] + "\n"
-            texto += f"Pendientes de segmento (primeras 10): {r['pendientes_segmento'][:10]}"
-            self.lbl_resultado_qc.setText(texto)
+            poblar_tabla_parametros(self.tabla_resultado_qc, [
+                ("Método", r["metodo"], "", r.get("advertencia", "")),
+                ("Pendientes de segmento (primeras 10)",
+                 ", ".join(str(v) for v in r["pendientes_segmento"][:10]), ""),
+            ])
 
             self.canvas_qc.ax.clear()
             self.canvas_qc.ax.plot(r["acumulado_referencia"], r["acumulado_estacion"], "-o",
@@ -2896,14 +2920,15 @@ class HydroAndinaProDialog(QDialog):
                 datos, km=self.spin_pmp_km.value(),
                 factor_hora_fija=1.13 if self.check_pmp_hora_fija.isChecked() else 1.0,
             )
-            self.lbl_resultado_pmp.setText(
-                f"PMP 24h = {r['PMP_24h_mm']} mm  (≈{r['razon_pmp_sobre_max_observado']}× el máximo "
-                f"observado de {r['valor_maximo_observado_mm']} mm en {r['n_anios']} años)\n"
-                f"Media (sin el máximo) = {r['media_sin_maximo_mm']} mm   "
-                f"Desv. std (sin el máximo) = {r['desv_std_sin_maximo_mm']} mm   "
-                f"Km = {r['km_usado']}   factor hora fija = {r['factor_hora_fija_aplicado']}\n\n"
-                f"NOTA: {r['nota']}"
-            )
+            poblar_tabla_parametros(self.tabla_resultado_pmp, [
+                ("PMP 24h", r["PMP_24h_mm"], "mm"),
+                ("Razón PMP / máximo observado", r["razon_pmp_sobre_max_observado"], "adim."),
+                ("Máximo observado", r["valor_maximo_observado_mm"], "mm", f"en {r['n_anios']} años"),
+                ("Media (sin el máximo)", r["media_sin_maximo_mm"], "mm"),
+                ("Desv. estándar (sin el máximo)", r["desv_std_sin_maximo_mm"], "mm"),
+                ("Km usado", r["km_usado"], "adim."),
+                ("Factor hora fija aplicado", r["factor_hora_fija_aplicado"], "adim.", r["nota"]),
+            ])
         except pmp_hershfield.PmpHershfieldError as e:
             QMessageBox.warning(self, "No se pudo calcular la PMP", str(e))
 
@@ -2937,7 +2962,10 @@ class HydroAndinaProDialog(QDialog):
                     self.tabla_distribuciones.setItem(row, 3, QTableWidgetItem(""))
                     self.tabla_distribuciones.setItem(row, 4, QTableWidgetItem(""))
                 else:
-                    params_str = ", ".join(f"{k}={v:.4f}" for k, v in r["parametros"].items())
+                    simbolos = SIMBOLOS_PARAMETROS_DISTRIBUCION.get(clave, {})
+                    params_str = ", ".join(
+                        f"{simbolos.get(k, k)} = {v:.4f}" for k, v in r["parametros"].items()
+                    )
                     self.tabla_distribuciones.setItem(row, 1, QTableWidgetItem(params_str))
                     self.tabla_distribuciones.setItem(row, 2, QTableWidgetItem(str(r["D_ks"])))
                     self.tabla_distribuciones.setItem(row, 3, QTableWidgetItem(str(r["D_critico"])))
@@ -3156,8 +3184,8 @@ class HydroAndinaProDialog(QDialog):
         self.btn_calc_hidrograma.clicked.connect(self._on_calcular_hidrograma)
         v.addWidget(self.btn_calc_hidrograma)
 
-        self.lbl_resultado_qp = QLabel("Caudal pico: (aún no calculado)")
-        v.addWidget(self.lbl_resultado_qp)
+        self.tabla_resultado_qp = crear_tabla_parametros(con_comentario=False)
+        v.addWidget(self.tabla_resultado_qp)
 
         self.canvas_hidrograma = HydrographCanvas(self, width=6.5, height=4.8)
         v.addWidget(self.canvas_hidrograma)
@@ -3210,10 +3238,8 @@ class HydroAndinaProDialog(QDialog):
         h_dir_btn.addWidget(btn_calc_dir)
         v_dir.addLayout(h_dir_btn)
 
-        self.lbl_resultado_caudales_directos = QLabel("Resultado: sin calcular.")
-        self.lbl_resultado_caudales_directos.setWordWrap(True)
-        self.lbl_resultado_caudales_directos.setStyleSheet("font-family: monospace;")
-        v_dir.addWidget(self.lbl_resultado_caudales_directos)
+        self.tabla_resultado_caudales_directos = crear_tabla_parametros()
+        v_dir.addWidget(self.tabla_resultado_caudales_directos)
 
         self.canvas_comparacion_qmax = HydrographCanvas(self, width=6.5, height=4.8)
         v_dir.addWidget(self.canvas_comparacion_qmax)
@@ -3336,19 +3362,21 @@ class HydroAndinaProDialog(QDialog):
                 pendiente_cauce_pct=self.spin_dir_s.value(), coeficiente_creager=self.spin_dir_creager_c.value(),
             )
             qp_scs = self.hidrograma_resultado.get("caudal_pico_m3s") if self.hidrograma_resultado else None
-            texto = (
-                f"Témez:     Q = {r['temez']['Q_m3_s']} m³/s   (K = {r['temez']['coeficiente_uniformidad_K']})\n"
-                f"Mac Math:  Q = {r['mac_math']['Q_m3_s']} m³/s\n"
-                f"Creager:   Q = {r['creager']['Q_m3_s']} m³/s   ({r['creager']['nota']})\n"
-            )
-            if qp_scs is not None:
-                texto += f"\n(Comparar contra Qp = {qp_scs} m³/s obtenido arriba por SCS/Snyder/Clark)"
             self.resultados_hidraulica_drenaje["Caudales directos (Témez/Mac Math/Creager)"] = {
                 "tipo": "Caudales directos", "Temez_Q_m3s": r["temez"]["Q_m3_s"],
                 "MacMath_Q_m3s": r["mac_math"]["Q_m3_s"], "Creager_Q_m3s": r["creager"]["Q_m3_s"],
                 "Qp_SCS_Snyder_Clark_m3s": qp_scs,
             }
-            self.lbl_resultado_caudales_directos.setText(texto)
+            filas_directos = [
+                ("Témez", r["temez"]["Q_m3_s"], "m³/s", f"K = {r['temez']['coeficiente_uniformidad_K']}"),
+                ("Mac Math", r["mac_math"]["Q_m3_s"], "m³/s"),
+                ("Creager", r["creager"]["Q_m3_s"], "m³/s", r["creager"]["nota"]),
+            ]
+            if qp_scs is not None:
+                filas_directos.append(
+                    ("Qp SCS/Snyder/Clark (referencia, calculado arriba)", qp_scs, "m³/s")
+                )
+            poblar_tabla_parametros(self.tabla_resultado_caudales_directos, filas_directos)
 
             nombres_metodos = ["Témez", "Mac Math", "Creager"]
             valores_metodos = [r["temez"]["Q_m3_s"], r["mac_math"]["Q_m3_s"], r["creager"]["Q_m3_s"]]
@@ -3442,10 +3470,12 @@ class HydroAndinaProDialog(QDialog):
 
             self.hidrograma_resultado = resultado
             self.hidrograma_resultado["metodo"] = metodo_ui
-            self.lbl_resultado_qp.setText(
-                f"Caudal pico Qp = {resultado['caudal_pico_m3s']} m³/s, en tiempo Tp = {resultado['tiempo_pico_h']} h "
-                f"(lluvia total = {sum(hietograma):.1f} mm, lluvia efectiva = {sum(resultado['lluvia_efectiva_incr_mm']):.1f} mm)"
-            )
+            poblar_tabla_parametros(self.tabla_resultado_qp, [
+                ("Caudal pico Qp", resultado["caudal_pico_m3s"], "m³/s"),
+                ("Tiempo pico Tp", resultado["tiempo_pico_h"], "h"),
+                ("Lluvia total", sum(hietograma), "mm"),
+                ("Lluvia efectiva", sum(resultado["lluvia_efectiva_incr_mm"]), "mm"),
+            ])
             self.canvas_hidrograma.plot_hidrograma(
                 resultado["tiempos_h"], resultado["caudal_m3s"], metodo_ui,
                 resultado["caudal_pico_m3s"], resultado["tiempo_pico_h"],
@@ -3676,11 +3706,14 @@ class HydroAndinaProDialog(QDialog):
         btn_calc = QPushButton("Calcular")
         v.addWidget(btn_calc)
 
-        lbl_resultado = QLabel("Resultado: sin calcular.")
-        lbl_resultado.setWordWrap(True)
-        lbl_resultado.setStyleSheet("font-family: monospace;")
-        v.addWidget(lbl_resultado)
-        setattr(self, f"lbl_{prefijo}_resultado", lbl_resultado)
+        lbl_estado = QLabel("Estado: sin calcular.")
+        lbl_estado.setWordWrap(True)
+        v.addWidget(lbl_estado)
+        setattr(self, f"lbl_{prefijo}_estado", lbl_estado)
+
+        tabla_resultado = crear_tabla_parametros()
+        v.addWidget(tabla_resultado)
+        setattr(self, f"tabla_{prefijo}_resultado", tabla_resultado)
 
         canvas_seccion = SeccionTransversalCanvas(pagina)
         v.addWidget(canvas_seccion)
@@ -3695,36 +3728,38 @@ class HydroAndinaProDialog(QDialog):
         s = getattr(self, f"spin_{prefijo}_s").value()
         q = getattr(self, f"spin_{prefijo}_q").value()
         forma = combo_forma.currentText()
-        lbl = getattr(self, f"lbl_{prefijo}_resultado")
+        lbl_estado = getattr(self, f"lbl_{prefijo}_estado")
+        tabla_resultado = getattr(self, f"tabla_{prefijo}_resultado")
         try:
             if forma.startswith("Rectangular"):
                 r = hydraulic_structures.canal_rectangular_maxima_eficiencia(n, s, q=q)
-                extra = f"b = {r.geometria['b_m']} m (b = 2y)"
+                extra = "b = 2y (máxima eficiencia)"
             elif forma.startswith("Triangular"):
                 r = hydraulic_structures.canal_triangular_maxima_eficiencia(n, s, q=q)
-                extra = f"z = {r.geometria['z']} (taludes a 45°)"
+                extra = "taludes a 45° (máxima eficiencia)"
             elif forma == "Trapezoidal (máx. eficiencia)":
                 r = hydraulic_structures.canal_trapezoidal_maxima_eficiencia(n, s, q=q)
-                extra = f"b = {r.geometria['b_m']} m, z = {r.geometria['z']} (semihexágono)"
+                extra = "semihexágono (máxima eficiencia)"
             elif forma == "Trapezoidal (geometría dada)":
                 b = getattr(self, f"spin_{prefijo}_b").value()
                 z = getattr(self, f"spin_{prefijo}_z").value()
                 r = hydraulic_structures.canal_trapezoidal_general(n, s, b, z, q=q)
-                extra = f"b = {b} m, z = {z} (ingresados por el usuario)"
+                extra = "geometría ingresada por el usuario"
             elif forma == "Parabólico":
                 t = getattr(self, f"spin_{prefijo}_t").value()
                 r = hydraulic_structures.canal_parabolico(n, s, t, q=q)
-                extra = f"T = {t} m"
+                extra = ""
             elif forma.startswith("Gutter"):
                 sx = getattr(self, f"spin_{prefijo}_sx").value()
                 res = hydraulic_structures.cuneta_vial_hec22(n, s, sx, q=q)
-                lbl.setText(
-                    "Cuneta vial (FHWA HEC-22):\n"
-                    f"  Ancho de inundación (spread) T = {res['spread_T_m']} m\n"
-                    f"  Tirante en el borde = {res['tirante_borde_m']} m\n"
-                    f"  Área = {res['area_m2']} m²   Velocidad = {res['velocidad_m_s']} m/s\n"
-                    f"  Caudal = {res['caudal_m3_s']} m³/s"
-                )
+                lbl_estado.setText(f"Estado: calculado (Cuneta vial FHWA HEC-22). {res.get('advertencia', '')}")
+                poblar_tabla_parametros(tabla_resultado, [
+                    ("Ancho de inundación (spread) T", res["spread_T_m"], "m"),
+                    ("Tirante en el borde", res["tirante_borde_m"], "m"),
+                    ("Área", res["area_m2"], "m²"),
+                    ("Velocidad", res["velocidad_m_s"], "m/s"),
+                    ("Caudal", res["caudal_m3_s"], "m³/s"),
+                ])
                 canvas = getattr(self, f"canvas_{prefijo}_seccion")
                 canvas.plot_triangular(1.0 / sx, res["tirante_borde_m"])
                 self.resultados_hidraulica_drenaje[f"Canal/cuneta - {forma}"] = {
@@ -3749,15 +3784,20 @@ class HydroAndinaProDialog(QDialog):
                 r = hydraulic_structures.canal_irregular(n, s, puntos, q=q)
                 extra = f"{len(puntos)} puntos de sección ingresados"
 
-            lbl.setText(
-                f"{r.forma}  [{extra}]\n"
-                f"  Tirante normal y = {r.y_m} m\n"
-                f"  Área = {r.area_m2} m²   Perímetro mojado = {r.perimetro_m} m   "
-                f"Radio hidráulico = {r.radio_hidraulico_m} m   Ancho superior = {r.ancho_superior_m} m\n"
-                f"  Velocidad = {r.velocidad_m_s} m/s   Energía específica = {r.energia_especifica_m} m\n"
-                f"  Número de Froude = {r.numero_froude}  ({r.tipo_flujo})\n"
-                f"  Tirante crítico = {r.tirante_critico_m} m   Pendiente crítica = {r.pendiente_critica} m/m"
-            )
+            lbl_estado.setText(f"Estado: calculado ({r.forma}).")
+            poblar_tabla_parametros(tabla_resultado, [
+                ("Forma", r.forma, "", extra),
+                ("Tirante normal y", r.y_m, "m"),
+                ("Área", r.area_m2, "m²"),
+                ("Perímetro mojado", r.perimetro_m, "m"),
+                ("Radio hidráulico", r.radio_hidraulico_m, "m"),
+                ("Ancho superior", r.ancho_superior_m, "m"),
+                ("Velocidad", r.velocidad_m_s, "m/s"),
+                ("Energía específica", r.energia_especifica_m, "m"),
+                ("Número de Froude", r.numero_froude, "adim.", r.tipo_flujo),
+                ("Tirante crítico", r.tirante_critico_m, "m"),
+                ("Pendiente crítica", r.pendiente_critica, "m/m"),
+            ])
 
             canvas = getattr(self, f"canvas_{prefijo}_seccion")
             if forma.startswith("Rectangular"):
@@ -3786,7 +3826,7 @@ class HydroAndinaProDialog(QDialog):
             }
             self._actualizar_texto_resumen_hidraulica()
         except Exception as e:
-            lbl.setText(f"ERROR: {e}")
+            lbl_estado.setText(f"Estado: ERROR -- {e}")
 
     # ---------------- Página: Alcantarilla ----------------
     def _pagina_alcantarilla(self) -> QWidget:
@@ -3821,19 +3861,20 @@ class HydroAndinaProDialog(QDialog):
 
         btn = QPushButton("Calcular capacidad")
         v.addWidget(btn)
-        lbl = QLabel("Resultado: sin calcular.")
-        lbl.setWordWrap(True)
-        lbl.setStyleSheet("font-family: monospace;")
-        v.addWidget(lbl)
+        lbl_estado = QLabel("Estado: sin calcular.")
+        lbl_estado.setWordWrap(True)
+        v.addWidget(lbl_estado)
 
         self.canvas_alcant_seccion = SeccionTransversalCanvas(pagina)
         v.addWidget(self.canvas_alcant_seccion)
+        self.tabla_alcant_resultado = crear_tabla_parametros()
+        v.addWidget(self.tabla_alcant_resultado)
 
         self.spin_alcant_n, self.spin_alcant_s = spin_n, spin_s
         self.combo_alcant_tipo = combo_tipo
         self.spin_alcant_diametro, self.spin_alcant_ancho = spin_diametro, spin_ancho
         self.spin_alcant_alto, self.spin_alcant_y = spin_alto, spin_y
-        self.lbl_alcant_resultado = lbl
+        self.lbl_alcant_resultado = lbl_estado
 
         btn.clicked.connect(self._on_calcular_alcantarilla)
         return pagina
@@ -3843,20 +3884,23 @@ class HydroAndinaProDialog(QDialog):
             n, s, y = self.spin_alcant_n.value(), self.spin_alcant_s.value(), self.spin_alcant_y.value()
             if self.combo_alcant_tipo.currentText().startswith("Circular"):
                 r = hydraulic_structures.alcantarilla_circular_capacidad(n, s, self.spin_alcant_diametro.value(), y)
-                extra_pct = f"% de área llena = {r['porcentaje_lleno_area']}%"
+                etiqueta_pct, valor_pct = "% de área llena", r["porcentaje_lleno_area"]
                 self.canvas_alcant_seccion.plot_circular(self.spin_alcant_diametro.value(), y)
             else:
                 r = hydraulic_structures.alcantarilla_cajon_capacidad(
                     n, s, self.spin_alcant_ancho.value(), self.spin_alcant_alto.value(), y
                 )
-                extra_pct = f"% de altura llena = {r['porcentaje_lleno_altura']}%"
+                etiqueta_pct, valor_pct = "% de altura llena", r["porcentaje_lleno_altura"]
                 self.canvas_alcant_seccion.plot_cajon(self.spin_alcant_ancho.value(), self.spin_alcant_alto.value(), y)
-            self.lbl_alcant_resultado.setText(
-                f"Área = {r['area_m2']} m²   Perímetro = {r['perimetro_m']} m   "
-                f"Radio hidráulico = {r['radio_hidraulico_m']} m ({extra_pct})\n"
-                f"Caudal (capacidad) = {r['caudal_m3_s']} m³/s   Velocidad = {r['velocidad_m_s']} m/s\n\n"
-                f"ADVERTENCIA: {r['advertencia']}"
-            )
+            self.lbl_alcant_resultado.setText(f"Estado: calculado. {r['advertencia']}")
+            poblar_tabla_parametros(self.tabla_alcant_resultado, [
+                ("Área", r["area_m2"], "m²"),
+                ("Perímetro", r["perimetro_m"], "m"),
+                ("Radio hidráulico", r["radio_hidraulico_m"], "m"),
+                (etiqueta_pct, valor_pct, "%"),
+                ("Caudal (capacidad)", r["caudal_m3_s"], "m³/s"),
+                ("Velocidad", r["velocidad_m_s"], "m/s"),
+            ])
             self.resultados_hidraulica_drenaje[f"Alcantarilla - {self.combo_alcant_tipo.currentText()}"] = {
                 "tipo": "Alcantarilla", "subtipo": self.combo_alcant_tipo.currentText(),
                 "n": n, "S": s, "tirante_m": y,
@@ -3864,7 +3908,7 @@ class HydroAndinaProDialog(QDialog):
             }
             self._actualizar_texto_resumen_hidraulica()
         except Exception as e:
-            self.lbl_alcant_resultado.setText(f"ERROR: {e}")
+            self.lbl_alcant_resultado.setText(f"Estado: ERROR -- {e}")
 
     # ---------------- Página: Enrocado (RipRap) ----------------
     def _pagina_enrocado(self) -> QWidget:
@@ -3890,24 +3934,26 @@ class HydroAndinaProDialog(QDialog):
 
         btn = QPushButton("Calcular D50")
         v.addWidget(btn)
-        lbl = QLabel("Resultado: sin calcular.")
-        lbl.setWordWrap(True)
-        lbl.setStyleSheet("font-family: monospace;")
-        v.addWidget(lbl)
+        lbl_estado = QLabel("Estado: sin calcular.")
+        lbl_estado.setWordWrap(True)
+        v.addWidget(lbl_estado)
 
         self.canvas_enrocado = SeccionTransversalCanvas(pagina)
         v.addWidget(self.canvas_enrocado)
+        tabla_resultado = crear_tabla_parametros()
+        v.addWidget(tabla_resultado)
 
         def calcular():
             try:
                 expuesta = combo_exposicion.currentIndex() == 0
                 r = hydraulic_structures.enrocado_isbash(spin_v.value(), spin_peso.value(), expuesta)
-                lbl.setText(
-                    f"D50 = {r['D50_m']} m ({r['D50_cm']} cm)\n"
-                    f"Gravedad específica de la roca = {r['gravedad_especifica_roca']}   "
-                    f"Coeficiente de Isbash C = {r['coeficiente_isbash']}\n\n"
-                    f"NOTA: {r['nota']}"
-                )
+                lbl_estado.setText("Estado: calculado.")
+                poblar_tabla_parametros(tabla_resultado, [
+                    ("D50", r["D50_m"], "m"),
+                    ("D50", r["D50_cm"], "cm"),
+                    ("Gravedad específica de la roca", r["gravedad_especifica_roca"], "adim."),
+                    ("Coeficiente de Isbash C", r["coeficiente_isbash"], "adim.", r["nota"]),
+                ])
                 self.canvas_enrocado.plot_riprap_talud(spin_v.value(), r["D50_m"])
                 self.resultados_hidraulica_drenaje["Enrocado (RipRap)"] = {
                     "tipo": "Enrocado (RipRap)", "V_m_s": spin_v.value(), "peso_esp_roca_kN_m3": spin_peso.value(),
@@ -3915,7 +3961,7 @@ class HydroAndinaProDialog(QDialog):
                 }
                 self._actualizar_texto_resumen_hidraulica()
             except Exception as e:
-                lbl.setText(f"ERROR: {e}")
+                lbl_estado.setText(f"Estado: ERROR -- {e}")
 
         btn.clicked.connect(calcular)
         return pagina
@@ -3942,21 +3988,22 @@ class HydroAndinaProDialog(QDialog):
 
         btn = QPushButton("Calcular capacidad de intercepción")
         v.addWidget(btn)
-        lbl = QLabel("Resultado: sin calcular.")
-        lbl.setWordWrap(True)
-        lbl.setStyleSheet("font-family: monospace;")
-        v.addWidget(lbl)
+        lbl_estado = QLabel("Estado: sin calcular.")
+        lbl_estado.setWordWrap(True)
+        v.addWidget(lbl_estado)
 
         self.canvas_sumidero = SeccionTransversalCanvas(pagina)
         v.addWidget(self.canvas_sumidero)
+        tabla_resultado = crear_tabla_parametros()
+        v.addWidget(tabla_resultado)
 
         def calcular():
             try:
                 r = hydraulic_structures.sumidero_capacidad_vertedero(spin_l.value(), spin_y.value(), spin_cw.value())
-                lbl.setText(
-                    f"Caudal interceptado = {r['caudal_interceptado_m3_s']} m³/s\n\n"
-                    f"ADVERTENCIA: {r['advertencia']}"
-                )
+                lbl_estado.setText(f"Estado: calculado. {r['advertencia']}")
+                poblar_tabla_parametros(tabla_resultado, [
+                    ("Caudal interceptado", r["caudal_interceptado_m3_s"], "m³/s"),
+                ])
                 self.canvas_sumidero.plot_ventana_sumidero(spin_l.value(), spin_y.value(), r["caudal_interceptado_m3_s"])
                 self.resultados_hidraulica_drenaje["Sumidero"] = {
                     "tipo": "Sumidero", "L_m": spin_l.value(), "y_m": spin_y.value(), "Cw": spin_cw.value(),
@@ -3964,7 +4011,7 @@ class HydroAndinaProDialog(QDialog):
                 }
                 self._actualizar_texto_resumen_hidraulica()
             except Exception as e:
-                lbl.setText(f"ERROR: {e}")
+                lbl_estado.setText(f"Estado: ERROR -- {e}")
 
         btn.clicked.connect(calcular)
         return pagina
@@ -3992,14 +4039,15 @@ class HydroAndinaProDialog(QDialog):
 
         btn = QPushButton("Verificar borde libre")
         v.addWidget(btn)
-        lbl = QLabel("Resultado: sin calcular.")
-        lbl.setWordWrap(True)
-        lbl.setStyleSheet("font-family: monospace;")
-        v.addWidget(lbl)
+        lbl_estado = QLabel("Estado: sin calcular.")
+        lbl_estado.setWordWrap(True)
+        v.addWidget(lbl_estado)
 
         canvas_bl = SeccionTransversalCanvas(pagina)
         v.addWidget(canvas_bl)
         setattr(self, f"canvas_bl_{nombre_estructura}", canvas_bl)  # referencia con nombre único (Pontón/Puente)
+        tabla_resultado = crear_tabla_parametros()
+        v.addWidget(tabla_resultado)
 
         def calcular():
             try:
@@ -4007,11 +4055,12 @@ class HydroAndinaProDialog(QDialog):
                     spin_cota_agua.value(), spin_cota_estructura.value(), spin_bl_min.value()
                 )
                 estado = "✔ CUMPLE" if r["cumple"] else "✘ NO CUMPLE"
-                lbl.setText(
-                    f"Borde libre disponible = {r['borde_libre_disponible_m']} m "
-                    f"(mínimo requerido = {r['borde_libre_minimo_requerido_m']} m)   [{estado}]\n"
-                    f"{r['mensaje']}\n\nNOTA: {r['nota']}"
-                )
+                lbl_estado.setText(f"Estado: {estado} -- {r['mensaje']}")
+                poblar_tabla_parametros(tabla_resultado, [
+                    ("Borde libre disponible", r["borde_libre_disponible_m"], "m"),
+                    ("Borde libre mínimo requerido", r["borde_libre_minimo_requerido_m"], "m"),
+                    ("¿Cumple?", "Sí" if r["cumple"] else "No", "", r["nota"]),
+                ])
                 canvas_bl.plot_borde_libre(spin_cota_agua.value(), spin_cota_estructura.value(),
                                             spin_bl_min.value(), nombre_estructura, r["cumple"])
                 self.resultados_hidraulica_drenaje[nombre_estructura] = {
@@ -4021,7 +4070,7 @@ class HydroAndinaProDialog(QDialog):
                 }
                 self._actualizar_texto_resumen_hidraulica()
             except Exception as e:
-                lbl.setText(f"ERROR: {e}")
+                lbl_estado.setText(f"Estado: ERROR -- {e}")
 
         btn.clicked.connect(calcular)
         return pagina
@@ -4053,15 +4102,16 @@ class HydroAndinaProDialog(QDialog):
 
         btn = QPushButton("Verificar")
         v.addWidget(btn)
-        lbl = QLabel("Resultado: sin calcular.")
-        lbl.setWordWrap(True)
-        lbl.setStyleSheet("font-family: monospace;")
-        v.addWidget(lbl)
+        lbl_estado = QLabel("Estado: sin calcular.")
+        lbl_estado.setWordWrap(True)
+        v.addWidget(lbl_estado)
 
         self.canvas_defensa_bl = SeccionTransversalCanvas(pagina)
         v.addWidget(self.canvas_defensa_bl)
         self.canvas_defensa_riprap = SeccionTransversalCanvas(pagina)
         v.addWidget(self.canvas_defensa_riprap)
+        tabla_resultado = crear_tabla_parametros()
+        v.addWidget(tabla_resultado)
 
         def calcular():
             try:
@@ -4070,11 +4120,13 @@ class HydroAndinaProDialog(QDialog):
                 )
                 r_rip = hydraulic_structures.enrocado_isbash(spin_v.value(), spin_peso.value(), roca_expuesta=True)
                 estado = "✔ CUMPLE" if r_bl["cumple"] else "✘ NO CUMPLE"
-                lbl.setText(
-                    f"Borde libre disponible = {r_bl['borde_libre_disponible_m']} m   [{estado}]\n"
-                    f"Enrocado de protección: D50 = {r_rip['D50_m']} m ({r_rip['D50_cm']} cm)\n\n"
-                    f"NOTA: {r_bl['nota']}\n{r_rip['nota']}"
-                )
+                lbl_estado.setText(f"Estado: {estado}")
+                poblar_tabla_parametros(tabla_resultado, [
+                    ("Borde libre disponible", r_bl["borde_libre_disponible_m"], "m", r_bl["nota"]),
+                    ("¿Cumple?", "Sí" if r_bl["cumple"] else "No", ""),
+                    ("D50 del enrocado de protección", r_rip["D50_m"], "m"),
+                    ("D50 del enrocado de protección", r_rip["D50_cm"], "cm", r_rip["nota"]),
+                ])
                 self.canvas_defensa_bl.plot_borde_libre(spin_cota_agua.value(), spin_cota_corona.value(),
                                                          spin_bl_min.value(), "Defensa Ribereña (corona)", r_bl["cumple"])
                 self.canvas_defensa_riprap.plot_riprap_talud(spin_v.value(), r_rip["D50_m"])
@@ -4086,7 +4138,7 @@ class HydroAndinaProDialog(QDialog):
                 }
                 self._actualizar_texto_resumen_hidraulica()
             except Exception as e:
-                lbl.setText(f"ERROR: {e}")
+                lbl_estado.setText(f"Estado: ERROR -- {e}")
 
         btn.clicked.connect(calcular)
         return pagina
@@ -4154,10 +4206,8 @@ class HydroAndinaProDialog(QDialog):
             h.addWidget(btn)
         v.addLayout(h)
 
-        self.lbl_resultado_completacion = QLabel("Resultado: sin calcular.")
-        self.lbl_resultado_completacion.setWordWrap(True)
-        self.lbl_resultado_completacion.setStyleSheet("font-family: monospace;")
-        v.addWidget(self.lbl_resultado_completacion)
+        self.tabla_resultado_completacion = crear_tabla_parametros()
+        v.addWidget(self.tabla_resultado_completacion)
         return pagina
 
     def _parsear_series_multiestacion(self, texto: str) -> dict:
@@ -4179,10 +4229,11 @@ class HydroAndinaProDialog(QDialog):
             objetivo = self.edit_completacion_objetivo.text().strip()
             if metodo == "vr":
                 r = data_completion.completar_vector_regional(series)
-                self.lbl_resultado_completacion.setText(
-                    f"[Vector Regional] índice regional por periodo: {r['indice_regional_por_periodo']}\n"
-                    f"Series completadas: {r['series_completadas']}"
-                )
+                poblar_tabla_parametros(self.tabla_resultado_completacion, [
+                    ("Método", "Vector Regional", ""),
+                    ("Índice regional por periodo", str(r["indice_regional_por_periodo"]), ""),
+                    ("Series completadas", str(r["series_completadas"]), ""),
+                ])
                 return
             if not objetivo:
                 QMessageBox.warning(self, "Falta la estación objetivo", "Indique el nombre de la estación a completar.")
@@ -4195,19 +4246,26 @@ class HydroAndinaProDialog(QDialog):
                         x, y = xy.split(",")
                         coords[nom.strip()] = (float(x), float(y))
                 r = data_completion.completar_idw(series, coords, objetivo)
-                self.lbl_resultado_completacion.setText(f"[IDW] Serie completada de '{objetivo}': {r}")
+                poblar_tabla_parametros(self.tabla_resultado_completacion, [
+                    ("Método", "IDW", ""),
+                    (f"Serie completada de '{objetivo}'", str(r), ""),
+                ])
             elif metodo == "regresion":
                 r = data_completion.completar_regresion_multiple(series, objetivo)
-                self.lbl_resultado_completacion.setText(
-                    f"[Regresión Múltiple] R²={r['r2_ajuste']}  coeficientes={r['coeficientes']}\n"
-                    f"Serie completada: {r['serie_completada']}"
-                )
+                poblar_tabla_parametros(self.tabla_resultado_completacion, [
+                    ("Método", "Regresión Múltiple", ""),
+                    ("R² de ajuste", r["r2_ajuste"], "adim."),
+                    ("Coeficientes", str(r["coeficientes"]), ""),
+                    ("Serie completada", str(r["serie_completada"]), ""),
+                ])
             else:  # rf
                 r = data_completion.completar_random_forest(series, objetivo)
-                self.lbl_resultado_completacion.setText(
-                    f"[Random Forest] R²(entrenamiento)={r['r2_ajuste_entrenamiento']}  "
-                    f"importancia={r['importancia_variables']}\nSerie completada: {r['serie_completada']}"
-                )
+                poblar_tabla_parametros(self.tabla_resultado_completacion, [
+                    ("Método", "Random Forest", ""),
+                    ("R² (entrenamiento)", r["r2_ajuste_entrenamiento"], "adim."),
+                    ("Importancia de variables", str(r["importancia_variables"]), ""),
+                    ("Serie completada", str(r["serie_completada"]), ""),
+                ])
         except (data_completion.DataCompletionError, ValueError) as e:
             QMessageBox.warning(self, "No se pudo completar", str(e))
 
@@ -4233,10 +4291,8 @@ class HydroAndinaProDialog(QDialog):
             h.addWidget(btn)
         v.addLayout(h)
 
-        self.lbl_resultado_areal = QLabel("Resultado: sin calcular.")
-        self.lbl_resultado_areal.setWordWrap(True)
-        self.lbl_resultado_areal.setStyleSheet("font-family: monospace;")
-        v.addWidget(self.lbl_resultado_areal)
+        self.tabla_resultado_areal = crear_tabla_parametros()
+        v.addWidget(self.tabla_resultado_areal)
         return pagina
 
     def _obtener_vertices_cuenca_activa(self):
@@ -4284,11 +4340,14 @@ class HydroAndinaProDialog(QDialog):
                 r = areal_precipitation.precipitacion_rbf(valores, coords, vertices)
             else:
                 r = areal_precipitation.precipitacion_kriging_ordinario(valores, coords, vertices)
-            self.lbl_resultado_areal.setText(
-                f"[{metodo.upper()}] Precipitación areal = {r['precipitacion_areal_mm']} mm  "
-                f"({r.get('n_puntos_grilla', '?')} puntos de grilla)"
-                + (f"\nVariograma: {r['variograma_ajustado']}\n{r['nota']}" if "variograma_ajustado" in r else "")
-            )
+            filas_areal = [
+                ("Método", metodo.upper(), ""),
+                ("Precipitación areal", r["precipitacion_areal_mm"], "mm"),
+                ("Puntos de grilla", r.get("n_puntos_grilla", "?"), ""),
+            ]
+            if "variograma_ajustado" in r:
+                filas_areal.append(("Variograma ajustado", str(r["variograma_ajustado"]), "", r.get("nota", "")))
+            poblar_tabla_parametros(self.tabla_resultado_areal, filas_areal)
         except (areal_precipitation.ArealPrecipitationError, ValueError) as e:
             QMessageBox.warning(self, "No se pudo calcular", str(e))
 
@@ -4338,10 +4397,8 @@ class HydroAndinaProDialog(QDialog):
 
         btn_calc = QPushButton("Calcular")
         v.addWidget(btn_calc)
-        self.lbl_resultado_oferta = QLabel("Resultado: sin calcular.")
-        self.lbl_resultado_oferta.setWordWrap(True)
-        self.lbl_resultado_oferta.setStyleSheet("font-family: monospace;")
-        v.addWidget(self.lbl_resultado_oferta)
+        self.tabla_resultado_oferta = crear_tabla_parametros()
+        v.addWidget(self.tabla_resultado_oferta)
 
         btn_calc.clicked.connect(lambda: self._on_calcular_oferta_hidrica(combo_modelo.currentIndex()))
         return pagina
@@ -4350,11 +4407,12 @@ class HydroAndinaProDialog(QDialog):
         try:
             if indice_modelo == 0:
                 r = water_yield.balance_budyko_fu(self.spin_of_p.value(), self.spin_of_pet.value(), self.spin_of_w.value())
-                self.lbl_resultado_oferta.setText(
-                    f"Índice de aridez = {r['indice_aridez_PET_P']}\n"
-                    f"AET = {r['AET_mm']} mm   Escorrentía = {r['escorrentia_mm']} mm   "
-                    f"Coef. de escorrentía = {r['coeficiente_escorrentia']}"
-                )
+                poblar_tabla_parametros(self.tabla_resultado_oferta, [
+                    ("Índice de aridez (PET/P)", r["indice_aridez_PET_P"], "adim."),
+                    ("AET", r["AET_mm"], "mm"),
+                    ("Escorrentía", r["escorrentia_mm"], "mm"),
+                    ("Coeficiente de escorrentía", r["coeficiente_escorrentia"], "adim."),
+                ])
                 return
             p_mensual = [float(x) for x in self.edit_of_p_mensual.text().split(",") if x.strip()]
             etp_mensual = [float(x) for x in self.edit_of_etp_mensual.text().split(",") if x.strip()]
@@ -4363,17 +4421,18 @@ class HydroAndinaProDialog(QDialog):
                 return
             if indice_modelo == 1:
                 r = water_yield.balance_mensual_simplificado(p_mensual, etp_mensual, self.spin_of_x1.value(), self.spin_of_x2.value())
-                self.lbl_resultado_oferta.setText(
-                    f"Caudal medio mensual = {r['caudal_medio_mensual_mm']} mm\n"
-                    f"Caudal mensual: {r['caudal_mensual_mm']}\n\nNOTA: {r['nota']}"
-                )
+                poblar_tabla_parametros(self.tabla_resultado_oferta, [
+                    ("Caudal medio mensual", r["caudal_medio_mensual_mm"], "mm"),
+                    ("Caudal mensual", str(r["caudal_mensual_mm"]), "mm", r["nota"]),
+                ])
             else:
                 r = water_yield.balance_lutz_scholz(p_mensual, etp_mensual, self.spin_of_a.value(),
                                                      self.spin_of_b.value(), self.spin_of_area.value())
-                self.lbl_resultado_oferta.setText(
-                    f"Caudal medio = {r['caudal_medio_m3s']} m³/s\nPersistencia: {r['persistencia']}\n"
-                    f"Caudal mensual (m³/s): {r['caudal_mensual_m3s']}\n\nNOTA: {r['nota']}"
-                )
+                poblar_tabla_parametros(self.tabla_resultado_oferta, [
+                    ("Caudal medio", r["caudal_medio_m3s"], "m³/s"),
+                    ("Persistencia", str(r["persistencia"]), ""),
+                    ("Caudal mensual", str(r["caudal_mensual_m3s"]), "m³/s", r["nota"]),
+                ])
         except (water_yield.WaterYieldError, ValueError) as e:
             QMessageBox.warning(self, "No se pudo calcular", str(e))
 
