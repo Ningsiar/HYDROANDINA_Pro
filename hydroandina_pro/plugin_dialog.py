@@ -56,6 +56,7 @@ from .ui.low_flow_canvas import LowFlowCanvas
 from .ui.phabsim_canvas import PhabsimCanvas
 from .ui.groundwater_canvas import GroundwaterCanvas
 from .ui.well_canvas import WellCanvas
+from .ui.table_utils import ajustar_alto_tabla, aplicar_columna_elastica, limitar_ancho_tabla
 
 
 def utm_epsg_for_lonlat(lon: float, lat: float) -> int:
@@ -1165,6 +1166,11 @@ class HydroAndinaProDialog(QDialog):
             # Guardar todo para exportación y para la pestaña 4 (Tc)
             self.morfometria_resultados = {"g1": g1, "g2": g2, "g5": g5, "g6": g6, "lc_km": lc_km}
 
+            # Recalcula el alto de la tabla ahora que tiene ~30 filas (se
+            # construyó con 0 filas y nunca recalculaba su alto, quedando
+            # con el alto por defecto de Qt para 0 filas).
+            ajustar_alto_tabla(self.tabla_morfo, filas_visibles_max=14)
+
             if g6["alerta_flujo_detritos"]:
                 QMessageBox.warning(self, "Alerta de flujo de detritos", g6["mensaje_alerta"])
 
@@ -1194,7 +1200,14 @@ class HydroAndinaProDialog(QDialog):
             self.tabla_cn.setItem(i, 3, QTableWidgetItem(str(uso.cn_c)))
             self.tabla_cn.setItem(i, 4, QTableWidgetItem(str(uso.cn_d)))
             self.tabla_cn.setItem(i, 5, QTableWidgetItem("0.0"))
-        self.tabla_cn.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        # "Uso de suelo" tiene nombres largos (hasta ~49 caracteres, p.ej.
+        # "Pastos naturales (ichu / ratio pobre-degradado)"); en
+        # ResizeToContents puro esa columna sumada a las otras 5 puede
+        # superar el ancho de la ventana. Se le da esa columna en Stretch
+        # (absorbe el espacio sobrante) y el resto queda angosto y fijo.
+        aplicar_columna_elastica(self.tabla_cn, indice_columna_larga=0,
+                                  anchos_fijos={1: 55, 2: 55, 3: 55, 4: 55, 5: 95})
+        ajustar_alto_tabla(self.tabla_cn, filas_visibles_max=10)
         v.addWidget(self.tabla_cn)
 
         h = QHBoxLayout()
@@ -1287,7 +1300,11 @@ class HydroAndinaProDialog(QDialog):
         self.tabla_desglose_cn_auto.setHorizontalHeaderLabels(
             ["Uso de suelo (ESA WorldCover)", "Grupo hidrológico", "Área (km²)", "CN"]
         )
-        self.tabla_desglose_cn_auto.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        # "Uso de suelo (ESA WorldCover)" trae nombres de clase de cobertura
+        # de longitud variable; en Stretch absorbe el espacio sobrante y
+        # evita que la suma de las 4 columnas supere el ancho de la ventana.
+        aplicar_columna_elastica(self.tabla_desglose_cn_auto, indice_columna_larga=0,
+                                  anchos_fijos={1: 110, 2: 90, 3: 55})
         v.addWidget(self.tabla_desglose_cn_auto)
 
         self._agregar_pestaña_con_scroll(tab, "3. Número de Curva SCS")
@@ -1320,6 +1337,7 @@ class HydroAndinaProDialog(QDialog):
                 self.tabla_desglose_cn_auto.setItem(r, 1, QTableWidgetItem(""))
                 self.tabla_desglose_cn_auto.setItem(r, 2, QTableWidgetItem(str(fila["area_km2"])))
                 self.tabla_desglose_cn_auto.setItem(r, 3, QTableWidgetItem(str(fila["cn"])))
+            ajustar_alto_tabla(self.tabla_desglose_cn_auto, filas_visibles_max=10)
 
             QgsProject.instance().addMapLayer(resultado["capa_cn_vectorizada"])
 
@@ -1385,6 +1403,7 @@ class HydroAndinaProDialog(QDialog):
                 self.tabla_desglose_cn_auto.setItem(r, 1, QTableWidgetItem(fila["hsg"]))
                 self.tabla_desglose_cn_auto.setItem(r, 2, QTableWidgetItem(str(fila["area_km2"])))
                 self.tabla_desglose_cn_auto.setItem(r, 3, QTableWidgetItem(str(fila["cn"])))
+            ajustar_alto_tabla(self.tabla_desglose_cn_auto, filas_visibles_max=10)
 
             cn_ii = resultado["cn_ii_ponderado"]
             amc = curve_number.condiciones_amc(cn_ii)
@@ -2293,7 +2312,12 @@ class HydroAndinaProDialog(QDialog):
         v.addWidget(QLabel("<b>5. Cuadro resumen</b> — todos los tests ejecutados en esta sesión:"))
         self.tabla_resumen_qc = QTableWidget(0, 4)
         self.tabla_resumen_qc.setHorizontalHeaderLabels(["Test", "Categoría", "Estadístico principal", "Conclusión"])
-        self.tabla_resumen_qc.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        # "Conclusión" trae una frase completa por test (longitud variable);
+        # se deja en Stretch para que absorba el espacio sobrante, evitando
+        # que la fila con la conclusión más larga empuje la tabla más allá
+        # del ancho de la ventana (hasta 14 tests posibles, uno por fila).
+        aplicar_columna_elastica(self.tabla_resumen_qc, indice_columna_larga=3,
+                                  anchos_fijos={0: 190, 1: 150, 2: 140})
         v.addWidget(self.tabla_resumen_qc)
 
         self._agregar_pestaña_con_scroll(tab, "6. Precipitación Media Mensual")
@@ -2368,6 +2392,9 @@ class HydroAndinaProDialog(QDialog):
         self.tabla_resumen_qc.setItem(row, 1, QTableWidgetItem(categoria))
         self.tabla_resumen_qc.setItem(row, 2, QTableWidgetItem(str(estadistico)))
         self.tabla_resumen_qc.setItem(row, 3, QTableWidgetItem(conclusion))
+        # Hasta 14 tests posibles: se construyó con 0 filas y nunca
+        # recalculaba su alto, quedando con el alto por defecto de Qt.
+        ajustar_alto_tabla(self.tabla_resumen_qc, filas_visibles_max=14)
 
     def _on_qc_pettitt(self):
         datos = self._obtener_serie_activa()
@@ -2506,6 +2533,12 @@ class HydroAndinaProDialog(QDialog):
                     self.tabla_distribuciones.setItem(row, 3, QTableWidgetItem(str(r["D_critico"])))
                     self.tabla_distribuciones.setItem(row, 4, QTableWidgetItem("Sí" if r["pasa_ks"] else "No"))
 
+            # Recalcula el alto de la tabla ahora que tiene filas (una por
+            # distribución, hasta 9): se construyó con 0 filas y nunca
+            # recalculaba su alto, quedando con el alto por defecto de Qt
+            # para 0 filas -- solo se veían 2-3 distribuciones a la vez.
+            ajustar_alto_tabla(self.tabla_distribuciones, filas_visibles_max=10)
+
             if mejor is None:
                 QMessageBox.warning(self, "Sin ajuste válido",
                                      "Ninguna distribución pudo ajustarse a la serie proporcionada.")
@@ -2584,6 +2617,14 @@ class HydroAndinaProDialog(QDialog):
         # columna de nombres de distribución (encabezado vertical).
         self.tabla_comparacion_distribuciones.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.tabla_comparacion_distribuciones.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        # Esta tabla puede crecer sin límite en columnas (una por cada
+        # "T-Diseño" agregado) y en filas (una por distribución, hasta 9).
+        # Se limita su ancho máximo para que sea ella la que muestre scroll
+        # horizontal interno en vez de ensanchar toda la pestaña, y se
+        # recalcula su alto para que las distribuciones no queden
+        # comprimidas con un scroll interno diminuto.
+        limitar_ancho_tabla(self.tabla_comparacion_distribuciones, ancho_maximo=880)
+        ajustar_alto_tabla(self.tabla_comparacion_distribuciones, filas_visibles_max=10)
         self.canvas_comparacion_tr.plot_comparacion_tr(tabla_comp, self.resultados_frecuencia,
                                                         self.mejor_ajuste_clave, escala_log=True)
         self.canvas_comparacion_tr_cartesiano.plot_comparacion_tr(tabla_comp, self.resultados_frecuencia,
@@ -4008,7 +4049,10 @@ class HydroAndinaProDialog(QDialog):
         self.tabla_resultados_socavacion = QTableWidget(0, 6)
         self.tabla_resultados_socavacion.setHorizontalHeaderLabels(
             ["Sección", "Método", "Tipo", "Profundidad ds (m)", "Cota socavada (m)", "Observación"])
-        self.tabla_resultados_socavacion.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        # "Observación" trae texto explicativo de longitud variable; se deja
+        # en Stretch para que no empuje la tabla más allá del ancho de la
+        # ventana cuando el método gobernante trae una nota más larga.
+        aplicar_columna_elastica(self.tabla_resultados_socavacion, indice_columna_larga=5)
         self.tabla_resultados_socavacion.setMinimumHeight(200)
         v_r.addWidget(self.tabla_resultados_socavacion)
 
@@ -5033,7 +5077,10 @@ class HydroAndinaProDialog(QDialog):
         self.tabla_resultados_sedimentos = QTableWidget(0, 5)
         self.tabla_resultados_sedimentos.setHorizontalHeaderLabels(
             ["Sección", "Método", "Tipo", "Tasa de transporte", "Observación"])
-        self.tabla_resultados_sedimentos.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        # "Observación" trae texto explicativo de longitud variable (p.ej.
+        # la advertencia de Einstein-Brown cuando Psi<1); en Stretch para
+        # que no empuje la tabla más allá del ancho de la ventana.
+        aplicar_columna_elastica(self.tabla_resultados_sedimentos, indice_columna_larga=4)
         self.tabla_resultados_sedimentos.setMinimumHeight(200)
         v_r.addWidget(self.tabla_resultados_sedimentos)
 
@@ -5479,7 +5526,10 @@ class HydroAndinaProDialog(QDialog):
         self.tabla_resultados_flujo = QTableWidget(0, 5)
         self.tabla_resultados_flujo.setHorizontalHeaderLabels(
             ["Método", "Tirante h (m)", "Velocidad V (m/s)", "Froude", "Observación"])
-        self.tabla_resultados_flujo.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        # "Observación" trae texto explicativo de longitud variable; en
+        # Stretch para que no empuje la tabla más allá del ancho de la
+        # ventana.
+        aplicar_columna_elastica(self.tabla_resultados_flujo, indice_columna_larga=4)
         self.tabla_resultados_flujo.setMinimumHeight(150)
         v_r.addWidget(self.tabla_resultados_flujo)
 
@@ -5855,7 +5905,11 @@ class HydroAndinaProDialog(QDialog):
 
         self.tabla_parametros_qm = QTableWidget(0, 4)
         self.tabla_parametros_qm.setHorizontalHeaderLabels(["Parámetro", "Valor inicial", "Mínimo (calibración)", "Máximo (calibración)"])
-        self.tabla_parametros_qm.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        # "Parámetro" trae nombres de coeficientes de modelo de longitud
+        # variable (distintos entre Lutz Scholz, GR2M, GR4J, HBV, SAC-SMA,
+        # SNOW-SD...); en Stretch para no forzar scroll horizontal en la
+        # pestaña cuando el modelo elegido tiene nombres más largos.
+        aplicar_columna_elastica(self.tabla_parametros_qm, indice_columna_larga=0)
         self.tabla_parametros_qm.horizontalHeader().setStretchLastSection(False)
         self.tabla_parametros_qm.setMinimumHeight(220)
         v_modelo.addWidget(self.tabla_parametros_qm)
@@ -6355,16 +6409,19 @@ class HydroAndinaProDialog(QDialog):
         v_hsi_v = QVBoxLayout(); v_hsi_v.addWidget(QLabel("<b>Velocidad</b> (m/s, idoneidad 0-1):"))
         self.tabla_hsi_velocidad = TablaPegable(8, 2)
         self.tabla_hsi_velocidad.setHorizontalHeaderLabels(["Velocidad (m/s)", "Idoneidad (0-1)"])
+        ajustar_alto_tabla(self.tabla_hsi_velocidad, filas_visibles_max=10)
         v_hsi_v.addWidget(self.tabla_hsi_velocidad)
         h_hsi_tablas.addLayout(v_hsi_v)
         v_hsi_d = QVBoxLayout(); v_hsi_d.addWidget(QLabel("<b>Profundidad</b> (m, idoneidad 0-1):"))
         self.tabla_hsi_profundidad = TablaPegable(8, 2)
         self.tabla_hsi_profundidad.setHorizontalHeaderLabels(["Tirante (m)", "Idoneidad (0-1)"])
+        ajustar_alto_tabla(self.tabla_hsi_profundidad, filas_visibles_max=10)
         v_hsi_d.addWidget(self.tabla_hsi_profundidad)
         h_hsi_tablas.addLayout(v_hsi_d)
         v_hsi_s = QVBoxLayout(); v_hsi_s.addWidget(QLabel("<b>Sustrato</b> (código, idoneidad 0-1):"))
         self.tabla_hsi_sustrato = TablaPegable(8, 2)
         self.tabla_hsi_sustrato.setHorizontalHeaderLabels(["Código sustrato", "Idoneidad (0-1)"])
+        ajustar_alto_tabla(self.tabla_hsi_sustrato, filas_visibles_max=10)
         v_hsi_s.addWidget(self.tabla_hsi_sustrato)
         h_hsi_tablas.addLayout(v_hsi_s)
         v_hsi.addLayout(h_hsi_tablas)
@@ -6488,6 +6545,10 @@ class HydroAndinaProDialog(QDialog):
             for i, (x, y) in enumerate(pares):
                 tabla.setItem(i, 0, QTableWidgetItem(f"{x:g}"))
                 tabla.setItem(i, 1, QTableWidgetItem(f"{y:g}"))
+            # Esta carga cambia rowCount directamente (sin pasar por el
+            # pegado de TablaPegable), así que necesita su propio recálculo
+            # de alto: algunas curvas de referencia traen más de 8 puntos.
+            ajustar_alto_tabla(tabla, filas_visibles_max=10)
 
         _llenar(self.tabla_hsi_velocidad, curvas["velocidad"])
         _llenar(self.tabla_hsi_profundidad, curvas["profundidad"])

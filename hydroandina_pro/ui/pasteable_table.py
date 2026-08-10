@@ -17,6 +17,8 @@ from typing import List
 from qgis.PyQt.QtWidgets import QTableWidget, QTableWidgetItem, QApplication
 from qgis.PyQt.QtGui import QKeySequence
 
+from .table_utils import ajustar_alto_tabla
+
 
 def parsear_texto_portapapeles(texto: str) -> List[List[str]]:
     """
@@ -77,6 +79,14 @@ class TablaPegable(QTableWidget):
                 if col >= self.columnCount():
                     continue
                 self.setItem(fila_inicial + i, col, QTableWidgetItem(valor.strip()))
+
+        # Si el pegado agregó filas, el alto mínimo de la tabla (fijado al
+        # construirla, pensando en su número de filas inicial) puede haber
+        # quedado corto para el nuevo contenido -- se recalcula para que
+        # las filas pegadas de más no queden ocultas tras un scroll interno
+        # diminuto. ajustar_alto_tabla() nunca reduce un alto ya fijado,
+        # solo lo aumenta si el contenido real lo necesita.
+        ajustar_alto_tabla(self, filas_visibles_max=20)
 
     def _copiar_a_portapapeles(self):
         seleccion = self.selectedRanges()

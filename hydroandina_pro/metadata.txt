@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.2.35
+version=0.2.36
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,34 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.2.36: corrección de dos causas de fondo, no cubiertas por los ajustes puntuales de anchos/altos
+      de la v0.2.33-35: (1) ALTO — varias tablas de resultados (tabla_distribuciones de "Pmax24h" con las
+      9 distribuciones ajustadas, tabla_morfo con los ~30 parámetros de morfometría, tabla_desglose_cn_auto,
+      tabla_comparacion_distribuciones, tabla_resumen_qc de control de calidad, y las 3 tablas HSI de
+      PHABSIM) se construían con 0 filas y nunca recalculaban su alto al poblarse con resultados en tiempo
+      de ejecución -- se quedaban con el alto por defecto de Qt (pensado para 0 filas), mostrando solo
+      2-3 de las N filas reales con un scroll interno diminuto y fácil de pasar por alto. Se agregó
+      ui/table_utils.py con ajustar_alto_tabla() (recalcula el alto mínimo según el número de filas real,
+      hasta un máximo configurable de filas visibles antes de permitir scroll interno a propósito; nunca
+      reduce un alto ya fijado a mano) y se llama después de cada punto de la interfaz que pobla una de
+      estas tablas. Además, TablaPegable (ui/pasteable_table.py, usada en las 21 tablas con pegado estilo
+      Excel del plugin) ahora llama a ajustar_alto_tabla() automáticamente cada vez que un pegado agrega
+      filas -- antes, pegar más filas de las que había al construir la tabla las dejaba con el mismo alto
+      chico de siempre. (2) ANCHO — 7 tablas con TODAS sus columnas en modo ResizeToContents (sin ninguna
+      en Stretch que absorbiera el espacio sobrante) podían sumar un ancho natural mayor al de la ventana
+      cuando alguna columna tenía texto de longitud variable (tabla_cn y tabla_desglose_cn_auto: nombres
+      de uso de suelo; tabla_resumen_qc: columna "Conclusión"; tabla_resultados_socavacion/_sedimentos/
+      _flujo: columna "Observación"; tabla_parametros_qm: nombres de parámetros de calibración, distintos
+      por modelo de caudales medios). Se agregó aplicar_columna_elastica() (mismo patrón "columnas angostas
+      fijas + una columna de texto largo en Stretch" ya validado en tabla_morfo/tabla_tc/tabla_distribuciones
+      desde la v0.2.35) a las 7. Para tabla_comparacion_distribuciones (matriz distribución x Tr que puede
+      crecer sin límite en columnas, una por cada "T-Diseño" agregado) se usó en cambio
+      limitar_ancho_tabla() -- topa el ancho máximo de la tabla para que sea ella la que muestre su propio
+      scroll horizontal interno, en vez de ensanchar toda la pestaña. Verificado con una prueba funcional
+      aislada (PyQt5 real, sin depender de un entorno QGIS) que instancia QTableWidget/TablaPegable reales
+      y confirma los tres comportamientos: el alto crece al poblar filas, se topa con scroll interno más
+      allá del máximo configurado, nunca reduce un alto ya fijado a mano, y el pegado hace crecer el alto
+      igual que agregar filas manualmente.
     - v0.2.35: extendida la corrección de anchos/altos de tabla de la v0.2.34 a TODAS las pestañas, de la
       2 a la 19. TABLAS: se corrigieron las 6 tablas restantes con encabezado completo en modo Stretch
       (tabla_cn y tabla_amc en Pestaña 3, tabla_desglose_cn_auto en Pestaña 3, tabla_resumen_hipsometrica
