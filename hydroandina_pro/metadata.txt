@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.2.38
+version=0.2.39
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,25 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.2.39: causa raíz encontrada de por qué la Pestaña 3 (y en realidad casi todo el plugin) seguía
+      necesitando scroll horizontal después de la v0.2.38: 44 de las 161 etiquetas descriptivas (QLabel)
+      del plugin -- casi siempre el párrafo de introducción al inicio de cada pestaña, o los textos de
+      instrucciones dentro de un QGroupBox -- se agregaban SIN setWordWrap(True). Sin ajuste de línea,
+      Qt calcula el ancho "natural" de una QLabel como el párrafo COMPLETO en una sola línea: se midió
+      con PyQt5 real que estas 44 etiquetas iban de 826px hasta 4148px de ancho natural (varias veces el
+      ancho de la ventana, 980px) -- eran, con diferencia, el mayor causante del desborde horizontal de
+      TODAS las pestañas, más que cualquier tabla o botón corregido en versiones anteriores. Verificado
+      con un caso real (el texto de "Curve Number Generator" de la Pestaña 3): sin word-wrap exige
+      1356px de ancho mínimo; con word-wrap, solo 83px (la palabra más larga) -- el resto del texto
+      crece en ALTO, no en ANCHO, que es el comportamiento correcto para un párrafo dentro de una
+      ventana de ancho fijo. Se corrigieron las 44 (más 7 casos puntuales ya corregidos a mano en la
+      v0.2.38, dentro de un QFormLayout.addRow()) con un script de transformación verificado paso a paso
+      (conteo de QLabel preservado 161->161, conteo de setWordWrap +43, sintaxis y diff revisados antes
+      de aplicar) en vez de 44 ediciones manuales, para reducir el riesgo de error humano en un cambio
+      de este tamaño. Afecta prácticamente todas las pestañas del plugin (1, 2, 3, 4, 5, 6, 7, 8, Módulos
+      Avanzados, Socavación, Pérdida en Suelos, Sedimentos, Flujos Hiperconcentrados, Cambio Climático,
+      Caudales Medios, Caudales Mínimos, PHABSIM, Flujo Subterráneo, Hidráulica de Pozos, Exportar/
+      Reportes), no solo la Pestaña 3 reportada.
     - v0.2.38: Pestaña "3. Número de Curva SCS" -- corregidos 2 problemas de proporción reportados con
       captura de pantalla. (1) La matriz "Uso de suelo" (tabla_cn) se veía desproporcionadamente ancha,
       más que la propia ventana (con scroll horizontal visible): la v0.2.36 le había puesto la columna

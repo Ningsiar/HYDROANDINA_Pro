@@ -496,12 +496,14 @@ class HydroAndinaProDialog(QDialog):
         # --- Mapa web (basemap) con control de transparencia ---
         gb_mapa_web = QGroupBox("3b. Mapa web de referencia (opcional)")
         v_mw = QVBoxLayout(gb_mapa_web)
-        v_mw.addWidget(QLabel(
+        _lbl_auto_1 = QLabel(
             "Añade un mapa web (OpenStreetMap u otro) como capa de fondo en el proyecto, con un "
             "control de transparencia para superponer el MDE y la red de drenaje encima sin perder "
             "la referencia geográfica. Útil para ubicar visualmente el punto de salida sobre la "
             "red, antes de delimitar."
-        ))
+        )
+        _lbl_auto_1.setWordWrap(True)
+        v_mw.addWidget(_lbl_auto_1)
         h_mw = QHBoxLayout()
         self.combo_basemap = QComboBox()
         self.combo_basemap.addItems([
@@ -530,11 +532,13 @@ class HydroAndinaProDialog(QDialog):
         gb_run = QGroupBox("4. Procesamiento y delimitación (2 pasos)")
         f4 = QFormLayout(gb_run)
         f4.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
-        f4.addRow(QLabel(
+        lbl_paso_a = QLabel(
             "<b>Paso A:</b> Genera la red de drenaje con orden de Strahler sobre el MDE. "
             "Esto le permite ver la red ANTES de delimitar, y elegir/ajustar el punto de salida "
             "sobre un cauce real visible en el mapa."
-        ))
+        )
+        lbl_paso_a.setWordWrap(True)
+        f4.addRow(lbl_paso_a)
         self.spin_umbral = QSpinBox()
         self.spin_umbral.setRange(1, 100000)
         self.spin_umbral.setValue(25)
@@ -545,10 +549,12 @@ class HydroAndinaProDialog(QDialog):
         limitar_ancho_boton(self.btn_generar_red)
         f4.addRow(self.btn_generar_red)
 
-        f4.addRow(QLabel(
+        lbl_paso_b = QLabel(
             "<b>Paso B:</b> Con la red ya visible en el mapa, seleccione/ajuste el break point "
             "sobre un cauce, y pulse el botón de abajo para delimitar la cuenca desde ese punto."
-        ))
+        )
+        lbl_paso_b.setWordWrap(True)
+        f4.addRow(lbl_paso_b)
 
         self.spin_smooth_offset = QDoubleSpinBox()
         self.spin_smooth_offset.setRange(0.0, 0.5)
@@ -578,11 +584,13 @@ class HydroAndinaProDialog(QDialog):
         gb_cuencas = QGroupBox("5. Cuencas delimitadas en esta sesión")
         f5 = QFormLayout(gb_cuencas)
         f5.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
-        f5.addRow(QLabel(
+        lbl_cuencas_guardadas = QLabel(
             "Cada vez que se delimita una cuenca queda guardada aquí con un nombre numerado "
             "secuencialmente (Cuenca 1, Cuenca 2, ...); seleccione cualquiera del menú para "
             "volver a activarla como la cuenca de trabajo para el resto de pestañas."
-        ))
+        )
+        lbl_cuencas_guardadas.setWordWrap(True)
+        f5.addRow(lbl_cuencas_guardadas)
         self.combo_cuenca_activa = QComboBox()
         self.combo_cuenca_activa.addItem("(ninguna cuenca delimitada todavía)")
         self.combo_cuenca_activa.currentIndexChanged.connect(self._on_cambiar_cuenca_activa)
@@ -1392,12 +1400,14 @@ class HydroAndinaProDialog(QDialog):
         tab = QWidget()
         v = QVBoxLayout(tab)
 
-        v.addWidget(QLabel(
+        _lbl_auto_2 = QLabel(
             "Matriz de uso de suelo x Grupo Hidrológico (A/B/C/D). Valores por defecto "
             "orientativos para condiciones altoandinas/Puna; edite el área (km²) de cada "
             "cobertura presente en su cuenca y verifique los CN contra una fuente local antes "
             "de un diseño definitivo."
-        ))
+        )
+        _lbl_auto_2.setWordWrap(True)
+        v.addWidget(_lbl_auto_2)
 
         # Columnas: Uso de suelo, CN-A..D, % cuenca (nueva, editable) y
         # Área (km²) -- el % permite distribuir el Área total ya calculada
@@ -1468,13 +1478,15 @@ class HydroAndinaProDialog(QDialog):
         )
         f_cng = QFormLayout(gb_cn_generator)
         f_cng.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
-        f_cng.addRow(QLabel(
+        lbl_cn_generator_info = QLabel(
             "Requiere tener instalado el plugin <b>Curve Number Generator</b> (Complementos &gt; "
             "Administrar e instalar complementos &gt; busque 'Curve Number Generator'). Descarga "
             "automáticamente ESA WorldCover 2021 y HYSOGs250m (ORNL) para la cuenca delimitada, y "
             "calcula el CN directamente — no requiere indicar ningún ráster manualmente.\n"
             "Si el plugin no está instalado, use el método alternativo más abajo."
-        ))
+        )
+        lbl_cn_generator_info.setWordWrap(True)
+        f_cng.addRow(lbl_cn_generator_info)
         self.combo_cng_condicion = QComboBox()
         self.combo_cng_condicion.addItems(["Fair (recomendado si no está seguro)", "Poor", "Good"])
         f_cng.addRow("Condición hidrológica:", self.combo_cng_condicion)
@@ -1502,14 +1514,16 @@ class HydroAndinaProDialog(QDialog):
         )
         f_auto_cn = QFormLayout(gb_auto_cn)
         f_auto_cn.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
-        f_auto_cn.addRow(QLabel(
+        lbl_auto_cn_info = QLabel(
             "A. Uso y cobertura de suelo (LULC): ESA WorldCover 10 m, obtenido automáticamente vía "
             "el catálogo STAC de AWS Earth Search (recorte remoto a la cuenca, sin descargar el "
             "mosaico global completo).\n"
             "B. Grupo Hidrológico de Suelo (HSG A/B/C/D): HYSOGs250m (ORNL DAAC) — indique abajo la "
             "ruta local o URL del GeoTIFF (no se encontró un catálogo STAC público estable para "
             "este dataset; ver docstring de core/landcover_soils.py)."
-        ))
+        )
+        lbl_auto_cn_info.setWordWrap(True)
+        f_auto_cn.addRow(lbl_auto_cn_info)
         self.edit_hsg_ruta = QLineEdit()
         self.edit_hsg_ruta.setPlaceholderText(
             "Ruta local o URL http(s) al GeoTIFF de HYSOGs250m (p.ej. descargado de https://doi.org/10.3334/ORNLDAAC/1566)"
@@ -1862,11 +1876,13 @@ class HydroAndinaProDialog(QDialog):
         v.addWidget(self.tabla_tc)
         self.grupo_radio_metodo = QButtonGroup(self)
 
-        v.addWidget(QLabel(
+        _lbl_auto_3 = QLabel(
             "Curva hipsométrica (Grupo 4) — eje X: % de área acumulada de la cuenca; "
             "eje Y: altitud real (m s.n.m.). Curva suavizada (interpolación monótona) "
             "para una lectura de alto impacto visual."
-        ))
+        )
+        _lbl_auto_3.setWordWrap(True)
+        v.addWidget(_lbl_auto_3)
         self.canvas_hipsometrica = HypsometricCanvas(self, width=6, height=4.6)
         v.addWidget(self.canvas_hipsometrica)
 
@@ -1902,11 +1918,13 @@ class HydroAndinaProDialog(QDialog):
         v_cav.addWidget(self.canvas_cav)
         v.addWidget(gb_cav)
 
-        v.addWidget(QLabel(
+        _lbl_auto_4 = QLabel(
             "Nota: la exportación de la curva hipsométrica y de todos los demás resultados (todos "
             "los formatos, reporte Word y proyecto portable) se centralizó en la pestaña "
             "\"Exportar / Reportes\", justo antes de Créditos."
-        ))
+        )
+        _lbl_auto_4.setWordWrap(True)
+        v.addWidget(_lbl_auto_4)
 
         self._agregar_pestaña_con_scroll(tab, "4. Tiempo de concentración y Lag Time")
 
@@ -2051,12 +2069,14 @@ class HydroAndinaProDialog(QDialog):
         tab = QWidget()
         v = QVBoxLayout(tab)
 
-        v.addWidget(QLabel(
+        _lbl_auto_5 = QLabel(
             "Análisis de frecuencia de precipitación máxima en 24 horas: ajuste de distribuciones "
             "de probabilidad (Normal, Log-Normal, Gumbel, Log-Pearson III, GEV), prueba de bondad "
             "de ajuste de Kolmogorov-Smirnov, y precipitaciones de diseño para Tr = 2 a 1000 años. "
             "El resultado se enlaza automáticamente a la pestaña 6 para generar caudales máximos."
-        ))
+        )
+        _lbl_auto_5.setWordWrap(True)
+        v.addWidget(_lbl_auto_5)
 
         gb_fuente = QGroupBox("1. Fuente de datos: serie de máximos anuales P24h")
         f = QFormLayout(gb_fuente)
@@ -2102,10 +2122,12 @@ class HydroAndinaProDialog(QDialog):
 
         gb_manual = QGroupBox("1b. O ingrese/pegue los datos directamente en esta tabla")
         v_manual = QVBoxLayout(gb_manual)
-        v_manual.addWidget(QLabel(
+        _lbl_auto_6 = QLabel(
             "Escriba año y P24 (mm) en cada fila, o copie un rango de dos columnas desde Excel/LibreOffice "
             "y péguelo aquí con Ctrl+V (haga clic primero en la celda donde debe empezar el pegado)."
-        ))
+        )
+        _lbl_auto_6.setWordWrap(True)
+        v_manual.addWidget(_lbl_auto_6)
 
         self.tabla_entrada_manual = TablaPegable(30, 2)
         self.tabla_entrada_manual.setHorizontalHeaderLabels(["Año", "P24 (mm)"])
@@ -2146,10 +2168,12 @@ class HydroAndinaProDialog(QDialog):
         v_manual.addLayout(h_botones_tabla)
         v.addWidget(gb_manual)
 
-        v.addWidget(QLabel(
+        _lbl_auto_7 = QLabel(
             "Nota: el control de calidad y homogeneidad (Pettitt, Mann-Kendall, etc.) y la PMP de "
             "Hershfield se movieron a la nueva pestaña \"6. Precipitación Media Mensual\"."
-        ))
+        )
+        _lbl_auto_7.setWordWrap(True)
+        v.addWidget(_lbl_auto_7)
 
         gb_analisis = QGroupBox("2. Análisis de frecuencia")
         h_a = QHBoxLayout(gb_analisis)
@@ -2206,23 +2230,27 @@ class HydroAndinaProDialog(QDialog):
         h_tdis.addWidget(self.btn_agregar_t_disenio)
         v.addWidget(gb_tdis)
 
-        v.addWidget(QLabel(
+        _lbl_auto_8 = QLabel(
             "3. Comparación entre distribuciones — Pmax 24h (mm) vs. periodo de retorno Tr, para "
             "TODAS las distribuciones ajustadas (incluido cualquier T-Diseño agregado arriba). "
             "Use esta tabla y el gráfico para comparar las magnitudes entre distribuciones y decidir, "
             "con criterio hidrológico además del puramente estadístico (KS), cuál adoptar para el "
             "caudal máximo de diseño."
-        ))
+        )
+        _lbl_auto_8.setWordWrap(True)
+        v.addWidget(_lbl_auto_8)
         self.tabla_comparacion_distribuciones = QTableWidget(0, 0)
         v.addWidget(self.tabla_comparacion_distribuciones)
 
         self.canvas_comparacion_tr = FrequencyCanvas(self, width=6.5, height=4.8)
         v.addWidget(self.canvas_comparacion_tr)
 
-        v.addWidget(QLabel(
+        _lbl_auto_9 = QLabel(
             "Mismo gráfico anterior, pero con el eje de periodo de retorno en escala cartesiana "
             "(lineal) en vez de logarítmica:"
-        ))
+        )
+        _lbl_auto_9.setWordWrap(True)
+        v.addWidget(_lbl_auto_9)
         self.canvas_comparacion_tr_cartesiano = FrequencyCanvas(self, width=6.5, height=4.8)
         v.addWidget(self.canvas_comparacion_tr_cartesiano)
 
@@ -2390,18 +2418,22 @@ class HydroAndinaProDialog(QDialog):
     def _build_tab_precipitacion_mensual(self):
         tab = QWidget()
         v = QVBoxLayout(tab)
-        v.addWidget(QLabel(
+        _lbl_auto_10 = QLabel(
             "<b>Precipitación Media Mensual</b> — ingreso de datos mensuales, completación/extensión "
             "de series, y control de calidad y homogeneidad (independiente de la serie de máximos "
             "anuales de la pestaña 5, aunque puede reutilizarla con el botón de abajo)."
-        ))
+        )
+        _lbl_auto_10.setWordWrap(True)
+        v.addWidget(_lbl_auto_10)
 
         gb_datos = QGroupBox("1. Datos de precipitación media mensual")
         v_datos = QVBoxLayout(gb_datos)
-        v_datos.addWidget(QLabel(
+        _lbl_auto_11 = QLabel(
             "Una fila por año: columna Año + 12 columnas de meses (mm). Pegue directamente desde "
             "Excel/LibreOffice (Ctrl+V, haga clic primero en la celda donde debe empezar el pegado)."
-        ))
+        )
+        _lbl_auto_11.setWordWrap(True)
+        v_datos.addWidget(_lbl_auto_11)
         self.tabla_precip_mensual = TablaPegable(60, 13)
         self.tabla_precip_mensual.setHorizontalHeaderLabels(
             ["Año", "Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
@@ -2424,10 +2456,12 @@ class HydroAndinaProDialog(QDialog):
 
         gb_completacion = QGroupBox("2. Completación y extensión de datos")
         v_comp = QVBoxLayout(gb_completacion)
-        v_comp.addWidget(QLabel(
+        _lbl_auto_12 = QLabel(
             "Aplica sobre la serie mensual activa (paso 1). 'NaN' en la tabla se trata como dato "
             "faltante a completar."
-        ))
+        )
+        _lbl_auto_12.setWordWrap(True)
+        v_comp.addWidget(_lbl_auto_12)
         f_comp = QFormLayout()
         f_comp.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
         self.spin_fourier_armonicos = QSpinBox(); self.spin_fourier_armonicos.setRange(1, 6); self.spin_fourier_armonicos.setValue(3)
@@ -2451,10 +2485,12 @@ class HydroAndinaProDialog(QDialog):
 
         gb_calidad = QGroupBox("3. Control de calidad y homogeneidad")
         v_cal = QVBoxLayout(gb_calidad)
-        v_cal.addWidget(QLabel(
+        _lbl_auto_13 = QLabel(
             "Se aplica sobre la serie activa (paso 1, o la ya completada del paso 2). Cada test "
             "queda registrado en el cuadro resumen del final de la pestaña."
-        ))
+        )
+        _lbl_auto_13.setWordWrap(True)
+        v_cal.addWidget(_lbl_auto_13)
         h_cal_ref = QHBoxLayout()
         self.edit_serie_referencia_dm = QLineEdit()
         self.edit_serie_referencia_dm.setPlaceholderText(
@@ -2873,12 +2909,14 @@ class HydroAndinaProDialog(QDialog):
         tab = QWidget()
         v = QVBoxLayout(tab)
 
-        v.addWidget(QLabel(
+        _lbl_auto_14 = QLabel(
             "Estimación empírica de caudales de crecida por transformación lluvia-escorrentía, "
             "replicando los tres métodos que también ofrece HEC-HMS: SCS (triangular), Snyder y "
             "Clark (área-tiempo + embalse lineal). Requiere haber calculado la morfometría (pestaña 2) "
             "y, para las pérdidas por infiltración, el número de curva (pestaña 3)."
-        ))
+        )
+        _lbl_auto_14.setWordWrap(True)
+        v.addWidget(_lbl_auto_14)
 
         gb_auto = QGroupBox("Generar hietograma automáticamente desde la Pestaña 5 (Precipitación Máx 24h)")
         f_auto = QFormLayout(gb_auto)
@@ -2991,10 +3029,12 @@ class HydroAndinaProDialog(QDialog):
             "para comparar contra el caudal SCS/Snyder/Clark de arriba"
         )
         v_dir = QVBoxLayout(gb_directos)
-        v_dir.addWidget(QLabel(
+        _lbl_auto_15 = QLabel(
             "Use el botón para autocompletar C, I, A, Tc y S con los valores ya calculados en otras "
             "pestañas (ediítelos si lo desea antes de calcular)."
-        ))
+        )
+        _lbl_auto_15.setWordWrap(True)
+        v_dir.addWidget(_lbl_auto_15)
         f_dir = QFormLayout()
         f_dir.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
         self.spin_dir_c = QDoubleSpinBox()
@@ -3239,11 +3279,13 @@ class HydroAndinaProDialog(QDialog):
         tab = QWidget()
         v = QVBoxLayout(tab)
 
-        v.addWidget(QLabel(
+        _lbl_auto_16 = QLabel(
             "<b>Hidráulica y Drenaje</b> — dimensionamiento/verificación de estructuras de drenaje. "
             "El caudal de entrada puede tomarse del caudal pico calculado en la pestaña 6, y la "
             "pendiente/rugosidad de referencia, de la morfometría (pestañas 1/2)."
-        ))
+        )
+        _lbl_auto_16.setWordWrap(True)
+        v.addWidget(_lbl_auto_16)
 
         h_sel = QHBoxLayout()
         h_sel.addWidget(QLabel("Estructura hidráulica:"))
@@ -3504,10 +3546,12 @@ class HydroAndinaProDialog(QDialog):
     def _pagina_alcantarilla(self) -> QWidget:
         pagina = QWidget()
         v = QVBoxLayout(pagina)
-        v.addWidget(QLabel(
+        _lbl_auto_17 = QLabel(
             "<b>Alcantarilla</b> — capacidad en régimen uniforme (Manning). NO reemplaza la "
             "verificación de control de entrada (inlet control); ver advertencia en el resultado."
-        ))
+        )
+        _lbl_auto_17.setWordWrap(True)
+        v.addWidget(_lbl_auto_17)
         f = QFormLayout()
         f.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
         combo_tipo = QComboBox()
@@ -3579,11 +3623,13 @@ class HydroAndinaProDialog(QDialog):
     def _pagina_enrocado(self) -> QWidget:
         pagina = QWidget()
         v = QVBoxLayout(pagina)
-        v.addWidget(QLabel(
+        _lbl_auto_18 = QLabel(
             "<b>Enrocado (RipRap)</b> — dimensionamiento por la ecuación de Isbash (1936). "
             "Verifique contra el método vigente en su localidad antes de un diseño definitivo "
             "(ver nota en el resultado)."
-        ))
+        )
+        _lbl_auto_18.setWordWrap(True)
+        v.addWidget(_lbl_auto_18)
         f = QFormLayout()
         f.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
         spin_v = QDoubleSpinBox(); spin_v.setRange(0.1, 20.0); spin_v.setDecimals(3); spin_v.setValue(3.0)
@@ -3626,10 +3672,12 @@ class HydroAndinaProDialog(QDialog):
     def _pagina_sumidero(self) -> QWidget:
         pagina = QWidget()
         v = QVBoxLayout(pagina)
-        v.addWidget(QLabel(
+        _lbl_auto_19 = QLabel(
             "<b>Sumideros</b> — capacidad simplificada como vertedero de ventana (weir). El diseño "
             "completo según HEC-22 requiere coeficientes propios del tipo de reja/ventana utilizada."
-        ))
+        )
+        _lbl_auto_19.setWordWrap(True)
+        v.addWidget(_lbl_auto_19)
         f = QFormLayout()
         f.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
         spin_l = QDoubleSpinBox(); spin_l.setRange(0.1, 5.0); spin_l.setDecimals(3); spin_l.setValue(0.6)
@@ -3668,11 +3716,13 @@ class HydroAndinaProDialog(QDialog):
     def _pagina_borde_libre(self, nombre_estructura: str) -> QWidget:
         pagina = QWidget()
         v = QVBoxLayout(pagina)
-        v.addWidget(QLabel(
+        _lbl_auto_20 = QLabel(
             f"<b>{nombre_estructura}</b> — verificación hidráulica básica (borde libre/revancha). "
             "NO es un diseño estructural, geotécnico ni de cimentación; eso requiere un análisis "
             "adicional fuera del alcance de este plugin."
-        ))
+        )
+        _lbl_auto_20.setWordWrap(True)
+        v.addWidget(_lbl_auto_20)
         f = QFormLayout()
         f.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
         spin_cota_agua = QDoubleSpinBox(); spin_cota_agua.setRange(0.0, 8000.0); spin_cota_agua.setDecimals(2); spin_cota_agua.setValue(0.0)
@@ -3716,11 +3766,13 @@ class HydroAndinaProDialog(QDialog):
     def _pagina_defensa_ribereña(self) -> QWidget:
         pagina = QWidget()
         v = QVBoxLayout(pagina)
-        v.addWidget(QLabel(
+        _lbl_auto_21 = QLabel(
             "<b>Defensa Ribereña</b> — verificación de borde libre de la corona respecto al nivel de "
             "agua de diseño, y dimensionamiento del enrocado de protección del talud (Isbash). NO "
             "reemplaza el diseño geotécnico/estructural de la defensa."
-        ))
+        )
+        _lbl_auto_21.setWordWrap(True)
+        v.addWidget(_lbl_auto_21)
         f = QFormLayout()
         f.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
         spin_cota_agua = QDoubleSpinBox(); spin_cota_agua.setRange(0.0, 8000.0); spin_cota_agua.setDecimals(2)
@@ -3773,12 +3825,14 @@ class HydroAndinaProDialog(QDialog):
     def _build_tab_modulos_avanzados(self):
         tab = QWidget()
         v = QVBoxLayout(tab)
-        v.addWidget(QLabel(
+        _lbl_auto_22 = QLabel(
             "<b>Módulos Avanzados (Beta)</b> — completación de datos faltantes, precipitación areal "
             "multi-método, y oferta hídrica (disponibilidad de agua a largo plazo, en contraste con "
             "el resto del plugin orientado a crecidas). Requieren que usted pegue los datos "
             "directamente (no están conectados automáticamente a las demás pestañas)."
-        ))
+        )
+        _lbl_auto_22.setWordWrap(True)
+        v.addWidget(_lbl_auto_22)
 
         combo_modulo = QComboBox()
         combo_modulo.addItems(["Completación de Datos", "Precipitación Areal", "Oferta Hídrica"])
@@ -3796,10 +3850,12 @@ class HydroAndinaProDialog(QDialog):
     def _pagina_completacion_datos(self) -> QWidget:
         pagina = QWidget()
         v = QVBoxLayout(pagina)
-        v.addWidget(QLabel(
+        _lbl_auto_23 = QLabel(
             "Una fila por estación: <b>nombre: valor1,valor2,...</b> (use 'NaN' para los datos "
             "faltantes a completar). Todas las estaciones deben tener la misma cantidad de valores."
-        ))
+        )
+        _lbl_auto_23.setWordWrap(True)
+        v.addWidget(_lbl_auto_23)
         self.edit_completacion_series = QPlainTextEdit()
         self.edit_completacion_series.setPlaceholderText(
             "A: 30.1,28.4,NaN,31.0,29.5\nB: 27.9,26.0,25.1,28.2,27.0\nC: 33.2,NaN,30.8,32.9,31.5"
@@ -3885,11 +3941,13 @@ class HydroAndinaProDialog(QDialog):
     def _pagina_precipitacion_areal(self) -> QWidget:
         pagina = QWidget()
         v = QVBoxLayout(pagina)
-        v.addWidget(QLabel(
+        _lbl_auto_24 = QLabel(
             "Formato: <b>nombre: valor_mm, x, y</b> (una estación por fila, coordenadas en metros, "
             "mismo CRS proyectado que la cuenca). La cuenca se toma de la delimitación activa "
             "(pestaña 1)."
-        ))
+        )
+        _lbl_auto_24.setWordWrap(True)
+        v.addWidget(_lbl_auto_24)
         self.edit_areal_estaciones = QPlainTextEdit()
         self.edit_areal_estaciones.setPlaceholderText("A: 35.2, 450000, 8500000\nB: 28.9, 452000, 8503000\n...")
         self.edit_areal_estaciones.setMaximumHeight(120)
@@ -3964,11 +4022,13 @@ class HydroAndinaProDialog(QDialog):
     def _pagina_oferta_hidrica(self) -> QWidget:
         pagina = QWidget()
         v = QVBoxLayout(pagina)
-        v.addWidget(QLabel(
+        _lbl_auto_25 = QLabel(
             "<b>Oferta hídrica</b> — disponibilidad de agua a largo plazo (distinto del resto del "
             "plugin, orientado a crecidas). Los modelos 2 y 3 requieren calibración contra caudales "
             "observados para ser confiables; ver advertencias en cada resultado."
-        ))
+        )
+        _lbl_auto_25.setWordWrap(True)
+        v.addWidget(_lbl_auto_25)
         combo_modelo = QComboBox()
         combo_modelo.addItems(["Budyko/Fu (anual)", "Balance mensual simplificado (tipo GR2M)", "Lutz Scholz (estructura general)"])
         v.addWidget(combo_modelo)
@@ -4051,7 +4111,7 @@ class HydroAndinaProDialog(QDialog):
     def _build_tab_socavacion(self):
         tab = QWidget()
         v = QVBoxLayout(tab)
-        v.addWidget(QLabel(
+        _lbl_auto_26 = QLabel(
             "<b>Socavación</b> — socavación GENERAL (Lischtvan-Lebediev cohesivo/no cohesivo, Lacey, "
             "Blench, Neill-Kellerhals), por CONTRACCIÓN (Laursen, agua clara / lecho móvil) y LOCAL en "
             "pilares (CSU/HEC-RAS, Froehlich). Ingrese la curva granulométrica para obtener D50/D36≈D35/"
@@ -4059,15 +4119,19 @@ class HydroAndinaProDialog(QDialog):
             "(desde el GIS mediante una línea trazada sobre el MDE, o pegando una tabla tipo Excel) y "
             "calcule con los métodos que aplique a su caso. Los resultados muestran la sección CON y SIN "
             "socavación, y un cuadro comparativo final entre métodos."
-        ))
+        )
+        _lbl_auto_26.setWordWrap(True)
+        v.addWidget(_lbl_auto_26)
 
         # ---------------- Curva granulométrica ----------------
         gb_granulo = QGroupBox("1. Curva granulométrica y diámetros característicos")
         v_g = QVBoxLayout(gb_granulo)
-        v_g.addWidget(QLabel(
+        _lbl_auto_27 = QLabel(
             "Pegue (Ctrl+V) desde Excel dos columnas: Diámetro (mm) y % que pasa. Ordénelas de menor "
             "a mayor diámetro (no es obligatorio, el cálculo las reordena)."
-        ))
+        )
+        _lbl_auto_27.setWordWrap(True)
+        v_g.addWidget(_lbl_auto_27)
         self.tabla_granulometria = TablaPegable(8, 2)
         self.tabla_granulometria.setHorizontalHeaderLabels(["Diámetro (mm)", "% que pasa"])
         self.tabla_granulometria.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
@@ -4160,11 +4224,13 @@ class HydroAndinaProDialog(QDialog):
         h_origen.addWidget(self.btn_trazar_seccion_socavacion)
         v_s.addLayout(h_origen)
 
-        v_s.addWidget(QLabel(
+        _lbl_auto_28 = QLabel(
             "Estación, elevación del fondo y velocidad media de esa vertical (si la extrajo del GIS, "
             "la columna de velocidad queda vacía y debe completarla con los resultados de su cálculo "
             "hidráulico en el punto de interés; puede pegar una sola velocidad media en todas las filas)."
-        ))
+        )
+        _lbl_auto_28.setWordWrap(True)
+        v_s.addWidget(_lbl_auto_28)
         self.tabla_seccion_socavacion = TablaPegable(10, 3)
         self.tabla_seccion_socavacion.setHorizontalHeaderLabels(
             ["Estación (m)", "Elevación fondo (m s.n.m.)", "Velocidad media (m/s)"])
@@ -4770,12 +4836,14 @@ class HydroAndinaProDialog(QDialog):
     def _build_tab_perdida_suelos(self):
         tab = QWidget()
         v = QVBoxLayout(tab)
-        v.addWidget(QLabel(
+        _lbl_auto_29 = QLabel(
             "<b>Pérdida en Suelos (USLE/RUSLE)</b> — A = R·K·LS·C·P. Calcule cada factor por el método "
             "que disponga (directo, fórmula empírica, o tabla), para una o varias zonas/parcelas de "
             "estudio, y compare. También puede ESPACIALIZAR el factor LS y el resultado final como un "
             "ráster real usando el MDE ya delimitado en la Pestaña 1 (pendiente + acumulación de flujo)."
-        ))
+        )
+        _lbl_auto_29.setWordWrap(True)
+        v.addWidget(_lbl_auto_29)
 
         # ---------------- Gestión de zonas ----------------
         gb_zonas = QGroupBox("1. Zonas / parcelas de estudio")
@@ -4807,7 +4875,9 @@ class HydroAndinaProDialog(QDialog):
         f_r.addRow("R directo:", self.spin_r_directo)
         self.spin_p_anual_r = QDoubleSpinBox(); self.spin_p_anual_r.setRange(1, 10000); self.spin_p_anual_r.setDecimals(1); self.spin_p_anual_r.setValue(800.0)
         f_r.addRow("P anual (mm), Wischmeier-Smith:", self.spin_p_anual_r)
-        f_r.addRow(QLabel("Precipitación mensual (mm), Fournier Modificado — pegue 12 valores:"))
+        lbl_precip_fournier = QLabel("Precipitación mensual (mm), Fournier Modificado — pegue 12 valores:")
+        lbl_precip_fournier.setWordWrap(True)
+        f_r.addRow(lbl_precip_fournier)
         self.tabla_precip_mensual_suelo = TablaPegable(12, 2)
         self.tabla_precip_mensual_suelo.setHorizontalHeaderLabels(["Mes", "Precipitación (mm)"])
         meses = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
@@ -4918,12 +4988,14 @@ class HydroAndinaProDialog(QDialog):
         # ---------------- Espacialización SIG ----------------
         gb_sig = QGroupBox("8. Espacialización SIG (ráster real de A, opcional)")
         v_sig = QVBoxLayout(gb_sig)
-        v_sig.addWidget(QLabel(
+        _lbl_auto_30 = QLabel(
             "Genera un ráster real de LS (Moore-Burch) a partir del MDE recortado a la cuenca (Pestaña 1: "
             "pendiente + acumulación de flujo D8), y lo combina con los factores R, K, C, P (uniformes, "
             "tomados de la zona activa ya calculada) en el ráster final de pérdida de suelo, que se agrega "
             "al lienzo de QGIS."
-        ))
+        )
+        _lbl_auto_30.setWordWrap(True)
+        v_sig.addWidget(_lbl_auto_30)
         h_sig1 = QHBoxLayout()
         self.spin_umbral_acumulacion_suelo = QSpinBox(); self.spin_umbral_acumulacion_suelo.setRange(1, 100000); self.spin_umbral_acumulacion_suelo.setValue(100)
         h_sig1.addWidget(QLabel("Umbral de acumulación (celdas, define la densidad de cauces):"))
@@ -5192,14 +5264,16 @@ class HydroAndinaProDialog(QDialog):
     def _build_tab_sedimentos(self):
         tab = QWidget()
         v = QVBoxLayout(tab)
-        v.addWidget(QLabel(
+        _lbl_auto_31 = QLabel(
             "<b>Sedimentos en Suspensión y Transporte de Sedimentos</b> — inicio del movimiento "
             "(tensión tangencial τ0 vs. crítica de Shields), carga de FONDO (Meyer-Peter y Müller, "
             "Einstein-Brown, Bagnold), carga en SUSPENSIÓN (perfil de Rouse / Lane y Kalinske, integrado "
             "numéricamente) y carga TOTAL (Engelund y Hansen, Yang, Ackers y White). Cree una o más "
             "secciones (GIS o tabla manual pegable) en el punto de interés, con sus propiedades "
             "hidráulicas y de sedimento."
-        ))
+        )
+        _lbl_auto_31.setWordWrap(True)
+        v.addWidget(_lbl_auto_31)
 
         # ---------------- Gestión de secciones ----------------
         gb_secciones = QGroupBox("1. Secciones transversales de estudio")
@@ -5679,14 +5753,16 @@ class HydroAndinaProDialog(QDialog):
     def _build_tab_flujos_hiperconcentrados(self):
         tab = QWidget()
         v = QVBoxLayout(tab)
-        v.addWidget(QLabel(
+        _lbl_auto_32 = QLabel(
             "<b>Flujos Hiperconcentrados / Lodos / Detritos</b> — clasificación por concentración "
             "volumétrica Cv, reología de Bingham (directa o estimación empírica de Julien y Lan), factor "
             "de amplificación por sedimento (bulking factor) y cálculo de tirante/velocidad por "
             "O'Brien y Julien (resistencia general) y Takahashi (velocidad crítica de detritos maduros). "
             "El cálculo manual sirve como validación preliminar; el diseño definitivo requiere modelación "
             "2D (FLO-2D, HEC-RAS ≥6.0, RAMMS)."
-        ))
+        )
+        _lbl_auto_32.setWordWrap(True)
+        v.addWidget(_lbl_auto_32)
 
         gb_clasif = QGroupBox("1. Caracterización y clasificación del flujo")
         f_clasif = QFormLayout(gb_clasif)
@@ -5717,8 +5793,10 @@ class HydroAndinaProDialog(QDialog):
         self.spin_mu_p_directo = QDoubleSpinBox(); self.spin_mu_p_directo.setRange(0, 500); self.spin_mu_p_directo.setDecimals(3); self.spin_mu_p_directo.setValue(0.3)
         f_reo.addRow("μp directo (Pa·s):", self.spin_mu_p_directo)
         v.addWidget(gb_reologia)
-        f_reo.addRow(QLabel("<i>Coeficientes de Julien-Lan (dependen del tipo de suelo/arcilla de la cuenca "
-                             "— calibre con ensayos de viscosímetro cuando sea posible):</i>"))
+        lbl_julien_lan = QLabel("<i>Coeficientes de Julien-Lan (dependen del tipo de suelo/arcilla de la cuenca "
+                                 "— calibre con ensayos de viscosímetro cuando sea posible):</i>")
+        lbl_julien_lan.setWordWrap(True)
+        f_reo.addRow(lbl_julien_lan)
         self.spin_alpha1_julien = QDoubleSpinBox(); self.spin_alpha1_julien.setRange(0.0001, 10); self.spin_alpha1_julien.setDecimals(4); self.spin_alpha1_julien.setValue(0.0500)
         f_reo.addRow("α1 (τy):", self.spin_alpha1_julien)
         self.spin_beta1_julien = QDoubleSpinBox(); self.spin_beta1_julien.setRange(0.1, 30); self.spin_beta1_julien.setDecimals(2); self.spin_beta1_julien.setValue(15.0)
@@ -5898,13 +5976,15 @@ class HydroAndinaProDialog(QDialog):
     def _build_tab_cambio_climatico(self):
         tab = QWidget()
         v = QVBoxLayout(tab)
-        v.addWidget(QLabel(
+        _lbl_auto_33 = QLabel(
             "<b>Cambio Climático - Escenarios</b> — marco CMIP6 (SSP-RCP, experimentos DECK) como "
             "referencia, y dos herramientas de cálculo: aplicación de deltas de cambio climático a su "
             "serie histórica (delta-change, a partir de anomalías que usted ya obtuvo de un informe "
             "CMIP6/CORDEX) y corrección de sesgo/escalamiento estadístico (bias correction) de series de "
             "un modelo climático contra sus observaciones locales."
-        ))
+        )
+        _lbl_auto_33.setWordWrap(True)
+        v.addWidget(_lbl_auto_33)
 
         gb_marco = QGroupBox("0. Marco de referencia CMIP6 (informativo)")
         v_marco = QVBoxLayout(gb_marco)
@@ -5926,11 +6006,13 @@ class HydroAndinaProDialog(QDialog):
         # ---------------- Delta-change ----------------
         gb_delta = QGroupBox("1. Método Delta-Change — aplicar anomalías CMIP6 a su serie base")
         v_delta = QVBoxLayout(gb_delta)
-        v_delta.addWidget(QLabel(
+        _lbl_auto_34 = QLabel(
             "Pegue la precipitación (mm) y temperatura (°C) mensual BASE (histórica/observada), y las "
             "anomalías (delta) de cada escenario: precipitación en % de cambio, temperatura en °C de "
             "cambio absoluto. Deje en blanco los escenarios que no vaya a usar."
-        ))
+        )
+        _lbl_auto_34.setWordWrap(True)
+        v_delta.addWidget(_lbl_auto_34)
         v_delta.addWidget(QLabel("<b>Precipitación</b> — P base (mm) y Δ% por escenario:"))
         self.tabla_delta_precipitacion = TablaPegable(12, 6)
         self.tabla_delta_precipitacion.setHorizontalHeaderLabels(
@@ -5969,11 +6051,13 @@ class HydroAndinaProDialog(QDialog):
         # ---------------- Corrección de sesgo ----------------
         gb_sesgo = QGroupBox("2. Corrección de sesgo / Escalamiento estadístico (bias correction)")
         v_sesgo = QVBoxLayout(gb_sesgo)
-        v_sesgo.addWidget(QLabel(
+        _lbl_auto_35 = QLabel(
             "Pegue 3 series mensuales de precipitación: Observado (histórico), Modelo crudo (histórico, "
             "del GCM/RCM sin corregir) y Modelo futuro (crudo, a corregir). El método corrige el sesgo "
             "sistemático del modelo contra sus observaciones locales."
-        ))
+        )
+        _lbl_auto_35.setWordWrap(True)
+        v_sesgo.addWidget(_lbl_auto_35)
         self.tabla_correccion_sesgo = TablaPegable(12, 4)
         self.tabla_correccion_sesgo.setHorizontalHeaderLabels(
             ["Mes", "Observado histórico", "Modelo histórico (crudo)", "Modelo futuro (crudo)"])
@@ -6121,7 +6205,7 @@ class HydroAndinaProDialog(QDialog):
     def _build_tab_caudales_medios(self):
         tab = QWidget()
         v = QVBoxLayout(tab)
-        v.addWidget(QLabel(
+        _lbl_auto_36 = QLabel(
             "<b>Caudales Medios (Qm)</b> — modelos precipitación-escorrentía fieles al Manual Técnico "
             "de RS MINERVE (CREALP/HydroCosmos, v2.25): Lutz Scholz (simplificado), GR2M, GR4J, HBV, "
             "SAC-SMA, Snow-SD, <b>Runoff (SWMM)</b>, <b>GSM</b> (nieve+glaciar) y <b>SOCONT</b> "
@@ -6129,7 +6213,9 @@ class HydroAndinaProDialog(QDialog):
             "(P, T, ETP) son configurables; la ETP puede pegarse directamente o calcularse por Turc, "
             "McGuinness-Bordne, Oudin o un valor uniforme. Calibrador genérico (Nelder-Mead) contra "
             "aforos, con los 10 indicadores de desempeño del Capítulo 3 del manual."
-        ))
+        )
+        _lbl_auto_36.setWordWrap(True)
+        v.addWidget(_lbl_auto_36)
 
         gb_modelo = QGroupBox("1. Selección del modelo y parámetros")
         v_modelo = QVBoxLayout(gb_modelo)
@@ -6156,11 +6242,13 @@ class HydroAndinaProDialog(QDialog):
         # ---------------- Serie de entrada ----------------
         gb_series = QGroupBox("2. Serie de entrada (pegar tabla tipo Excel)")
         v_series = QVBoxLayout(gb_series)
-        v_series.addWidget(QLabel(
+        _lbl_auto_37 = QLabel(
             "Columnas: Año, Mes (1-12), Día (opcional, solo para paso diario — deje 15 para mensual), "
             "P (mm/paso), T media (°C, requerida por modelos con nieve: HBV, Snow-SD, GSM, SOCONT), "
             "ETP (mm/paso — puede pegarla o calcularla abajo), Q obs (m³/s, opcional, para calibrar)."
-        ))
+        )
+        _lbl_auto_37.setWordWrap(True)
+        v_series.addWidget(_lbl_auto_37)
         self.tabla_series_qm = TablaPegable(60, 7)
         self.tabla_series_qm.setHorizontalHeaderLabels(
             ["Año", "Mes", "Día", "P (mm)", "T media (°C)", "ETP (mm)", "Q obs (m³/s)"])
@@ -6414,14 +6502,16 @@ class HydroAndinaProDialog(QDialog):
     def _build_tab_caudales_minimos(self):
         tab = QWidget()
         v = QVBoxLayout(tab)
-        v.addWidget(QLabel(
+        _lbl_auto_38 = QLabel(
             "<b>Caudales Mínimos</b> — Curva de Duración de Caudales (persistencia, Q95), método de "
             "Tennant/Montana (caudal ecológico como % del Qma), análisis de frecuencia de mínimos "
             "(Weibull y Gumbel de mínimos) y transferencia por cuenca homóloga para cuencas sin "
             "información. El criterio conservador para no comprometer el ecosistema es adoptar el "
             "<b>mínimo</b> valor entre los métodos aplicables (a diferencia de socavación, donde se "
             "adopta el máximo)."
-        ))
+        )
+        _lbl_auto_38.setWordWrap(True)
+        v.addWidget(_lbl_auto_38)
 
         # ---------------- Curva de duración ----------------
         gb_cdc = QGroupBox("1. Curva de Duración de Caudales (CDC) / Persistencia")
@@ -6634,7 +6724,7 @@ class HydroAndinaProDialog(QDialog):
     def _build_tab_phabsim(self):
         tab = QWidget()
         v = QVBoxLayout(tab)
-        v.addWidget(QLabel(
+        _lbl_auto_39 = QLabel(
             "<b>Caudal Ecológico — Metodología USGS PHABSIM</b> — acopla un módulo hidráulico (tirante "
             "y velocidad vs. caudal en cada estación de un transecto, ajustado desde mediciones de campo "
             "en varios caudales de calibración) con un módulo de hábitat (curvas de idoneidad HSI de "
@@ -6642,7 +6732,9 @@ class HydroAndinaProDialog(QDialog):
             "(WUA, m²/km) en función del caudal. <i>Las curvas HSI deben ser ingresadas por usted "
             "(de su estudio de campo, cuenca homóloga, o bibliografía validada por un biólogo/ecólogo) — "
             "este módulo no trae curvas precargadas de ninguna especie.</i>"
-        ))
+        )
+        _lbl_auto_39.setWordWrap(True)
+        v.addWidget(_lbl_auto_39)
 
         # ---------------- Curvas HSI ----------------
         gb_hsi = QGroupBox("1. Curvas de Idoneidad de Hábitat (HSI) de la especie objetivo")
@@ -6676,7 +6768,7 @@ class HydroAndinaProDialog(QDialog):
         btn_cargar_referencia.clicked.connect(self._on_cargar_curva_referencia_phabsim)
         h_referencia.addWidget(btn_cargar_referencia)
         v_hsi.addLayout(h_referencia)
-        v_hsi.addWidget(QLabel(
+        _lbl_auto_40 = QLabel(
             "<span style='color:#B3261E'><b>Advertencia:</b> las curvas de referencia son plantillas "
             "ILUSTRATIVAS con la forma típica descrita en la ecología general de cada especie/gremio "
             "(especies de manglares de Tumbes, Lago Titicaca, ríos altoandinos, ríos de la costa, y "
@@ -6686,7 +6778,9 @@ class HydroAndinaProDialog(QDialog):
             "capta bien la cobertura vegetal/raíces — ambas limitaciones se documentan en el código. "
             "Consulte al IIAP, IMARPE, o estudios ANA/SENACE de proyectos específicos para una curva "
             "validada, y reemplace esta plantilla con datos de campo o bibliografía específica revisada "
-            "por un biólogo/ecólogo antes de sustentar un expediente técnico.</span>"))
+            "por un biólogo/ecólogo antes de sustentar un expediente técnico.</span>")
+        _lbl_auto_40.setWordWrap(True)
+        v_hsi.addWidget(_lbl_auto_40)
         btn_graficar_hsi = QPushButton("Graficar curvas HSI")
         btn_graficar_hsi.clicked.connect(self._on_graficar_hsi_phabsim)
         v_hsi.addWidget(btn_graficar_hsi)
@@ -6952,7 +7046,7 @@ class HydroAndinaProDialog(QDialog):
     def _build_tab_flujo_subterraneo(self):
         tab = QWidget()
         v = QVBoxLayout(tab)
-        v.addWidget(QLabel(
+        _lbl_auto_41 = QLabel(
             "<b>Flujo Subterráneo</b> — Ley de Darcy, flujo 1D entre dos puntos (confinado y no "
             "confinado/Dupuit), y un <b>solver 2D real</b> de flujo subterráneo en régimen permanente "
             "(diferencias finitas, Gauss-Seidel/SOR) para acuíferos confinados homogéneos o con "
@@ -6960,7 +7054,9 @@ class HydroAndinaProDialog(QDialog):
             "transitorios y heterogéneos — para eso siga las fases: modelo conceptual, discretización, "
             "selección de software, calibración con piezómetros de campo. La hidráulica de POZOS "
             "específica (Thiem, Theis, radio de influencia) está en la siguiente pestaña.</i>"
-        ))
+        )
+        _lbl_auto_41.setWordWrap(True)
+        v.addWidget(_lbl_auto_41)
 
         # ---------------- Ley de Darcy ----------------
         gb_darcy = QGroupBox("1. Ley de Darcy")
@@ -7221,13 +7317,15 @@ class HydroAndinaProDialog(QDialog):
     def _build_tab_hidraulica_pozos(self):
         tab = QWidget()
         v = QVBoxLayout(tab)
-        v.addWidget(QLabel(
+        _lbl_auto_42 = QLabel(
             "<b>Hidráulica de Pozos</b> — régimen permanente (Thiem confinado, Dupuit-Thiem libre), "
             "régimen variable (Theis con la función de pozo W(u), y su simplificación de Cooper-Jacob), "
             "pérdidas de carga en el pozo (ensayo escalonado sw=B·Q+C·Q²), y radio de influencia por "
             "varios métodos con selección de la <b>mejor propuesta</b> según la jerarquía de exactitud "
             "de la bibliografía (prueba de bombeo real &gt; Theis &gt; fórmulas empíricas)."
-        ))
+        )
+        _lbl_auto_42.setWordWrap(True)
+        v.addWidget(_lbl_auto_42)
 
         # ---------------- Régimen permanente ----------------
         gb_permanente = QGroupBox("1. Régimen permanente (Thiem / Dupuit-Thiem)")
@@ -7524,12 +7622,14 @@ class HydroAndinaProDialog(QDialog):
         tab = QWidget()
         v = QVBoxLayout(tab)
 
-        v.addWidget(QLabel(
+        _lbl_auto_43 = QLabel(
             "<b>Exportar / Reportes</b> — todas las exportaciones de resultados de las pestañas 1 "
             "a 7 quedan centralizadas aquí, en un solo lugar. Cada botón reúne los resultados "
             "calculados hasta el momento en la sesión actual (lo que aún no se haya calculado en "
             "alguna pestaña simplemente se omite de esa sección)."
-        ))
+        )
+        _lbl_auto_43.setWordWrap(True)
+        v.addWidget(_lbl_auto_43)
 
         gb_completo = QGroupBox(
             "Exportación completa (recomendado) — reporte descriptivo en Word, archivos nativos/"
