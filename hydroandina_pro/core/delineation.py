@@ -57,6 +57,31 @@ import processing
 from qgis.core import QgsProcessingUtils
 
 
+def _cellsize_kw(cellsize):
+    """Devuelve el parámetro de resolución de GRASS solo si hay un valor;
+    pasar None explícitamente haría que el algoritmo lo interprete como un
+    valor inválido en vez de omitirlo."""
+    return {"GRASS_REGION_CELLSIZE_PARAMETER": cellsize} if cellsize else {}
+
+
+def _cellsize_dem(dem_layer) -> float:
+    """
+    Tamaño de celda nativo del MDE, para fijarlo explícitamente en los
+    algoritmos GRASS.
+
+    POR QUÉ HACE FALTA (v0.2.55): fijar solo GRASS_REGION_PARAMETER
+    (la extensión) no basta. Si no se indica también la resolución, GRASS
+    usa la suya por defecto y AJUSTA la extensión pedida para que encaje
+    en un número entero de celdas de ESE tamaño -- con lo que los rásteres
+    de salida (dirección, acumulación, cauces) pueden quedar desplazados
+    hasta una celda respecto del MDE de entrada. Un punto de salida
+    elegido cerca del borde entra entonces en el MDE pero cae fuera del
+    ráster de cauces, produciendo el error "el punto de salida cae fuera
+    de la extensión del ráster de cauces" sin causa aparente.
+    """
+    return abs(dem_layer.rasterUnitsPerPixelX())
+
+
 def _region_string(dem_layer) -> str:
     """
     Construye el string de región de GRASS ("xmin,xmax,ymin,ymax") a
@@ -78,13 +103,15 @@ def calcular_flujo(dem_layer, umbral_acumulacion=25, context=None, feedback=None
     siguientes de la cadena sin recalcularlo).
     """
     region = _region_string(dem_layer)
+    cellsize = _cellsize_dem(dem_layer)
 
     feedback.pushInfo("1/3 Rellenando sumideros (grass7:r.fill.dir)...")
     relleno = processing.run(
         "grass7:r.fill.dir",
         {"input": dem_layer, "format": 0, "output": "TEMPORARY_OUTPUT",
          "direction": "TEMPORARY_OUTPUT", "areas": "TEMPORARY_OUTPUT",
-         "GRASS_REGION_PARAMETER": region},
+         "GRASS_REGION_PARAMETER": region,
+         **_cellsize_kw(cellsize)},
         context=context, feedback=feedback, is_child_algorithm=True,
     )["output"]
 
@@ -98,6 +125,7 @@ def calcular_flujo(dem_layer, umbral_acumulacion=25, context=None, feedback=None
             "accumulation": "TEMPORARY_OUTPUT",
             "stream": "TEMPORARY_OUTPUT",
             "GRASS_REGION_PARAMETER": region,
+            **_cellsize_kw(cellsize),
         },
         context=context, feedback=feedback, is_child_algorithm=True,
     )
@@ -107,10 +135,11 @@ def calcular_flujo(dem_layer, umbral_acumulacion=25, context=None, feedback=None
         "raster_acumulacion": watershed["accumulation"],
         "raster_cauces": watershed["stream"],
         "region": region,
+        "cellsize": cellsize,
     }
 
 
-def delinear_desde_punto(raster_direccion, punto_xy, region, context=None, feedback=None,
+def delinear_desde_punto(raster_direccion, punto_xy, region, cellsize=None, context=None, feedback=None,
                           smooth_iterations=1, smooth_offset=0.25):
     """
     Delimita la cuenca aguas arriba de punto_xy=(x,y) usando el ráster de
@@ -130,7 +159,8 @@ def delinear_desde_punto(raster_direccion, punto_xy, region, context=None, feedb
     cuenca_raster = processing.run(
         "grass7:r.water.outlet",
         {"input": raster_direccion, "coordinates": f"{x},{y}", "output": "TEMPORARY_OUTPUT",
-         "GRASS_REGION_PARAMETER": region},
+         "GRASS_REGION_PARAMETER": region,
+         **_cellsize_kw(cellsize)},
         context=context, feedback=feedback, is_child_algorithm=True,
     )["output"]
 
@@ -153,7 +183,8 @@ def delinear_desde_punto(raster_direccion, punto_xy, region, context=None, feedb
     return cuenca_suavizada
 
 
-def extraer_y_recortar_red(raster_cauces, ruta_cuenca_vector, region, context=None, feedback=None):
+def extraer_y_recortar_red(raster_cauces, ruta_cuenca_vector, region, cellsize=None,
+                            context=None, feedback=None):
     """
     Vectoriza el ráster de cauces completo y, si se provee una cuenca,
     lo recorta a ella. Si ruta_cuenca_vector es None, devuelve la red
@@ -164,12 +195,14 @@ def extraer_y_recortar_red(raster_cauces, ruta_cuenca_vector, region, context=No
     feedback.pushInfo("Vectorizando la red de drenaje...")
     cauces_delgados = processing.run(
         "grass7:r.thin", {"input": raster_cauces, "output": "TEMPORARY_OUTPUT",
-                          "GRASS_REGION_PARAMETER": region},
+                          "GRASS_REGION_PARAMETER": region,
+         **_cellsize_kw(cellsize)},
         context=context, feedback=feedback, is_child_algorithm=True,
     )["output"]
     red_vector = processing.run(
         "grass7:r.to.vect", {"input": cauces_delgados, "type": 0, "output": "TEMPORARY_OUTPUT",
-                             "GRASS_REGION_PARAMETER": region},
+                             "GRASS_REGION_PARAMETER": region,
+         **_cellsize_kw(cellsize)},
         context=context, feedback=feedback, is_child_algorithm=True,
     )["output"]
 

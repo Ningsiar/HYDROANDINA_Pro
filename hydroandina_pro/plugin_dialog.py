@@ -766,7 +766,7 @@ class HydroAndinaProDialog(QDialog):
 
             resultado_red = delineation.extraer_y_recortar_red(
                 resultado_flujo["raster_cauces"], ruta_cuenca_vector=None,
-                region=resultado_flujo["region"],
+                region=resultado_flujo["region"], cellsize=resultado_flujo.get("cellsize"),
                 context=context, feedback=feedback,
             )
             capa_red = obtener_capa(resultado_red["red_drenaje_vector"], context, es_raster=False, nombre="red_drenaje_stream_network")
@@ -1004,11 +1004,13 @@ class HydroAndinaProDialog(QDialog):
             resultado = {}
             resultado["cuenca_vector"] = delineation.delinear_desde_punto(
                 flujo["raster_direccion"], punto_delineacion, flujo["region"],
+                cellsize=flujo.get("cellsize"),
                 context=context, feedback=feedback,
                 smooth_offset=self.spin_smooth_offset.value(),
             )
             resultado["red_drenaje_vector"] = delineation.extraer_y_recortar_red(
                 flujo["raster_cauces"], resultado["cuenca_vector"], flujo["region"],
+                cellsize=flujo.get("cellsize"),
                 context=context, feedback=feedback,
             )
 

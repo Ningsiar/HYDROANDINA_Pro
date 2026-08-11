@@ -107,9 +107,64 @@ def snap_a_cauce(ruta_raster_cauces: str, x: float, y: float, radio_celdas: int 
     fila_centro, col_centro = _mundo_a_pixel(x, y, geotransform)
     n_filas, n_cols = mascara_cauce.shape
     if not (0 <= fila_centro < n_filas and 0 <= col_centro < n_cols):
+        # MENSAJE DIAGNÓSTICO, no genérico. El mensaje anterior pedía
+        # "verifique que el break point esté dentro del área del MDE",
+        # pero para cuando este error salta el plugin YA validó justamente
+        # eso contra la extensión del MDE (ver _on_run_delineation): decirlo
+        # de nuevo mandaba al usuario a un callejón sin salida. Si el punto
+        # está dentro del MDE y aun así cae fuera del ráster de cauces, lo
+        # que hay es un DESAJUSTE entre ambos rásteres, y para diagnosticarlo
+        # hacen falta las extensiones y el desplazamiento reales.
+        x_origen, ancho_px, _, y_origen, _, alto_px = geotransform
+        x_min = x_origen
+        x_max = x_origen + n_cols * ancho_px
+        y_max = y_origen
+        y_min = y_origen + n_filas * alto_px
+        if x_min > x_max:
+            x_min, x_max = x_max, x_min
+        if y_min > y_max:
+            y_min, y_max = y_max, y_min
+
+        fuera_x = 0.0
+        if x < x_min:
+            fuera_x = x_min - x
+        elif x > x_max:
+            fuera_x = x - x_max
+        fuera_y = 0.0
+        if y < y_min:
+            fuera_y = y_min - y
+        elif y > y_max:
+            fuera_y = y - y_max
+
+        detalle_desfase = ""
+        if fuera_x or fuera_y:
+            celdas_x = fuera_x / abs(ancho_px) if ancho_px else 0.0
+            celdas_y = fuera_y / abs(alto_px) if alto_px else 0.0
+            detalle_desfase = (
+                f"\n\nDesplazamiento fuera del ráster: {fuera_x:.1f} m en X ({celdas_x:.1f} celdas), "
+                f"{fuera_y:.1f} m en Y ({celdas_y:.1f} celdas)."
+            )
+            if max(celdas_x, celdas_y) <= 3.0:
+                detalle_desfase += (
+                    " Al ser un desfase de pocas celdas, lo más probable es que GRASS haya ajustado "
+                    "ligeramente la extensión de sus rásteres de salida al alinearla con su malla, y "
+                    "que el punto haya quedado justo en el borde. Mueva el punto de salida unas "
+                    "decenas de metros hacia el interior de la cuenca."
+                )
+            else:
+                detalle_desfase += (
+                    " El desfase es grande: lo más probable es un problema de sistema de coordenadas "
+                    "o que el MDE descargado no cubra realmente la zona donde hizo clic."
+                )
+
         raise ValueError(
-            "El punto de salida cae fuera de la extensión del ráster de cauces; "
-            "verifique que el break point esté dentro del área del MDE."
+            "El punto de salida cae fuera de la extensión del RÁSTER DE CAUCES generado por GRASS "
+            "(no del MDE, que ya se verificó antes).\n\n"
+            f"Punto de salida:  X = {x:.1f},  Y = {y:.1f}\n"
+            f"Ráster de cauces: X = [{x_min:.1f}, {x_max:.1f}],  Y = [{y_min:.1f}, {y_max:.1f}]\n"
+            f"Malla: {n_cols} columnas x {n_filas} filas, celda de "
+            f"{abs(ancho_px):.2f} x {abs(alto_px):.2f} m."
+            + detalle_desfase
         )
 
     resultado_indice = _indice_celda_mas_cercana(mascara_cauce, fila_centro, col_centro, radio_celdas)

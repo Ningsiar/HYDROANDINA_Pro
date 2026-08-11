@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.2.54
+version=0.2.55
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,31 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.2.55: correccion en la delimitacion (Pestaña 1) del error "El punto de salida cae fuera de la
+      extension del raster de cauces", reportado por el usuario.
+      CAUSA RAIZ: la cadena de delimitacion fijaba GRASS_REGION_PARAMETER (la EXTENSION) en todas las
+      llamadas a grass7:*, pero no la RESOLUCION. Sin indicarla, GRASS usa su tamaño de celda por
+      defecto y AJUSTA la extension pedida para que encaje en un numero entero de celdas de ese tamaño,
+      con lo que los rasteres de salida (direccion, acumulacion y cauces) pueden quedar desplazados
+      hasta una celda respecto del MDE de entrada. Un punto de salida elegido cerca del borde entra
+      entonces en el MDE -- y por eso pasaba la validacion temprana -- pero cae fuera del raster de
+      cauces. Corregido fijando tambien GRASS_REGION_CELLSIZE_PARAMETER a la resolucion nativa del MDE
+      en toda la cadena, y propagandola entre pasos junto con la region.
+      MENSAJE DE ERROR AHORA DIAGNOSTICO: el anterior pedia "verifique que el break point este dentro
+      del area del MDE", pero para cuando ese error salta el plugin YA valido exactamente eso contra la
+      extension del MDE, de modo que enviaba al usuario a un callejon sin salida. Ahora el mensaje
+      aclara que el desajuste es con el RASTER DE CAUCES (no con el MDE), e informa las coordenadas del
+      punto, la extension real y la malla del raster de cauces, y el desplazamiento fuera de el tanto en
+      metros como en numero de celdas -- distinguiendo ademas el diagnostico: un desfase de pocas celdas
+      apunta al ajuste de malla de GRASS y se resuelve moviendo el punto hacia el interior de la cuenca,
+      mientras que un desfase grande apunta a un problema de sistema de coordenadas o a un MDE que no
+      cubre la zona.
+      Al agregar la resolucion se detecto y evito de paso un fallo propio: dos de las funciones de la
+      cadena (delinear_desde_punto y extraer_y_recortar_red) reciben la region como parametro y no
+      calculan nada del MDE, asi que referenciar alli la variable de resolucion habria lanzado un
+      NameError en tiempo de ejecucion; se agrego el parametro correspondiente, se propaga desde
+      calcular_flujo, y una funcion auxiliar omite la clave por completo cuando no hay valor en vez de
+      pasar None a GRASS.
     - v0.2.54: la Pestaña 3 completa su presentacion -- cada metodo con su GRAFICO y su CUADRO RESUMEN
       DE ALTO IMPACTO propios, mas un CUADRO RESUMEN FINAL de toda la pestaña, y Richards 1D integrado
       en la interfaz (en la v0.2.53 solo existia el nucleo numerico).
