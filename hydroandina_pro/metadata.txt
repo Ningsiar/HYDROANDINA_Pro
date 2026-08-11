@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.2.44
+version=0.2.45
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,20 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.2.45: mejoras de presentación en la sección IDF de la Pestaña 5 (Precipitación Máx 24h).
+      (1) La ecuación IDF combinada (i = K*Tr^m/t^n) ya no se muestra como una simple etiqueta de texto:
+      ahora tiene su propio cuadro resumen enmarcado y centrado (borde azul, fondo tenue), con la
+      ecuación en fuente monoespaciada grande y en negrita, y los 3 parámetros ajustados (K, m, n) más el
+      R² desglosados debajo en formato "descripción + valor" alineado en cuadrícula, con una leyenda de
+      las variables (i, Tr, t) -- mismo espíritu que el resto de "cuadros resumen" del plugin, pero
+      adaptado a una sola ecuación en vez de una tabla de parámetros. (2) Corregida la tabla de "Ecuación
+      potencial por periodo de retorno" (i = a*t^b por cada Tr): tenía su columna "Ecuación" en modo
+      Stretch, absorbiendo todo el ancho sobrante de la pestaña y viéndose desproporcionadamente ancha
+      pese a contener textos cortos de formato fijo (p.ej. "i = 1329.253 · t^-0.8000") -- reportado por
+      el usuario con captura de pantalla. Las 5 columnas son datos cortos de longitud uniforme (igual
+      categoría que tabla_comparacion_distribuciones, no una columna de texto libre), así que se
+      corrigió a ResizeToContents en las 5 más limitar_ancho_tabla(560px), quedando la tabla ajustada a
+      su contenido real en vez de estirada a todo el ancho de la ventana.
     - v0.2.44: *** CORRECCIÓN CRÍTICA *** encontrada al implementar el volumen de escorrentía directa
       del hidrograma (verificación de conservación de masa: el volumen bajo CUALQUIER hidrograma unitario
       debe reproducir exactamente 1 mm de lámina sobre toda el área, por definición). Afecta el caudal de

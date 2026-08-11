@@ -27,7 +27,7 @@ from qgis.PyQt.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QSpinBox, QDoubleSpinBox, QComboBox,
     QTableWidget, QTableWidgetItem, QFileDialog, QMessageBox, QRadioButton,
     QButtonGroup, QCheckBox, QWidget, QHeaderView, QPlainTextEdit, QTextBrowser,
-    QApplication, QScrollArea, QStackedWidget,
+    QApplication, QScrollArea, QStackedWidget, QFrame, QGridLayout,
 )
 
 from .core import (delineation, morphometry, curve_number, tc_methods, dem_download,
@@ -2345,13 +2345,103 @@ class HydroAndinaProDialog(QDialog):
         v_idf.addWidget(QLabel("<b>Ecuación potencial por periodo de retorno</b> (i = a·t^b, t en minutos):"))
         self.tabla_ecuaciones_idf = QTableWidget(0, 5)
         self.tabla_ecuaciones_idf.setHorizontalHeaderLabels(["Tr (años)", "Ecuación", "a", "b", "R²"])
-        aplicar_columna_elastica(self.tabla_ecuaciones_idf, indice_columna_larga=1)
-        v_idf.addWidget(self.tabla_ecuaciones_idf)
+        # Las 5 columnas son valores cortos de formato fijo (ninguna es texto
+        # libre de longitud variable) -- igual que tabla_comparacion_distribuciones,
+        # se ajustan todas a su contenido y se limita el ancho total de la
+        # tabla, en vez de usar una columna Stretch que las infla a todo el
+        # ancho de la pestaña (reportado: columna "Ecuación" desproporcionada).
+        for _col in range(self.tabla_ecuaciones_idf.columnCount()):
+            self.tabla_ecuaciones_idf.horizontalHeader().setSectionResizeMode(_col, QHeaderView.ResizeToContents)
+        limitar_ancho_tabla(self.tabla_ecuaciones_idf, ancho_maximo=560)
+        h_tabla_idf_centrada = QHBoxLayout()
+        h_tabla_idf_centrada.addWidget(self.tabla_ecuaciones_idf)
+        h_tabla_idf_centrada.addStretch()
+        v_idf.addLayout(h_tabla_idf_centrada)
 
-        self.lbl_ecuacion_idf_combinada = QLabel("Ecuación IDF combinada: sin calcular.")
+        # ---- Cuadro resumen enmarcado y centrado: ecuación IDF combinada ----
+        frame_idf_resumen = QFrame()
+        frame_idf_resumen.setObjectName("frameIdfResumen")
+        frame_idf_resumen.setFrameShape(QFrame.StyledPanel)
+        frame_idf_resumen.setStyleSheet(
+            "QFrame#frameIdfResumen {"
+            "  border: 2px solid #2c6fa8;"
+            "  border-radius: 10px;"
+            "  background-color: #eef5fb;"
+            "}"
+        )
+        v_idf_resumen = QVBoxLayout(frame_idf_resumen)
+        v_idf_resumen.setContentsMargins(16, 12, 16, 14)
+        v_idf_resumen.setSpacing(6)
+
+        lbl_idf_resumen_titulo = QLabel("ECUACIÓN IDF COMBINADA")
+        lbl_idf_resumen_titulo.setAlignment(Qt.AlignCenter)
+        lbl_idf_resumen_titulo.setStyleSheet(
+            "font-weight: bold; font-size: 10.5pt; color: #1a4a70; letter-spacing: 1px;"
+        )
+        v_idf_resumen.addWidget(lbl_idf_resumen_titulo)
+
+        lbl_idf_resumen_sub = QLabel("(ajustada sobre todos los puntos (Tr, t, i) de todas las curvas a la vez)")
+        lbl_idf_resumen_sub.setAlignment(Qt.AlignCenter)
+        lbl_idf_resumen_sub.setStyleSheet("font-size: 8pt; color: #4a4a4a; font-style: italic;")
+        lbl_idf_resumen_sub.setWordWrap(True)
+        v_idf_resumen.addWidget(lbl_idf_resumen_sub)
+
+        linea_idf_1 = QFrame()
+        linea_idf_1.setFrameShape(QFrame.HLine)
+        linea_idf_1.setStyleSheet("color: #b9d3e6;")
+        v_idf_resumen.addWidget(linea_idf_1)
+
+        self.lbl_ecuacion_idf_combinada = QLabel("i = K · Trᵐ / tⁿ   —   sin calcular todavía")
+        self.lbl_ecuacion_idf_combinada.setAlignment(Qt.AlignCenter)
         self.lbl_ecuacion_idf_combinada.setWordWrap(True)
-        self.lbl_ecuacion_idf_combinada.setStyleSheet("font-family: monospace;")
-        v_idf.addWidget(self.lbl_ecuacion_idf_combinada)
+        self.lbl_ecuacion_idf_combinada.setStyleSheet(
+            "font-family: 'Consolas', 'Courier New', monospace; font-size: 13pt; font-weight: bold; "
+            "color: #0d3757; padding: 4px 0px;"
+        )
+        v_idf_resumen.addWidget(self.lbl_ecuacion_idf_combinada)
+
+        linea_idf_2 = QFrame()
+        linea_idf_2.setFrameShape(QFrame.HLine)
+        linea_idf_2.setStyleSheet("color: #b9d3e6;")
+        v_idf_resumen.addWidget(linea_idf_2)
+
+        grid_idf_params = QGridLayout()
+        grid_idf_params.setHorizontalSpacing(28)
+        grid_idf_params.setVerticalSpacing(2)
+        _etiquetas_idf = [
+            ("K (coef. de intensidad)", "lbl_idf_param_k"),
+            ("m (exp. de Tr)", "lbl_idf_param_m"),
+            ("n (exp. de t)", "lbl_idf_param_n"),
+            ("R² (bondad de ajuste)", "lbl_idf_param_r2"),
+        ]
+        for col, (texto_desc, nombre_attr) in enumerate(_etiquetas_idf):
+            lbl_desc = QLabel(texto_desc)
+            lbl_desc.setAlignment(Qt.AlignCenter)
+            lbl_desc.setStyleSheet("font-size: 7.7pt; color: #4a4a4a;")
+            lbl_desc.setWordWrap(True)
+            grid_idf_params.addWidget(lbl_desc, 0, col)
+            lbl_val = QLabel("—")
+            lbl_val.setAlignment(Qt.AlignCenter)
+            lbl_val.setStyleSheet("font-size: 11pt; font-weight: bold; color: #0d3757;")
+            setattr(self, nombre_attr, lbl_val)
+            grid_idf_params.addWidget(lbl_val, 1, col)
+        h_idf_grid_centrado = QHBoxLayout()
+        h_idf_grid_centrado.addStretch()
+        h_idf_grid_centrado.addLayout(grid_idf_params)
+        h_idf_grid_centrado.addStretch()
+        v_idf_resumen.addLayout(h_idf_grid_centrado)
+
+        lbl_idf_leyenda = QLabel("i: intensidad (mm/h)  ·  Tr: periodo de retorno (años)  ·  t: duración (min)")
+        lbl_idf_leyenda.setAlignment(Qt.AlignCenter)
+        lbl_idf_leyenda.setStyleSheet("font-size: 7.7pt; color: #6a6a6a; font-style: italic;")
+        lbl_idf_leyenda.setWordWrap(True)
+        v_idf_resumen.addWidget(lbl_idf_leyenda)
+
+        h_idf_resumen_centrado = QHBoxLayout()
+        h_idf_resumen_centrado.addStretch()
+        h_idf_resumen_centrado.addWidget(frame_idf_resumen, stretch=0)
+        h_idf_resumen_centrado.addStretch()
+        v_idf.addLayout(h_idf_resumen_centrado)
 
         self.canvas_idf_log = IdfCanvas(self, width=7.6, height=5.2)
         v_idf.addWidget(self.canvas_idf_log)
@@ -2401,9 +2491,12 @@ class HydroAndinaProDialog(QDialog):
 
             combinada = idf_curves.ajustar_idf_combinada(p24_por_tr, exponente_n)
             self.lbl_ecuacion_idf_combinada.setText(
-                "Ecuación IDF combinada (Tr y t a la vez, ajustada sobre todos los puntos de todas "
-                f"las curvas):\n{combinada['ecuacion_texto']}\nR² = {combinada['r2']:.5f}"
+                f"i = {combinada['K']:.3f} · Tr^{combinada['m']:.4f} / t^{combinada['n_exp']:.4f}"
             )
+            self.lbl_idf_param_k.setText(f"{combinada['K']:.3f}")
+            self.lbl_idf_param_m.setText(f"{combinada['m']:.4f}")
+            self.lbl_idf_param_n.setText(f"{combinada['n_exp']:.4f}")
+            self.lbl_idf_param_r2.setText(f"{combinada['r2']:.5f}")
 
             self.canvas_idf_log.plot_curvas_idf(datos_por_tr, ecuaciones_por_tr, escala_log=True)
             self.canvas_idf_cartesiano.plot_curvas_idf(datos_por_tr, ecuaciones_por_tr, escala_log=False)
