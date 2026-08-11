@@ -1471,10 +1471,24 @@ class HydroAndinaProDialog(QDialog):
 
             self._agregar_titulo_grupo_morfo("4 — Pendiente media de la cuenca")
             if g4 is not None:
+                # Las advertencias de plausibilidad se muestran EN LA PROPIA
+                # FILA del parámetro afectado, no solo en un mensaje aparte:
+                # un valor corrupto que se ve normal en la tabla se copia a un
+                # informe sin que nadie lo note.
+                avisos_g4 = g4.get("advertencias") or []
+                comentario_pct = g4["interpretacion"]
+                if avisos_g4:
+                    comentario_pct = "*** VALOR NO FIABLE *** " + avisos_g4[0]
                 self._agregar_fila_morfo("Pendiente media de la cuenca", "Scuenca", g4["S_cuenca_pct"],
-                                          g4["interpretacion"], clave_lookup="Scuenca_pct")
+                                          comentario_pct, clave_lookup="Scuenca_pct")
                 self._agregar_fila_morfo("Pendiente media de la cuenca", "Scuenca", g4["S_cuenca_deg"],
                                           clave_lookup="Scuenca_deg")
+                if avisos_g4:
+                    QMessageBox.warning(
+                        self, "Resultados morfométricos no fiables",
+                        "El cálculo detectó valores imposibles, que indican un problema en los datos de "
+                        "entrada y NO deben usarse para diseño:\n\n- " + "\n\n- ".join(avisos_g4)
+                    )
             else:
                 self._agregar_fila_morfo("Pendiente media de la cuenca", "Scuenca", "—", clave_lookup="Scuenca_pct")
                 self._agregar_fila_morfo("Pendiente media de la cuenca", "Scuenca", "—", clave_lookup="Scuenca_deg")

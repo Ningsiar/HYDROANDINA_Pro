@@ -262,10 +262,49 @@ def grupo4_pendiente_hipsometria(slope_array_pct: np.ndarray, z_array: np.ndarra
         curva.append({"elevacion_m": round(umbral, 2), "elevacion_relativa_pct": round(elevacion_relativa, 2),
                       "area_acumulada_pct": round(area_sobre_umbral, 2)})
 
+    # --- VALIDACIÓN DE PLAUSIBILIDAD (v0.2.58) ---
+    # No se RECORTA ningún valor: una pendiente en % puede superar
+    # legítimamente el 100% (100% = 45°, y las cuencas altoandinas
+    # rebasan ese umbral con frecuencia), así que limitarla a 100
+    # falsearía cuencas escarpadas reales. Lo que sí es imposible es que
+    # la MEDIA de toda una cuenca ronde la vertical: eso delata que el
+    # array de entrada está contaminado.
+    # El caso real que motivó esta comprobación: al recortar el MDE a la
+    # cuenca sin declarar el valor sin-dato, las celdas de fuera quedaban
+    # en 0 y creaban un acantilado artificial de miles de metros en una
+    # sola celda justo en el borde; la media salía 3167% (88.2°) y la
+    # cota mínima 0 m s.n.m. en una cuenca cuyo mínimo real era 3525 m.
+    advertencias = []
+    # Umbral en 300% (71.6°): calibrado con pruebas para NO marcar cuencas
+    # altoandinas legítimamente escarpadas -- una media de 120% (50°) es
+    # empinada pero perfectamente real y no debe generar aviso -- y sí
+    # capturar la contaminación, que en el caso observado dio 4026% (88.6°).
+    if slope_array_pct.size and s_media_pct > 300.0:
+        advertencias.append(
+            f"La pendiente MEDIA de la cuenca resultó {s_media_pct:.1f}% ({s_media_deg:.1f}°), "
+            "prácticamente vertical, lo que no es posible para el promedio de una cuenca completa. "
+            "Casi con seguridad el MDE recortado conserva celdas de relleno fuera del polígono (sin "
+            "declarar como sin-dato), que forman un acantilado artificial en el borde. Revise el "
+            "recorte del MDE antes de usar este valor."
+        )
+    if z_array.size:
+        rango = z_max - z_min
+        mediana_z = float(np.median(z_array))
+        # Un mínimo que se aparta de la mediana mucho más que el resto de
+        # la distribución es la firma típica del relleno con ceros.
+        if rango > 0 and (mediana_z - z_min) > 0.8 * rango and z_min < mediana_z * 0.5:
+            advertencias.append(
+                f"La cota mínima ({z_min:.1f} m) está desproporcionadamente por debajo de la mediana "
+                f"({mediana_z:.1f} m) de la cuenca: es la firma de celdas de relleno contadas como "
+                "cotas reales. El relieve H, la pendiente media, la curva hipsométrica y los tiempos "
+                "de concentración que dependen de ellos quedarían falseados."
+            )
+
     return {
         "S_cuenca_pct": round(s_media_pct, 3), "S_cuenca_deg": round(s_media_deg, 3),
         "interpretacion": "Muy escarpada" if s_media_pct > 30 else "Pendiente moderada a suave",
         "curva_hipsometrica": curva,
+        "advertencias": advertencias,
     }
 
 

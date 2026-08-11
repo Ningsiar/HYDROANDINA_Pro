@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.2.57
+version=0.2.58
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,36 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.2.58: *** CORRECCION CRITICA *** de las estadisticas del MDE recortado a la cuenca, que
+      falseaban TODA la morfometria. Reportado por el usuario: cota minima 0.0 m s.n.m. en una cuenca
+      altoandina cuyo minimo real es 3525 m, y pendiente media de 3167% (88.2 grados).
+      CAUSA: clip_dem_a_cuenca llamaba a gdal:cliprasterbymasklayer SIN el parametro NODATA. Sin el,
+      gdalwarp rellena con CERO las celdas del rectangulo envolvente que quedan fuera del poligono de
+      cuenca y NO las declara como sin-dato, de modo que entran en las estadisticas como cotas reales.
+      core/raster_stats.leer_array_valido() ya filtraba el sin-dato correctamente, pero no habia ninguno
+      que filtrar.
+      ALCANCE DEL DAÑO: no se limitaba a la cota minima. Z50 salia 0, Zmed quedaba a la mitad de su
+      valor, y el relieve H = Zmax - Zmin pasaba de ~630 m a 4066 m. De H y de la pendiente media
+      dependen la curva hipsometrica y varios de los 14 metodos de tiempo de concentracion, y de Tc
+      depende el caudal de diseño: el error se propagaba a TODO el analisis aguas abajo. Ademas, el
+      relleno de ceros formaba un acantilado artificial de miles de metros en una sola celda justo en el
+      borde de la cuenca, y esas celdas casi verticales arrastraban la pendiente media hasta 88 grados.
+      CORRECCION: se fija NODATA = -9999 en el recorte (convenio habitual en MDE y muy lejos de
+      cualquier cota real de la Tierra), con lo que esas celdas quedan correctamente excluidas.
+      SOBRE EL LIMITE DE 100% EN LA PENDIENTE: el usuario pidio acotar la pendiente a 100 por parecer
+      imposible superarlo. NO se hizo, y conviene explicar por que: la pendiente en porcentaje es
+      tan(angulo)*100, de modo que 45 grados = 100% y 60 grados = 173%; superar el 100% es
+      perfectamente legitimo y frecuente en cuencas altoandinas. Acotar habria ocultado el error de
+      datos real y falseado cuencas escarpadas validas. Lo imposible no era el >100% sino que la MEDIA
+      de una cuenca completa rondara la vertical.
+      VALIDACION DE PLAUSIBILIDAD AÑADIDA: grupo4_pendiente_hipsometria detecta ahora esta clase de
+      contaminacion y devuelve advertencias, sin recortar ningun valor. El umbral de pendiente media se
+      calibro con pruebas en 300% (71.6 grados) para NO marcar cuencas legitimamente escarpadas -- se
+      verifico que medias de 120% (50 grados) y 200% (63 grados) no generan aviso -- y si capturar el
+      caso real, que dio 4026% en la reproduccion. Se detecta ademas la firma del relleno con ceros
+      comparando la cota minima con la mediana de la cuenca. Las advertencias se muestran en la PROPIA
+      FILA del parametro afectado ademas de en un cuadro de dialogo: un valor corrupto que se ve normal
+      en la tabla acaba copiado a un informe sin que nadie lo note.
     - v0.2.57: *** ZONA UTM EQUIVOCADA *** -- causa del error persistente al delimitar, identificada al
       ver los numeros reales que ya reportaba el mensaje mejorado.
       SINTOMA: la delimitacion fallaba con el punto de salida fuera del MDE, con una extension de MDE de

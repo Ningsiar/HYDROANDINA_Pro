@@ -225,13 +225,36 @@ def extraer_y_recortar_red(raster_cauces, ruta_cuenca_vector, region, cellsize=N
     return red_recortada
 
 
+# Valor sin-dato para el MDE recortado. Se elige -9999 por ser el
+# convenio más extendido en MDE y quedar muy lejos de cualquier cota
+# real de la Tierra (el punto más bajo emergido está a -430 m).
+NODATA_MDE = -9999.0
+
+
 def clip_dem_a_cuenca(dem_layer, cuenca_vector_layer, context=None, feedback=None):
-    """Recorta y enmascara el MDE al polígono de cuenca (para estadísticas
-    zonales, curva hipsométrica, pendiente media, etc.)."""
+    """
+    Recorta y enmascara el MDE al polígono de cuenca (para estadísticas
+    zonales, curva hipsométrica, pendiente media, etc.).
+
+    *** POR QUÉ SE FIJA NODATA EXPLÍCITAMENTE (v0.2.58) ***
+    Sin el parámetro NODATA, gdalwarp rellena con CERO las celdas del
+    rectángulo envolvente que quedan FUERA del polígono de cuenca, y no
+    las declara como sin-dato. Esos ceros entran entonces en las
+    estadísticas como si fueran cotas reales: en una cuenca altoandina
+    con cotas de 3525 a 4558 m, la cota mínima salía 0.0 m s.n.m. (caso
+    real reportado). El daño no se queda ahí -- el relieve H = Zmax-Zmin
+    pasaba de ~630 m a ~4558 m, y de H dependen la pendiente media de la
+    cuenca, la curva hipsométrica y varios de los 14 métodos de tiempo de
+    concentración, así que el error se propagaba a TODO el análisis
+    aguas abajo, incluido el caudal de diseño.
+    Al declarar NODATA, esas celdas quedan correctamente excluidas por
+    core/raster_stats.leer_array_valido(), que ya filtraba el sin-dato
+    pero no tenía ninguno que filtrar.
+    """
     return processing.run(
         "gdal:cliprasterbymasklayer",
         {"INPUT": dem_layer, "MASK": cuenca_vector_layer, "CROP_TO_CUTLINE": True,
-         "OUTPUT": "TEMPORARY_OUTPUT"},
+         "NODATA": NODATA_MDE, "OUTPUT": "TEMPORARY_OUTPUT"},
         context=context, feedback=feedback, is_child_algorithm=True,
     )["OUTPUT"]
 
