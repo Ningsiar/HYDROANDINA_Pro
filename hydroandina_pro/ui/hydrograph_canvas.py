@@ -82,6 +82,33 @@ class HydrographCanvas(FigureCanvas):
         "Aforo indirecto": "#0E7490",
     }
 
+    def plot_separacion_flujo_base(self, caudal_total, flujo_base, escorrentia_directa,
+                                     metodo, bfi, etiqueta_x="Paso de tiempo"):
+        """
+        Hidrograma observado con el flujo base separado de la escorrentía
+        directa, en áreas apiladas: la franja inferior es el flujo base y
+        la superior la escorrentía directa, de modo que la altura total
+        es siempre el caudal observado.
+        """
+        self.fig.clear()
+        self.ax = self.fig.add_subplot(111)
+        x = list(range(len(caudal_total)))
+
+        self.ax.fill_between(x, 0, flujo_base, color="#2E7D32", alpha=0.55, label="Flujo base")
+        self.ax.fill_between(x, flujo_base, caudal_total, color="#1F3864", alpha=0.40,
+                              label="Escorrentía directa")
+        self.ax.plot(x, caudal_total, linewidth=1.8, color="#0D2440", label="Caudal observado total")
+        self.ax.plot(x, flujo_base, linewidth=1.6, color="#1B5E20")
+
+        self.ax.set_xlabel(etiqueta_x)
+        self.ax.set_ylabel("Caudal (m³/s)")
+        self.ax.set_title(f"Separación de flujo base — {metodo}   (BFI = {bfi:.3f})", pad=12)
+        self.ax.set_ylim(0, max(caudal_total) * 1.15 if caudal_total else 1)
+        self.ax.grid(True, linestyle=":", linewidth=0.5)
+        self.ax.legend(fontsize=8, loc="upper right")
+        self.fig.tight_layout()
+        self.draw()
+
     def plot_transito(self, tiempos_h, caudal_entrada, caudal_salida, metodo,
                        qp_entrada, qp_salida, atenuacion_pct, retardo_h,
                        almacenamiento_m3=None):

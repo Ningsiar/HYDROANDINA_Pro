@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.2.49
+version=0.2.50
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,46 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.2.50: completa la lista de mejoras solicitada -- items 3, 6 y 4 (los items 5, 2, 1 y 7 se
+      entregaron en las v0.2.44, v0.2.48 y v0.2.49).
+      (1) ITEM 3 -- BANDAS DE CONFIANZA POR BOOTSTRAP para P24(Tr) en la Pestaña 5. El analisis
+      devolvia un unico valor por periodo de retorno y esa cifra pasaba al caudal de diseno como si
+      fuera exacta; en realidad se estimo con 20-40 anos de datos. El bootstrap de percentiles
+      remuestrea la serie con reposicion y reajusta la distribucion cada vez. Verificado: la amplitud
+      relativa del intervalo CRECE monotonamente con Tr (de 19.9% en Tr=2 a 41.5% en Tr=1000 sobre una
+      serie de n=30), que es lo que debe ocurrir al extrapolar; el resultado es reproducible al fijar
+      la semilla (sin ella la banda cambiaria en cada clic sin cambiar los datos); los remuestreos que
+      no logran ajustarse se descartan, se cuentan y se avisa si superan el 5%. El grafico superpone
+      los datos observados con posicion de graficacion de Weibull, para juzgar el ajuste en el rango
+      donde SI hay observaciones. Se documenta el limite del metodo: mide la incertidumbre por tener
+      pocos datos, NO el error por haber elegido una distribucion equivocada.
+      (2) ITEM 6 -- SEPARACION DE FLUJO BASE (nuevo core/baseflow.py) con tres metodos: Lyne-Hollick
+      (1979), Eckhardt (2005) y minimos locales (USGS/HYSEP). Sirve para calibrar el numero de curva y
+      los hidrogramas unitarios contra crecidas reales -- esos metodos producen escorrentia DIRECTA, no
+      caudal total, asi que compararlos con un caudal aforado sin separar el flujo base sobreestima
+      sistematicamente el ajuste -- y para obtener el Indice de Flujo Base (BFI). Verificado contra una
+      serie sintetica de BFI conocido (0.5394): minimos locales lo recupera exactamente, Lyne-Hollick
+      converge a el al aumentar las pasadas (0.726 -> 0.567 -> 0.540 -> 0.527 con 1, 3, 5 y 7 pasadas),
+      lo que confirma empiricamente la debilidad conocida de ese metodo y por que Eckhardt la corrige
+      con el BFImax; y se comprobo que BFImax gobierna el resultado de Eckhardt (BFI de 0.68/0.45/0.21
+      para BFImax de 0.80/0.50/0.25), por lo que se presenta como parametro a calibrar, no como
+      detalle. Se corrigio ademas que las tres series (total, base y directa) se redondeaban por
+      separado y dejaban de sumar exactamente, lo que habria roto cualquier comprobacion del usuario al
+      exportarlas. Se documenta que la separacion NO tiene solucion unica: por eso se calculan los tres
+      metodos y su dispersion se reporta como medida de robustez.
+      (3) ITEM 4 -- ANALISIS DE FRECUENCIA NO ESTACIONARIO (Normal y Gumbel con tendencia lineal en el
+      parametro de posicion), presentado deliberadamente como ANALISIS DE SENSIBILIDAD y no como
+      reemplazo del analisis estacionario. Verificado en dos casos: una serie sin tendencia se declara
+      correctamente no significativa (p=0.876); y en una serie con una tendencia REAL impuesta de
+      +3 mm/decada, el estimador la recupera bien (+3.33 mm/decada) pero el p-valor sale 0.117 -- es
+      decir, con 34 anos y un ruido de ~12 mm una tendencia real de esa magnitud NO alcanza
+      significancia estadistica. El modulo lo reporta asi en vez de sobrevender el resultado, y en ese
+      caso concluye explicitamente que debe usarse el valor estacionario. La tabla de sensibilidad
+      muestra cuanto cambiaria el diseno en el primer ano, el ultimo observado y 20 anos despues,
+      marcando este ultimo como EXTRAPOLACION. Se advierte en la interfaz que la tendencia debe tener
+      causa fisica identificada (una causada por cambio de emplazamiento de la estacion es un problema
+      de datos, a corregir en el control de calidad, no una senal a modelar) y que no hay consenso en
+      la comunidad hidrologica sobre usar estos modelos en diseno.
     - v0.2.49: TRANSITO DE AVENIDAS (item 7) -- nuevo modulo core/flood_routing.py y nueva seccion en la
       Pestaña 7. El hidrograma que calcula esa pestaña corresponde a la SALIDA DE LA CUENCA; si la obra
       que se diseña esta aguas abajo (un puente kilometros mas abajo, una defensa riberena en otro tramo,

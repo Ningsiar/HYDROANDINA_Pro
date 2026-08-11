@@ -1238,6 +1238,203 @@ def bandas_confianza_bootstrap(datos: List[float], clave_distribucion: str,
     }
 
 
+# ---------------------------------------------------------------------
+# Análisis de frecuencia NO ESTACIONARIO
+# ---------------------------------------------------------------------
+# El análisis de frecuencia clásico supone ESTACIONARIEDAD: que la
+# distribución de la que provienen los máximos anuales es la misma todos
+# los años. Si la serie tiene una tendencia (por cambio climático, por
+# cambio de uso del suelo en la cuenca, o por un cambio en la instrumentación
+# o en el emplazamiento de la estación), ese supuesto se rompe y el "Tr=100
+# años" deja de tener un significado único: la precipitación asociada a esa
+# probabilidad cambia con el año.
+#
+# Aquí se ajustan Normal y Gumbel con TENDENCIA LINEAL EN EL PARÁMETRO DE
+# POSICIÓN y escala constante:
+#       Normal:  mu(t) = mu0 + mu1*t ,  sigma constante
+#       Gumbel:  xi(t) = xi0 + xi1*t ,  alpha constante
+# El ajuste es por mínimos cuadrados sobre el tiempo (que para la Normal
+# coincide con la máxima verosimilitud) más el ajuste de la escala sobre
+# los residuos.
+#
+# ADVERTENCIAS QUE HAY QUE LEER ANTES DE USAR ESTO EN UN DISEÑO:
+#   1. Una tendencia ajustada NO debe extrapolarse lejos del periodo
+#      observado. Proyectar una tendencia lineal 50 años hacia adelante a
+#      partir de 30 años de datos no tiene respaldo: nada garantiza que
+#      siga siendo lineal, ni que siga existiendo.
+#   2. Antes de adoptar un modelo no estacionario hay que comprobar que la
+#      tendencia sea ESTADÍSTICAMENTE SIGNIFICATIVA (aquí se reporta el
+#      p-valor de la pendiente) y, sobre todo, que tenga una CAUSA FÍSICA
+#      identificada. Una tendencia significativa causada por un cambio de
+#      emplazamiento de la estación es un problema de datos, no una señal
+#      climática, y debe corregirse en el control de calidad (pestaña 6),
+#      no modelarse como no estacionariedad.
+#   3. La comunidad hidrológica NO tiene consenso sobre usar modelos no
+#      estacionarios en diseño; hay literatura relevante en contra
+#      ("Stationarity is Undead", Serinaldi & Kilsby 2015; Montanari &
+#      Koutsoyiannis 2014) que argumenta que gran parte de las tendencias
+#      aparentes son explicables por la variabilidad natural de largo
+#      plazo. Trate el resultado como un ANÁLISIS DE SENSIBILIDAD frente
+#      al valor estacionario, no como un reemplazo automático de este.
+
+def _regresion_lineal(x: List[float], y: List[float]) -> dict:
+    """Regresión lineal simple y = a + b*x por mínimos cuadrados, con el
+    error estándar de la pendiente y su p-valor (prueba t de dos colas,
+    aproximada por la normal para n grande)."""
+    n = len(x)
+    if n < 3:
+        raise ValueError("Se necesitan al menos 3 puntos para una regresión lineal.")
+    mx, my = sum(x) / n, sum(y) / n
+    sxx = sum((xi - mx) ** 2 for xi in x)
+    if sxx <= 0:
+        raise ValueError("Todos los valores de tiempo son iguales; no se puede ajustar una tendencia.")
+    sxy = sum((xi - mx) * (yi - my) for xi, yi in zip(x, y))
+    b = sxy / sxx
+    a = my - b * mx
+    residuos = [yi - (a + b * xi) for xi, yi in zip(x, y)]
+    gl = n - 2
+    s2 = sum(r * r for r in residuos) / gl if gl > 0 else 0.0
+    error_b = math.sqrt(s2 / sxx) if sxx > 0 and s2 > 0 else 0.0
+    t_stat = (b / error_b) if error_b > 0 else 0.0
+    # p-valor de dos colas aproximado con la normal estándar: para gl>=20
+    # la diferencia con la t de Student es pequeña, y estas series suelen
+    # tener 20-40 años. Se advierte en el resultado si gl es menor.
+    p_valor = 2.0 * (1.0 - _cdf_normal_estandar(abs(t_stat)))
+    syy = sum((yi - my) ** 2 for yi in y)
+    r2 = 1.0 - (sum(r * r for r in residuos) / syy) if syy > 0 else 0.0
+    return {"intercepto": a, "pendiente": b, "residuos": residuos, "error_pendiente": error_b,
+            "t": t_stat, "p_valor": p_valor, "r2": r2, "grados_libertad": gl}
+
+
+def ajustar_no_estacionario(datos: List[float], anios: List[int] = None,
+                             tipo: str = "gumbel") -> dict:
+    """
+    Ajusta un modelo no estacionario con tendencia lineal en el parámetro
+    de posición. `tipo` puede ser "normal" o "gumbel".
+
+    anios: lista de años correspondiente a cada dato. Si no se pasa, se
+    numeran 1..n (el resultado es el mismo salvo el origen de tiempos).
+    """
+    if tipo not in ("normal", "gumbel"):
+        raise ValueError("tipo debe ser 'normal' o 'gumbel'.")
+    n = len(datos)
+    if n < 10:
+        raise ValueError(
+            "Se necesitan al menos 10 años para intentar un ajuste no estacionario con sentido "
+            "(con menos datos, cualquier tendencia aparente es indistinguible del ruido)."
+        )
+    if anios is None:
+        anios = list(range(1, n + 1))
+    if len(anios) != n:
+        raise ValueError("La lista de años debe tener la misma longitud que la serie de datos.")
+
+    t = [float(a) for a in anios]
+    reg = _regresion_lineal(t, [float(v) for v in datos])
+    residuos = reg["residuos"]
+
+    if tipo == "normal":
+        sigma = math.sqrt(sum(r * r for r in residuos) / (n - 2))
+        parametros = {"mu0": reg["intercepto"], "mu1_por_año": reg["pendiente"], "sigma": sigma}
+        nombre = "Normal no estacionaria (μ con tendencia lineal)"
+
+        def cuantil_en(p, anio):
+            return (reg["intercepto"] + reg["pendiente"] * anio) + sigma * cuantil_normal_estandar(p)
+    else:
+        # Gumbel sobre los residuos: alpha desde su desviación estándar,
+        # y la corrección de la constante de Euler se absorbe en el
+        # intercepto para que xi(t) quede centrado correctamente.
+        desv_residuos = math.sqrt(sum(r * r for r in residuos) / (n - 2))
+        alpha = desv_residuos * math.sqrt(6.0) / math.pi
+        xi0 = reg["intercepto"] - 0.5772156649 * alpha
+        parametros = {"xi0": xi0, "xi1_por_año": reg["pendiente"], "alpha": alpha}
+        nombre = "Gumbel no estacionaria (ξ con tendencia lineal)"
+
+        def cuantil_en(p, anio):
+            return (xi0 + reg["pendiente"] * anio) - alpha * math.log(-math.log(p))
+
+    anio_inicial, anio_final = min(anios), max(anios)
+    significativa = reg["p_valor"] < 0.05
+
+    return {
+        "tipo": tipo,
+        "nombre": nombre,
+        "parametros": parametros,
+        "tendencia_por_año": round(reg["pendiente"], 5),
+        "tendencia_por_decada": round(reg["pendiente"] * 10.0, 4),
+        "p_valor_tendencia": round(reg["p_valor"], 5),
+        "r2_tendencia": round(reg["r2"], 5),
+        "tendencia_significativa_5pct": significativa,
+        "anio_inicial": anio_inicial,
+        "anio_final": anio_final,
+        "n_datos": n,
+        "cuantil_en": cuantil_en,
+        "advertencia_gl": (
+            f"Solo {reg['grados_libertad']} grados de libertad: el p-valor se aproximó con la "
+            "distribución normal y con tan pocos datos es poco fiable."
+            if reg["grados_libertad"] < 20 else None
+        ),
+        "conclusion": (
+            f"Tendencia de {reg['pendiente'] * 10:+.2f} mm por década, ESTADÍSTICAMENTE SIGNIFICATIVA "
+            f"al 5% (p={reg['p_valor']:.4f}). Antes de adoptarla en un diseño, verifique que tenga una "
+            "causa física identificada (clima, cambio de uso del suelo) y no sea un artefacto de la "
+            "estación (cambio de emplazamiento o de instrumento), que debe corregirse en el control de "
+            "calidad, no modelarse como no estacionariedad."
+            if significativa else
+            f"Tendencia de {reg['pendiente'] * 10:+.2f} mm por década, NO significativa al 5% "
+            f"(p={reg['p_valor']:.4f}). Con esta serie no hay evidencia estadística suficiente para "
+            "abandonar el análisis estacionario: use el resultado estacionario como valor de diseño."
+        ),
+    }
+
+
+def comparar_estacionario_vs_no_estacionario(datos: List[float], anios: List[int] = None,
+                                              tipo: str = "gumbel",
+                                              periodos_retorno: List[int] = None,
+                                              anios_evaluacion: List[int] = None) -> dict:
+    """
+    Compara la precipitación de diseño estacionaria con la que da el
+    modelo no estacionario evaluado en distintos años. Es la forma
+    recomendada de usar esto: como ANÁLISIS DE SENSIBILIDAD, viendo
+    cuánto cambiaría el valor de diseño, no como reemplazo automático.
+    """
+    n = len(datos)
+    if anios is None:
+        anios = list(range(1, n + 1))
+    periodos_retorno = list(periodos_retorno or PERIODOS_RETORNO_DEFAULT)
+    modelo = ajustar_no_estacionario(datos, anios, tipo)
+
+    if anios_evaluacion is None:
+        # Por defecto: primer año, último año observado, y el último + 20,
+        # que ya es una EXTRAPOLACIÓN y se marca como tal.
+        anios_evaluacion = [modelo["anio_inicial"], modelo["anio_final"], modelo["anio_final"] + 20]
+
+    dist_estacionaria = (ajustar_gumbel_lmomentos(datos) if tipo == "gumbel"
+                         else ajustar_normal_lmomentos(datos))
+
+    tabla = {}
+    for tr in periodos_retorno:
+        p = 1.0 - 1.0 / tr
+        fila = {"estacionario": round(dist_estacionaria.cuantil(p), 3)}
+        for anio in anios_evaluacion:
+            valor = modelo["cuantil_en"](p, anio)
+            fila[anio] = {
+                "valor": round(valor, 3),
+                "diferencia_vs_estacionario_pct": round(
+                    (valor - fila["estacionario"]) / fila["estacionario"] * 100.0, 2
+                ) if fila["estacionario"] else None,
+                "es_extrapolacion": anio > modelo["anio_final"],
+            }
+        tabla[tr] = fila
+
+    return {
+        "modelo": modelo,
+        "nombre_estacionario": dist_estacionaria.nombre,
+        "anios_evaluacion": anios_evaluacion,
+        "periodos_retorno": periodos_retorno,
+        "tabla": tabla,
+    }
+
+
 PERIODOS_RETORNO_DEFAULT = [2, 5, 10, 25, 50, 100, 250, 500, 1000]
 
 

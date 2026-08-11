@@ -35,7 +35,7 @@ from .core import (delineation, morphometry, curve_number, tc_methods, dem_downl
                     design_storm, precip_source, scs_storm_patterns, pour_point_snap,
                     main_channel, landcover_soils, dem_download_asf, hydraulic_structures,
                     cn_generator_bridge, report_generator, project_export,
-                    quality_control, pmp_hershfield, direct_discharge_methods, flood_routing,
+                    quality_control, pmp_hershfield, direct_discharge_methods, flood_routing, baseflow,
                     data_completion, areal_precipitation, water_yield, scour, soil_loss,
                     sediment_transport, debris_flow, climate_change, mean_flow_models, etp_methods,
                     low_flows, phabsim, groundwater_flow, well_hydraulics, idf_curves)
@@ -325,6 +325,8 @@ class HydroAndinaProDialog(QDialog):
         self.metodo_ajuste_usado = "momentos_l"
         self.transito_resultado = {}
         self.bandas_confianza_resultado = {}
+        self.flujo_base_resultado = {}
+        self.no_estacionario_resultado = {}
         self.p24_disenio = {}
         self.periodos_retorno_actuales = []
         self.idf_resultados = {}  # curvas/ecuaciones IDF derivadas de p24_disenio (pestaña 5)
@@ -2358,6 +2360,64 @@ class HydroAndinaProDialog(QDialog):
         self.canvas_comparacion_tr_cartesiano = FrequencyCanvas(self, width=6.5, height=4.8)
         v.addWidget(self.canvas_comparacion_tr_cartesiano)
 
+        # ------- Análisis de frecuencia no estacionario -------
+        gb_no_est = QGroupBox("Análisis de frecuencia NO ESTACIONARIO (tendencia en la serie)")
+        v_ne = QVBoxLayout(gb_no_est)
+        lbl_ne = QLabel(
+            "El análisis clásico supone <b>estacionariedad</b>: que la distribución de la que provienen "
+            "los máximos anuales es la misma todos los años. Si la serie tiene tendencia (cambio "
+            "climático, cambio de uso del suelo, o un cambio de emplazamiento o instrumento en la "
+            "estación), ese supuesto se rompe y el «Tr=100 años» deja de tener un valor único. Aquí se "
+            "ajusta Normal o Gumbel con <b>tendencia lineal en el parámetro de posición</b>.<br><br>"
+            "<b>Léase antes de usarlo en un diseño:</b> (1) una tendencia ajustada <b>no debe "
+            "extrapolarse</b> lejos del periodo observado — proyectar 50 años a partir de 30 de datos no "
+            "tiene respaldo; los años posteriores al último observado se marcan como extrapolación. "
+            "(2) Debe ser <b>estadísticamente significativa</b> (se reporta el p-valor) y, sobre todo, "
+            "tener una <b>causa física identificada</b>: una tendencia causada por un cambio de "
+            "emplazamiento es un problema de datos que se corrige en el control de calidad, no una "
+            "señal a modelar. (3) <b>No hay consenso</b> en la comunidad hidrológica sobre usar modelos "
+            "no estacionarios en diseño (ver Serinaldi &amp; Kilsby 2015; Montanari &amp; Koutsoyiannis "
+            "2014). Trate esto como un <b>análisis de sensibilidad</b> frente al valor estacionario, no "
+            "como su reemplazo automático."
+        )
+        lbl_ne.setWordWrap(True)
+        v_ne.addWidget(lbl_ne)
+
+        h_ne = QHBoxLayout()
+        h_ne.addWidget(QLabel("Distribución:"))
+        self.combo_no_estacionario = QComboBox()
+        self.combo_no_estacionario.addItem("Gumbel con tendencia en ξ", "gumbel")
+        self.combo_no_estacionario.addItem("Normal con tendencia en μ", "normal")
+        h_ne.addWidget(self.combo_no_estacionario)
+        h_ne.addWidget(QLabel("Año inicial de la serie:"))
+        self.spin_anio_inicial = QSpinBox()
+        self.spin_anio_inicial.setRange(1900, 2100)
+        self.spin_anio_inicial.setValue(1990)
+        h_ne.addWidget(self.spin_anio_inicial)
+        self.btn_no_estacionario = QPushButton("Analizar tendencia")
+        self.btn_no_estacionario.clicked.connect(self._on_analizar_no_estacionario)
+        limitar_ancho_boton(self.btn_no_estacionario)
+        h_ne.addWidget(self.btn_no_estacionario)
+        h_ne.addStretch()
+        v_ne.addLayout(h_ne)
+
+        self.tabla_no_estacionario = crear_tabla_parametros()
+        v_ne.addWidget(self.tabla_no_estacionario)
+
+        self.tabla_sensibilidad_no_est = QTableWidget(0, 5)
+        self.tabla_sensibilidad_no_est.setHorizontalHeaderLabels(
+            ["Tr (años)", "Estacionario (mm)", "Primer año (mm)", "Último año (mm)",
+             "Último + 20 años (mm) — EXTRAPOLACIÓN"])
+        for _c in range(5):
+            self.tabla_sensibilidad_no_est.horizontalHeader().setSectionResizeMode(
+                _c, QHeaderView.ResizeToContents)
+        limitar_ancho_tabla(self.tabla_sensibilidad_no_est, ancho_maximo=820)
+        h_tabla_ne = QHBoxLayout()
+        h_tabla_ne.addWidget(self.tabla_sensibilidad_no_est)
+        h_tabla_ne.addStretch()
+        v_ne.addLayout(h_tabla_ne)
+        v.addWidget(gb_no_est)
+
         # ------- Bandas de confianza (bootstrap) -------
         gb_bandas = QGroupBox("Bandas de confianza de la precipitación de diseño (bootstrap)")
         v_bandas = QVBoxLayout(gb_bandas)
@@ -2558,6 +2618,62 @@ class HydroAndinaProDialog(QDialog):
         v.addWidget(gb_idf)
 
         self._agregar_pestaña_con_scroll(tab, "5. Precipitación Máx 24h")
+
+    def _on_analizar_no_estacionario(self):
+        if not self.serie_precip_anual:
+            QMessageBox.warning(self, "Falta la serie",
+                                 "Cargue primero la serie anual de precipitación máxima en 24h.")
+            return
+        try:
+            datos = self.serie_precip_anual.valores_mm
+            anio0 = self.spin_anio_inicial.value()
+            anios = list(range(anio0, anio0 + len(datos)))
+            tipo = self.combo_no_estacionario.currentData()
+            comp = frequency_analysis.comparar_estacionario_vs_no_estacionario(
+                datos, anios, tipo, periodos_retorno=self.periodos_retorno_actuales)
+            modelo = comp["modelo"]
+            self.no_estacionario_resultado = comp
+
+            filas = [
+                ("Modelo", modelo["nombre"], ""),
+                ("Periodo analizado", f"{modelo['anio_inicial']}–{modelo['anio_final']}", "",
+                 f"{modelo['n_datos']} años"),
+                ("Tendencia estimada", modelo["tendencia_por_decada"], "mm/década"),
+                ("p-valor de la tendencia", modelo["p_valor_tendencia"], "",
+                 "significativa al 5%" if modelo["tendencia_significativa_5pct"]
+                 else "NO significativa al 5%: no hay evidencia para abandonar el análisis estacionario"),
+                ("R² de la tendencia", modelo["r2_tendencia"], "",
+                 "fracción de la varianza de la serie explicada por la tendencia"),
+                ("Conclusión", "—", "", modelo["conclusion"]),
+            ]
+            if modelo.get("advertencia_gl"):
+                filas.append(("Advertencia", "—", "", modelo["advertencia_gl"]))
+            poblar_tabla_parametros(self.tabla_no_estacionario, filas)
+
+            self.tabla_sensibilidad_no_est.setRowCount(0)
+            a_ini, a_fin, a_ext = comp["anios_evaluacion"]
+            self.tabla_sensibilidad_no_est.setHorizontalHeaderLabels(
+                ["Tr (años)", "Estacionario (mm)", f"{a_ini} (mm)", f"{a_fin} (mm)",
+                 f"{a_ext} (mm) — EXTRAPOLACIÓN"])
+            for tr in comp["periodos_retorno"]:
+                f = comp["tabla"][tr]
+                fila = self.tabla_sensibilidad_no_est.rowCount()
+                self.tabla_sensibilidad_no_est.insertRow(fila)
+                self.tabla_sensibilidad_no_est.setItem(fila, 0, QTableWidgetItem(str(tr)))
+                self.tabla_sensibilidad_no_est.setItem(
+                    fila, 1, QTableWidgetItem(f"{f['estacionario']:.2f}"))
+                for col, anio in enumerate((a_ini, a_fin, a_ext), start=2):
+                    d = f[anio]
+                    item = QTableWidgetItem(
+                        f"{d['valor']:.2f}  ({d['diferencia_vs_estacionario_pct']:+.1f}%)")
+                    if d["es_extrapolacion"]:
+                        item.setToolTip(
+                            "Año posterior al último observado: la tendencia se está EXTRAPOLANDO. "
+                            "Nada garantiza que siga siendo lineal ni que persista.")
+                    self.tabla_sensibilidad_no_est.setItem(fila, col, item)
+            ajustar_alto_tabla(self.tabla_sensibilidad_no_est, filas_visibles_max=12)
+        except Exception as e:
+            QMessageBox.critical(self, "Error en el análisis no estacionario", str(e))
 
     def _on_calcular_bandas_confianza(self):
         if not self.resultados_frecuencia:
@@ -3481,6 +3597,83 @@ class HydroAndinaProDialog(QDialog):
         self.canvas_hidrograma = HydrographCanvas(self, width=6.5, height=4.8)
         v.addWidget(self.canvas_hidrograma)
 
+        # ---------------- Separación de flujo base ----------------
+        gb_flujo_base = QGroupBox("Separación de flujo base de un hidrograma OBSERVADO")
+        v_fb = QVBoxLayout(gb_flujo_base)
+        lbl_fb = QLabel(
+            "Descompone un hidrograma <b>aforado</b> en escorrentía directa (la respuesta rápida a la "
+            "lluvia) y flujo base (el aporte sostenido del agua subterránea). Sirve para dos cosas "
+            "concretas aquí: <b>(a) calibrar</b> el número de curva (pestaña 3) y los hidrogramas "
+            "unitarios de arriba contra crecidas reales — esos métodos producen escorrentía DIRECTA, no "
+            "caudal total, así que compararlos con un caudal aforado sin separar el flujo base "
+            "sobreestima sistemáticamente el ajuste; y <b>(b)</b> obtener el <b>Índice de Flujo Base "
+            "(BFI)</b>, descriptor de la capacidad de regulación natural de la cuenca.<br><br>"
+            "<b>Advertencia metodológica:</b> la separación del flujo base <b>no tiene solución única</b> "
+            "— no es una magnitud medible sino una construcción conceptual, y métodos (o parámetros) "
+            "distintos dan resultados distintos, todos formalmente válidos. Por eso se calculan los "
+            "tres a la vez: su coincidencia o divergencia es en sí misma información sobre cuán robusta "
+            "es la separación en esa serie. Use un método y unos parámetros de forma consistente en "
+            "todo un estudio, y repórtelos siempre."
+        )
+        lbl_fb.setWordWrap(True)
+        v_fb.addWidget(lbl_fb)
+
+        v_fb.addWidget(QLabel(
+            "Serie de caudales observados (m³/s), un valor por paso de tiempo — pegue desde Excel:"))
+        self.tabla_caudales_observados = TablaPegable(12, 1)
+        self.tabla_caudales_observados.setHorizontalHeaderLabels(["Caudal observado (m³/s)"])
+        limitar_ancho_tabla(self.tabla_caudales_observados, ancho_maximo=260)
+        ajustar_alto_tabla(self.tabla_caudales_observados, filas_visibles_max=10)
+        h_fb_tabla = QHBoxLayout()
+        h_fb_tabla.addWidget(self.tabla_caudales_observados)
+        h_fb_tabla.addStretch()
+        v_fb.addLayout(h_fb_tabla)
+
+        f_fb = QFormLayout()
+        f_fb.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.spin_fb_filtro = QDoubleSpinBox()
+        self.spin_fb_filtro.setRange(0.80, 0.999)
+        self.spin_fb_filtro.setDecimals(3)
+        self.spin_fb_filtro.setValue(0.925)
+        f_fb.addRow("Parámetro de filtro a — Lyne-Hollick (típico 0.90-0.98):", self.spin_fb_filtro)
+        self.spin_fb_pasadas = QSpinBox()
+        self.spin_fb_pasadas.setRange(1, 9)
+        self.spin_fb_pasadas.setValue(3)
+        f_fb.addRow("Pasadas de filtrado — Lyne-Hollick (a más pasadas, menor flujo base):",
+                     self.spin_fb_pasadas)
+        self.spin_fb_recesion = QDoubleSpinBox()
+        self.spin_fb_recesion.setRange(0.80, 0.999)
+        self.spin_fb_recesion.setDecimals(3)
+        self.spin_fb_recesion.setValue(0.980)
+        f_fb.addRow("Constante de recesión a — Eckhardt (típico 0.95-0.99):", self.spin_fb_recesion)
+        self.combo_fb_bfimax = QComboBox()
+        for _clave, (_val, _desc) in baseflow.BFIMAX_RECOMENDADOS.items():
+            self.combo_fb_bfimax.addItem(f"{_val:.2f} — {_desc}", _val)
+        f_fb.addRow("BFImax — Eckhardt (gobierna el resultado: calíbrelo):", self.combo_fb_bfimax)
+        self.spin_fb_intervalo = QSpinBox()
+        self.spin_fb_intervalo.setRange(3, 99)
+        self.spin_fb_intervalo.setValue(5)
+        f_fb.addRow("Intervalo de mínimos locales (pasos; N=A^0.2 con A en mi²):", self.spin_fb_intervalo)
+        v_fb.addLayout(f_fb)
+
+        h_fb_btn = QHBoxLayout()
+        btn_fb_intervalo = QPushButton("Estimar intervalo desde el área de la cuenca")
+        btn_fb_intervalo.clicked.connect(self._on_estimar_intervalo_minimos)
+        limitar_ancho_boton(btn_fb_intervalo)
+        h_fb_btn.addWidget(btn_fb_intervalo)
+        btn_fb_calc = QPushButton("Separar flujo base (los 3 métodos)")
+        btn_fb_calc.clicked.connect(self._on_separar_flujo_base)
+        limitar_ancho_boton(btn_fb_calc)
+        h_fb_btn.addWidget(btn_fb_calc)
+        h_fb_btn.addStretch()
+        v_fb.addLayout(h_fb_btn)
+
+        self.tabla_resultado_flujo_base = crear_tabla_parametros()
+        v_fb.addWidget(self.tabla_resultado_flujo_base)
+        self.canvas_flujo_base = HydrographCanvas(self, width=6.5, height=4.4)
+        v_fb.addWidget(self.canvas_flujo_base)
+        v.addWidget(gb_flujo_base)
+
         # ---------------- Tránsito de avenidas ----------------
         gb_transito = QGroupBox("Tránsito de avenidas (propagación del hidrograma aguas abajo)")
         v_tr = QVBoxLayout(gb_transito)
@@ -4248,6 +4441,83 @@ class HydroAndinaProDialog(QDialog):
                 self._actualizar_texto_resumen_hidraulica()
         except direct_discharge_methods.DirectDischargeError as e:
             QMessageBox.warning(self, "No se pudo calcular", str(e))
+
+    def _leer_caudales_observados(self):
+        valores = []
+        for fila in range(self.tabla_caudales_observados.rowCount()):
+            item = self.tabla_caudales_observados.item(fila, 0)
+            if item and item.text().strip():
+                try:
+                    valores.append(float(item.text().replace(",", ".")))
+                except ValueError:
+                    continue
+        return valores
+
+    def _on_estimar_intervalo_minimos(self):
+        g1 = self.morfometria_resultados.get("g1")
+        if not g1:
+            QMessageBox.warning(self, "Falta la morfometría",
+                                 "Calcule primero la morfometría (pestaña 2) para conocer el área.")
+            return
+        try:
+            n = baseflow.intervalo_minimos_locales(g1["A"])
+            self.spin_fb_intervalo.setValue(n)
+            QMessageBox.information(
+                self, "Intervalo estimado",
+                f"Área de la cuenca = {g1['A']} km² ({g1['A'] * 0.386102:.1f} mi²).\n"
+                f"Intervalo N = A^0.2 = {n} pasos de tiempo (redondeado al impar más próximo, "
+                "según el procedimiento USGS/HYSEP)."
+            )
+        except baseflow.BaseflowError as e:
+            QMessageBox.warning(self, "No se pudo estimar", str(e))
+
+    def _on_separar_flujo_base(self):
+        caudales = self._leer_caudales_observados()
+        if len(caudales) < 3:
+            QMessageBox.warning(
+                self, "Faltan datos",
+                "Ingrese al menos 3 caudales observados en la tabla (puede pegarlos desde Excel).")
+            return
+        try:
+            r = baseflow.comparar_metodos_separacion(
+                caudales,
+                parametro_filtro=self.spin_fb_filtro.value(),
+                n_pasadas=self.spin_fb_pasadas.value(),
+                parametro_recesion=self.spin_fb_recesion.value(),
+                bfi_max=self.combo_fb_bfimax.currentData(),
+                intervalo_minimos=min(self.spin_fb_intervalo.value(), len(caudales)),
+            )
+            self.flujo_base_resultado = r
+            comp = r["comparacion"]
+            filas = []
+            for clave in ("lyne_hollick", "eckhardt", "minimos_locales"):
+                d = r[clave]
+                filas.append((f"BFI — {d['metodo']}", d["BFI"], "",
+                               f"{d['BFI_pct']}% del volumen es flujo base"))
+            filas += [
+                ("BFI promedio de los 3 métodos", comp["BFI_promedio"], ""),
+                ("Dispersión entre métodos", comp["dispersion_BFI"], "",
+                 comp["interpretacion_dispersion"]),
+            ]
+            # Se detalla el método de Eckhardt, que es el recomendado por
+            # tener un tope físico (BFImax) en vez de depender del número
+            # de pasadas como Lyne-Hollick.
+            eck = r["eckhardt"]
+            filas += [
+                ("Caudal pico observado", eck["Qp_total_m3_s"], "m³/s"),
+                ("Flujo base en el instante del pico (Eckhardt)",
+                 eck["flujo_base_en_el_pico_m3_s"], "m³/s"),
+                ("Escorrentía directa en el pico (Eckhardt)",
+                 eck["escorrentia_directa_en_el_pico_m3_s"], "m³/s",
+                 "es este valor, no el caudal total, el comparable con el Qp de los hidrogramas unitarios"),
+                ("Interpretación del BFI", eck["BFI"], "", eck["interpretacion_bfi"]),
+            ]
+            poblar_tabla_parametros(self.tabla_resultado_flujo_base, filas)
+            self.canvas_flujo_base.plot_separacion_flujo_base(
+                eck["caudal_total_m3_s"], eck["flujo_base_m3_s"],
+                eck["escorrentia_directa_m3_s"], eck["metodo"], eck["BFI"])
+        except baseflow.BaseflowError as e:
+            QMessageBox.warning(self, "No se pudo separar el flujo base", str(e))
 
     def _on_cambiar_metodo_transito(self):
         self.stack_transito.setCurrentIndex(self.combo_metodo_transito.currentIndex())
