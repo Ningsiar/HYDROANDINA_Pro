@@ -45,6 +45,7 @@ from .ui.hydrograph_canvas import HydrographCanvas
 from .ui.frequency_canvas import FrequencyCanvas
 from .ui.idf_canvas import IdfCanvas
 from .ui.infiltration_canvas import InfiltrationCanvas
+from .ui.summary_box import CuadroResumenImpacto, centrar_en_layout
 from .ui.pasteable_table import TablaPegable
 from .ui.cross_section_canvas import SeccionTransversalCanvas
 from .ui.cav_canvas import CavCanvas
@@ -329,6 +330,9 @@ class HydroAndinaProDialog(QDialog):
         self.flujo_base_resultado = {}
         self.no_estacionario_resultado = {}
         self.infiltracion_resultado = {}
+        self.cuadros_infiltracion = {}
+        self.canvas_por_metodo_infiltracion = {}
+        self.resultados_infiltracion_por_metodo = {}
         self.p24_disenio = {}
         self.periodos_retorno_actuales = []
         self.idf_resultados = {}  # curvas/ecuaciones IDF derivadas de p24_disenio (pestaña 5)
@@ -1639,7 +1643,8 @@ class HydroAndinaProDialog(QDialog):
                 ("Horton (1940) — empírico exponencial", "horton"),
                 ("Philip (1957) — sorptividad + gravedad", "philip"),
                 ("Kostiakov / Kostiakov-Lewis (1932)", "kostiakov"),
-                ("Holtan (USDA-HL) — por almacenamiento disponible", "holtan")):
+                ("Holtan (USDA-HL) — por almacenamiento disponible", "holtan"),
+                ("Richards 1D (van Genuchten) — física completa", "richards")):
             self.combo_modelo_infiltracion.addItem(_txt, _clave)
         self.combo_modelo_infiltracion.currentIndexChanged.connect(
             lambda: self.stack_infiltracion.setCurrentIndex(
@@ -1651,7 +1656,7 @@ class HydroAndinaProDialog(QDialog):
         self.stack_infiltracion = QStackedWidget()
 
         # -- Green-Ampt --
-        _p = QWidget(); _f = QFormLayout(_p); _f.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        _p, _f = self._nueva_pagina_infiltracion()
         self.combo_textura_ga3 = QComboBox()
         for _clave, (_n, _k, _psi, _po) in infiltration.PARAMETROS_GREEN_AMPT.items():
             self.combo_textura_ga3.addItem(f"{_n}  (K={_k} mm/h, ψ={_psi} mm, θe={_po})", _clave)
@@ -1667,10 +1672,10 @@ class HydroAndinaProDialog(QDialog):
         self.spin_ga3_dth = QDoubleSpinBox(); self.spin_ga3_dth.setRange(0.01, 1.0)
         self.spin_ga3_dth.setDecimals(3); self.spin_ga3_dth.setValue(0.412)
         _f.addRow("Déficit de humedad Δθ:", self.spin_ga3_dth)
-        self.stack_infiltracion.addWidget(_p)
+        self._cerrar_pagina_infiltracion(_p, _f, "green_ampt")
 
         # -- Horton --
-        _p = QWidget(); _f = QFormLayout(_p); _f.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        _p, _f = self._nueva_pagina_infiltracion()
         self.combo_grupo_ho3 = QComboBox()
         for _g, (_d, _f0, _fc) in infiltration.PARAMETROS_HORTON.items():
             self.combo_grupo_ho3.addItem(f"{_d}  (f0={_f0}, fc={_fc} mm/h)", _g)
@@ -1686,10 +1691,10 @@ class HydroAndinaProDialog(QDialog):
         self.spin_ho3_k = QDoubleSpinBox(); self.spin_ho3_k.setRange(0.1, 20.0)
         self.spin_ho3_k.setDecimals(3); self.spin_ho3_k.setValue(infiltration.K_HORTON_DEFAULT)
         _f.addRow("Constante de decaimiento k (1/h; usual 2-7):", self.spin_ho3_k)
-        self.stack_infiltracion.addWidget(_p)
+        self._cerrar_pagina_infiltracion(_p, _f, "horton")
 
         # -- Philip --
-        _p = QWidget(); _f = QFormLayout(_p); _f.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        _p, _f = self._nueva_pagina_infiltracion()
         self.spin_ph_s = QDoubleSpinBox(); self.spin_ph_s.setRange(1.0, 500.0)
         self.spin_ph_s.setDecimals(2); self.spin_ph_s.setValue(60.0)
         _f.addRow("Sorptividad S (mm/h^0.5):", self.spin_ph_s)
@@ -1702,10 +1707,10 @@ class HydroAndinaProDialog(QDialog):
             "que el plugin usa la capacidad MEDIA de cada intervalo, que es el valor comparable con la "
             "intensidad media del mismo intervalo.")
         _l.setWordWrap(True); _f.addRow(_l)
-        self.stack_infiltracion.addWidget(_p)
+        self._cerrar_pagina_infiltracion(_p, _f, "philip")
 
         # -- Kostiakov --
-        _p = QWidget(); _f = QFormLayout(_p); _f.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        _p, _f = self._nueva_pagina_infiltracion()
         self.spin_ko_a = QDoubleSpinBox(); self.spin_ko_a.setRange(0.1, 500.0)
         self.spin_ko_a.setDecimals(2); self.spin_ko_a.setValue(40.0)
         _f.addRow("Coeficiente a (de ensayo de infiltrómetro):", self.spin_ko_a)
@@ -1720,10 +1725,10 @@ class HydroAndinaProDialog(QDialog):
             "tiende a CERO al crecer el tiempo — físicamente imposible, ningún suelo deja de infiltrar. "
             "La variante de Lewis (f_c > 0) lo corrige, y es la recomendable en tormentas largas.")
         _l.setWordWrap(True); _f.addRow(_l)
-        self.stack_infiltracion.addWidget(_p)
+        self._cerrar_pagina_infiltracion(_p, _f, "kostiakov")
 
         # -- Holtan --
-        _p = QWidget(); _f = QFormLayout(_p); _f.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        _p, _f = self._nueva_pagina_infiltracion()
         self.spin_hol_a = QDoubleSpinBox(); self.spin_hol_a.setRange(0.05, 3.0)
         self.spin_hol_a.setDecimals(3); self.spin_hol_a.setValue(0.5)
         _f.addRow("Índice de cobertura a (rango bibliográfico 0.1–1.0):", self.spin_hol_a)
@@ -1746,7 +1751,52 @@ class HydroAndinaProDialog(QDialog):
             "puede decaer). Atención: la formulación original es en pulgadas; el plugin convierte "
             "internamente, así que 'a' conserva su rango bibliográfico de 0.1–1.0 y SA se ingresa en mm.")
         _l.setWordWrap(True); _f.addRow(_l)
-        self.stack_infiltracion.addWidget(_p)
+        self._cerrar_pagina_infiltracion(_p, _f, "holtan")
+
+        # -- Richards 1D --
+        _p, _f = self._nueva_pagina_infiltracion()
+        self.combo_textura_vg = QComboBox()
+        for _clave, (_n, _tr, _ts, _al, _nv, _ks) in infiltration.PARAMETROS_VAN_GENUCHTEN.items():
+            self.combo_textura_vg.addItem(
+                f"{_n}  (θr={_tr}, θs={_ts}, α={_al} 1/cm, n={_nv}, Ks={_ks} cm/h)", _clave)
+        self.combo_textura_vg.setCurrentIndex(2)
+        self.combo_textura_vg.currentIndexChanged.connect(self._on_textura_vg)
+        _f.addRow("Clase textural (Carsel & Parrish, 1988):", self.combo_textura_vg)
+        self.spin_vg_tr = QDoubleSpinBox(); self.spin_vg_tr.setRange(0.0, 0.5)
+        self.spin_vg_tr.setDecimals(4); self.spin_vg_tr.setValue(0.065)
+        _f.addRow("Humedad residual θr:", self.spin_vg_tr)
+        self.spin_vg_ts = QDoubleSpinBox(); self.spin_vg_ts.setRange(0.1, 0.9)
+        self.spin_vg_ts.setDecimals(4); self.spin_vg_ts.setValue(0.41)
+        _f.addRow("Humedad saturada θs:", self.spin_vg_ts)
+        self.spin_vg_alpha = QDoubleSpinBox(); self.spin_vg_alpha.setRange(0.0001, 1.0)
+        self.spin_vg_alpha.setDecimals(4); self.spin_vg_alpha.setValue(0.075)
+        _f.addRow("α de van Genuchten (1/cm):", self.spin_vg_alpha)
+        self.spin_vg_n = QDoubleSpinBox(); self.spin_vg_n.setRange(1.01, 5.0)
+        self.spin_vg_n.setDecimals(3); self.spin_vg_n.setValue(1.89)
+        _f.addRow("n de van Genuchten (> 1):", self.spin_vg_n)
+        self.spin_vg_ks = QDoubleSpinBox(); self.spin_vg_ks.setRange(0.001, 100.0)
+        self.spin_vg_ks.setDecimals(4); self.spin_vg_ks.setValue(4.42)
+        _f.addRow("Conductividad saturada Ks (cm/h):", self.spin_vg_ks)
+        self.spin_vg_prof = QDoubleSpinBox(); self.spin_vg_prof.setRange(100.0, 10000.0)
+        self.spin_vg_prof.setValue(1500.0)
+        _f.addRow("Profundidad de la columna simulada (mm):", self.spin_vg_prof)
+        self.spin_vg_celdas = QSpinBox(); self.spin_vg_celdas.setRange(10, 200)
+        self.spin_vg_celdas.setValue(40)
+        _f.addRow("Número de celdas de la malla:", self.spin_vg_celdas)
+        self.spin_vg_succion = QDoubleSpinBox(); self.spin_vg_succion.setRange(-50000.0, -1.0)
+        self.spin_vg_succion.setValue(-1000.0)
+        _f.addRow("Succión inicial del perfil (mm, negativa):", self.spin_vg_succion)
+        _l = QLabel(
+            "El más riguroso de los seis: resuelve la ecuación de Richards en forma mixta con "
+            "iteración de Picard modificada (Celia et al., 1990) y volúmenes finitos, que es la "
+            "formulación conservativa en masa. <b>Límite medido:</b> converge en suelos de textura "
+            "gruesa a media (arena, arena franca, franco arenoso, franco, limo, franco arcillo-limoso) "
+            "con error de balance de 0 a 4.5·10⁻⁴ mm. En suelos muy finos, cuya Ks queda uno o dos "
+            "órdenes por debajo de la intensidad de la lluvia, el frente se vuelve casi discontinuo y "
+            "la iteración no converge: en ese caso el plugin avisa y lo razonable es usar Green-Ampt, "
+            "que está formulado precisamente para un frente abrupto. Es también el más lento.")
+        _l.setWordWrap(True); _f.addRow(_l)
+        self._cerrar_pagina_infiltracion(_p, _f, "richards")
 
         v_inf.addWidget(self.stack_infiltracion)
 
@@ -1764,9 +1814,16 @@ class HydroAndinaProDialog(QDialog):
 
         self.tabla_resultado_infiltracion = crear_tabla_parametros()
         v_inf.addWidget(self.tabla_resultado_infiltracion)
-        self.canvas_infiltracion = InfiltrationCanvas(self, width=7.0, height=4.6)
+        v_inf.addWidget(QLabel(
+            "<b>Comparación entre modelos</b> (se llena con el botón «Comparar TODOS los modelos»):"))
+        self.canvas_infiltracion = InfiltrationCanvas(self, width=7.0, height=5.4)
         v_inf.addWidget(self.canvas_infiltracion)
         v.addWidget(gb_infil)
+
+        v.addWidget(QLabel("<b>Cuadro resumen final de la pestaña:</b>"))
+        self.texto_resumen_pestana3 = QTextBrowser()
+        self.texto_resumen_pestana3.setMinimumHeight(200)
+        v.addWidget(self.texto_resumen_pestana3)
 
         self._agregar_pestaña_con_scroll(
             tab, "3. Métodos de pérdida SCS-CN / Horton / Green-Ampt / otros")
@@ -1774,6 +1831,126 @@ class HydroAndinaProDialog(QDialog):
     # ------------------------------------------------------------------
     # Modelos de infiltración (Pestaña 3)
     # ------------------------------------------------------------------
+    def _nueva_pagina_infiltracion(self):
+        """
+        Crea una página del selector de modelos con la estructura común:
+        formulario de parámetros arriba, y debajo (los añade
+        _cerrar_pagina_infiltracion) su propio cuadro resumen de impacto
+        y su propio gráfico. Cada método tiene los suyos en vez de
+        compartir uno solo, para poder compararlos alternando el
+        desplegable sin perder el contexto de cada uno.
+        """
+        pagina = QWidget()
+        contenedor = QVBoxLayout(pagina)
+        formulario = QFormLayout()
+        formulario.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        contenedor.addLayout(formulario)
+        return pagina, formulario
+
+    def _cerrar_pagina_infiltracion(self, pagina, formulario, clave):
+        """Añade a la página su cuadro de impacto y su gráfico, los
+        registra por clave de método y la inserta en el stack."""
+        contenedor = pagina.layout()
+        cuadro = CuadroResumenImpacto(ancho_maximo=680)
+        cuadro.actualizar(
+            titulo="SIN CALCULAR",
+            valor_principal="—",
+            subtitulo="Pulse «Calcular el modelo seleccionado» para obtener la lluvia efectiva",
+            tipo="info")
+        centrar_en_layout(cuadro, contenedor)
+        canvas = InfiltrationCanvas(self, width=6.9, height=4.3)
+        contenedor.addWidget(canvas)
+        self.cuadros_infiltracion[clave] = cuadro
+        self.canvas_por_metodo_infiltracion[clave] = canvas
+        self.stack_infiltracion.addWidget(pagina)
+
+    def _actualizar_cuadro_infiltracion(self, clave, r):
+        """Vuelca el resultado de un modelo en su cuadro de alto impacto.
+        El color comunica el régimen: verde si casi todo infiltra, ámbar
+        si la escorrentía es apreciable y rojo si domina la escorrentía,
+        que es la condición crítica para el caudal de diseño."""
+        cuadro = self.cuadros_infiltracion.get(clave)
+        if cuadro is None:
+            return
+        coef = r["coeficiente_escorrentia"]
+        tipo = "exito" if coef < 0.15 else ("atencion" if coef < 0.40 else "alerta")
+        metricas = [
+            ("Lluvia total", f"{r['lluvia_total_mm']:.1f} mm"),
+            ("Infiltrado", f"{r['infiltracion_total_mm']:.1f} mm"),
+            ("Coef. escorrentía", f"{coef:.3f}"),
+            ("Encharcamiento",
+             f"t = {r['tiempo_encharcamiento_h']} h" if r.get("hubo_encharcamiento") else "no hubo"),
+        ]
+        cuadro.actualizar(
+            titulo=r["metodo"].upper(),
+            valor_principal=f"Lluvia efectiva = {r['lluvia_efectiva_total_mm']:.2f} mm",
+            subtitulo="es la lámina que alimenta el hidrograma unitario y fija el caudal pico",
+            metricas=metricas,
+            leyenda=("balance de masa verificado: infiltración + efectiva = lluvia total  "
+                     f"(error {r['error_balance_masa_mm']:.1e} mm)"),
+            tipo=tipo)
+
+    def _actualizar_resumen_final_pestana3(self):
+        """Cuadro resumen final de la Pestaña 3: reúne el número de curva
+        (si se calculó) y todos los modelos de infiltración ya
+        ejecutados, ordenados por la lluvia efectiva que producen, que es
+        lo que se traslada al caudal de diseño."""
+        html = "<h3>Cuadro resumen final — Métodos de pérdida</h3>"
+        hay_algo = False
+
+        if self.cn_resultados:
+            hay_algo = True
+            cn = self.cn_resultados
+            html += (
+                "<p><b>Número de Curva SCS</b><br>"
+                f"CN = <b>{cn.get('CN_ponderado', cn.get('CN', '—'))}</b> &nbsp;|&nbsp; "
+                f"S = {cn.get('S_mm', '—')} mm &nbsp;|&nbsp; "
+                f"Abstracción inicial Ia = {round(0.2 * cn['S_mm'], 2) if cn.get('S_mm') else '—'} mm</p>"
+            )
+
+        if self.resultados_infiltracion_por_metodo:
+            hay_algo = True
+            ordenados = sorted(self.resultados_infiltracion_por_metodo.items(),
+                               key=lambda kv: kv[1]["lluvia_efectiva_total_mm"], reverse=True)
+            html += ("<hr><p><b>Modelos de infiltración calculados</b> "
+                     "(ordenados por lluvia efectiva, de mayor a menor):</p>"
+                     "<table cellpadding='4' style='border-collapse:collapse'>"
+                     "<tr style='background:#eef5fb'><th align='left'>Modelo</th>"
+                     "<th align='right'>Lluvia efectiva</th><th align='right'>Infiltrado</th>"
+                     "<th align='right'>Coef. escorrentía</th><th align='left'>Encharcamiento</th></tr>")
+            for _clave, r in ordenados:
+                ench = (f"t = {r['tiempo_encharcamiento_h']} h"
+                        if r.get("hubo_encharcamiento") else "no hubo")
+                html += (
+                    f"<tr><td>{r['metodo']}</td>"
+                    f"<td align='right'><b>{r['lluvia_efectiva_total_mm']:.2f} mm</b></td>"
+                    f"<td align='right'>{r['infiltracion_total_mm']:.2f} mm</td>"
+                    f"<td align='right'>{r['coeficiente_escorrentia']:.3f}</td>"
+                    f"<td>{ench}</td></tr>")
+            html += "</table>"
+
+            efectivas = [r["lluvia_efectiva_total_mm"] for _, r in ordenados]
+            if len(efectivas) > 1:
+                dispersion = max(efectivas) - min(efectivas)
+                relativa = dispersion / max(efectivas) * 100.0 if max(efectivas) else 0.0
+                html += (
+                    f"<p><b>Dispersión entre modelos: {dispersion:.2f} mm ({relativa:.1f}%).</b> "
+                    "La lluvia efectiva se traslada de forma casi proporcional al caudal pico, así que "
+                    "esta cifra es aproximadamente la incertidumbre que introduce la ELECCIÓN DEL "
+                    "MODELO en el caudal de diseño — con frecuencia mayor que la de otros parámetros a "
+                    "los que se dedica mucho más esfuerzo.</p>")
+
+        if not hay_algo:
+            html += ("<p style='color:#666666'>Aún no se ha calculado ningún método de pérdida en esta "
+                     "pestaña.</p>")
+        else:
+            html += (
+                "<p style='color:#666666'>El modelo que elija aquí queda disponible en el desplegable "
+                "de pérdidas de la Pestaña 7, donde se resta del hietograma de diseño para obtener la "
+                "lluvia efectiva que alimenta el hidrograma unitario. Mantenga el mismo modelo y los "
+                "mismos parámetros de forma consistente a lo largo de todo el estudio.</p>")
+        self.texto_resumen_pestana3.setHtml(html)
+
     def _on_textura_ga3(self):
         clave = self.combo_textura_ga3.currentData()
         if clave in infiltration.PARAMETROS_GREEN_AMPT:
@@ -1781,6 +1958,14 @@ class HydroAndinaProDialog(QDialog):
             self.spin_ga3_k.setValue(k)
             self.spin_ga3_psi.setValue(psi)
             self.spin_ga3_dth.setValue(poro)
+
+    def _on_textura_vg(self):
+        clave = self.combo_textura_vg.currentData()
+        if clave in infiltration.PARAMETROS_VAN_GENUCHTEN:
+            _n, tr, ts, al, nv, ks = infiltration.PARAMETROS_VAN_GENUCHTEN[clave]
+            self.spin_vg_tr.setValue(tr); self.spin_vg_ts.setValue(ts)
+            self.spin_vg_alpha.setValue(al); self.spin_vg_n.setValue(nv)
+            self.spin_vg_ks.setValue(ks)
 
     def _on_grupo_ho3(self):
         grupo = self.combo_grupo_ho3.currentData()
@@ -1812,6 +1997,13 @@ class HydroAndinaProDialog(QDialog):
         if clave == "kostiakov":
             return {"coef_a": self.spin_ko_a.value(), "exponente_b": self.spin_ko_b.value(),
                     "fc_mm_h": self.spin_ko_fc.value()}
+        if clave == "richards":
+            return {"theta_r": self.spin_vg_tr.value(), "theta_s": self.spin_vg_ts.value(),
+                    "alpha_1_cm": self.spin_vg_alpha.value(), "n_vg": self.spin_vg_n.value(),
+                    "ks_cm_h": self.spin_vg_ks.value(),
+                    "profundidad_columna_mm": self.spin_vg_prof.value(),
+                    "n_celdas": self.spin_vg_celdas.value(),
+                    "succion_inicial_mm": self.spin_vg_succion.value()}
         if clave == "holtan":
             return {"coef_a": self.spin_hol_a.value(),
                     "indice_crecimiento_gi": self.spin_hol_gi.value(),
@@ -1828,6 +2020,7 @@ class HydroAndinaProDialog(QDialog):
             "philip": infiltration.infiltracion_philip,
             "kostiakov": infiltration.infiltracion_kostiakov,
             "holtan": infiltration.infiltracion_holtan,
+            "richards": infiltration.infiltracion_richards_1d,
         }
         return funciones[clave](hietograma, dt_h, **params)
 
@@ -1860,12 +2053,23 @@ class HydroAndinaProDialog(QDialog):
         try:
             dt_h = self.spin_dt_infiltracion.value()
             clave = self.combo_modelo_infiltracion.currentData()
-            r = self._ejecutar_modelo_infiltracion(clave, hietograma, dt_h)
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            try:
+                r = self._ejecutar_modelo_infiltracion(clave, hietograma, dt_h)
+            finally:
+                QApplication.restoreOverrideCursor()
             self.infiltracion_resultado = r
+            self.resultados_infiltracion_por_metodo[clave] = r
             poblar_tabla_parametros(self.tabla_resultado_infiltracion,
                                      self._filas_resultado_infiltracion(r))
-            self.canvas_infiltracion.plot_hietograma_separado(r, dt_h)
+            # Cada método actualiza SU cuadro de impacto y SU gráfico.
+            self._actualizar_cuadro_infiltracion(clave, r)
+            canvas = self.canvas_por_metodo_infiltracion.get(clave)
+            if canvas is not None:
+                canvas.plot_hietograma_separado(r, dt_h)
+            self._actualizar_resumen_final_pestana3()
         except infiltration.InfiltrationError as e:
+            QApplication.restoreOverrideCursor()
             QMessageBox.warning(self, "No se pudo calcular", str(e))
 
     def _on_comparar_infiltracion_todos(self):
@@ -1893,11 +2097,21 @@ class HydroAndinaProDialog(QDialog):
                 "coeficiente_escorrentia": round(sum(efectiva) / total, 4) if total else 0.0,
                 "hubo_encharcamiento": False,
             })
-        for clave in ("green_ampt", "horton", "philip", "kostiakov", "holtan"):
-            try:
-                resultados.append(self._ejecutar_modelo_infiltracion(clave, hietograma, dt_h))
-            except infiltration.InfiltrationError as e:
-                errores.append(f"{clave}: {e}")
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            for clave in ("green_ampt", "horton", "philip", "kostiakov", "holtan", "richards"):
+                try:
+                    r_i = self._ejecutar_modelo_infiltracion(clave, hietograma, dt_h)
+                    resultados.append(r_i)
+                    self.resultados_infiltracion_por_metodo[clave] = r_i
+                    self._actualizar_cuadro_infiltracion(clave, r_i)
+                    canvas_i = self.canvas_por_metodo_infiltracion.get(clave)
+                    if canvas_i is not None:
+                        canvas_i.plot_hietograma_separado(r_i, dt_h)
+                except infiltration.InfiltrationError as e:
+                    errores.append(f"{clave}: {e}")
+        finally:
+            QApplication.restoreOverrideCursor()
         if not resultados:
             QMessageBox.warning(self, "Sin resultados",
                                  "Ningún modelo pudo calcularse:\n\n" + "\n".join(errores))
@@ -1912,6 +2126,7 @@ class HydroAndinaProDialog(QDialog):
              "dispersión es, aproximadamente, la incertidumbre del Qp por la elección del modelo"))
         poblar_tabla_parametros(self.tabla_resultado_infiltracion, filas)
         self.canvas_infiltracion.plot_comparacion_metodos(resultados, dt_h)
+        self._actualizar_resumen_final_pestana3()
         if errores:
             QMessageBox.information(
                 self, "Algunos modelos no se calcularon", "\n\n".join(errores))

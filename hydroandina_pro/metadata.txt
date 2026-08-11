@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.2.53
+version=0.2.54
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,32 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.2.54: la Pestaña 3 completa su presentacion -- cada metodo con su GRAFICO y su CUADRO RESUMEN
+      DE ALTO IMPACTO propios, mas un CUADRO RESUMEN FINAL de toda la pestaña, y Richards 1D integrado
+      en la interfaz (en la v0.2.53 solo existia el nucleo numerico).
+      GRAFICO Y CUADRO POR METODO: cada una de las seis paginas del selector (Green-Ampt, Horton,
+      Philip, Kostiakov/Kostiakov-Lewis, Holtan y Richards 1D) tiene ahora, bajo su formulario de
+      parametros, su propio cuadro de impacto y su propio grafico -- antes compartian un unico lienzo,
+      de modo que alternar entre metodos hacia perder lo ya calculado. El cuadro destaca la LLUVIA
+      EFECTIVA (que es lo que se traslada al caudal pico) como cifra principal, con lluvia total,
+      infiltrado, coeficiente de escorrentia e instante de encharcamiento como metricas secundarias, y
+      CAMBIA DE COLOR segun el regimen: verde si casi todo infiltra, ambar si la escorrentia es
+      apreciable y rojo si domina la escorrentia, que es la condicion critica para el diseño.
+      RICHARDS 1D EN LA INTERFAZ: pagina propia con seleccion por clase textural (12 clases de Carsel &
+      Parrish, que autocompletan theta_r, theta_s, alpha, n y Ks), profundidad y numero de celdas de la
+      malla, y succion inicial del perfil. El calculo muestra cursor de espera por ser el mas lento de
+      los seis, y su limite de convergencia se advierte en la propia pagina.
+      CUADRO RESUMEN FINAL DE LA PESTAÑA: reune el numero de curva (CN, S e Ia) y todos los modelos de
+      infiltracion ya ejecutados en una tabla ordenada por lluvia efectiva de mayor a menor, con su
+      infiltrado, coeficiente de escorrentia e instante de encharcamiento, y calcula la DISPERSION
+      entre modelos -- que, al trasladarse la lluvia efectiva de forma casi proporcional al caudal
+      pico, es aproximadamente la incertidumbre que introduce la sola ELECCION DEL MODELO en el caudal
+      de diseño, con frecuencia mayor que la de otros parametros a los que se dedica mucho mas esfuerzo.
+      El boton de comparacion ejecuta ahora los seis metodos (antes cinco), actualiza de paso el cuadro
+      y el grafico de cada uno, y reporta cuales no pudieron calcularse en vez de omitirlos en silencio.
+      Nuevo componente reutilizable ui/summary_box.py (CuadroResumenImpacto) aplicado aqui por primera
+      vez de forma sistematica: recuadro enmarcado y centrado con una cifra principal grande, metricas
+      en cuadricula, leyenda al pie y cuatro paletas segun el tipo de resultado.
     - v0.2.53: RICHARDS 1D (nucleo numerico) y componente reutilizable de cuadro resumen.
       RICHARDS 1D en core/infiltration.py, resuelto en FORMA MIXTA con iteracion de Picard MODIFICADA
       (Celia, Bouloutas & Zarba, 1990, Water Resources Research 26(7):1483-1496). Se eligio esa
