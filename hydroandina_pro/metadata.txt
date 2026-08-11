@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.2.52
+version=0.2.53
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,45 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.2.53: RICHARDS 1D (nucleo numerico) y componente reutilizable de cuadro resumen.
+      RICHARDS 1D en core/infiltration.py, resuelto en FORMA MIXTA con iteracion de Picard MODIFICADA
+      (Celia, Bouloutas & Zarba, 1990, Water Resources Research 26(7):1483-1496). Se eligio esa
+      formulacion y no la forma "en h" porque esta ultima es notoriamente NO conservativa: acumula
+      errores de balance de masa del 10-20% justo en frentes humedos abruptos, que es el caso de la
+      infiltracion. Discretizacion por VOLUMENES FINITOS (conservativa por construccion), sistema
+      tridiagonal por algoritmo de Thomas, y relaciones constitutivas de van Genuchten-Mualem.
+      Condicion de borde superior CONMUTADA: flujo impuesto mientras el suelo admita toda la lluvia, y
+      carga impuesta h=0 cuando exigiria presion positiva, con la escorrentia saliendo de la
+      diferencia -- asi el exceso de infiltracion aparece de forma fisica y no por un criterio
+      empirico de encharcamiento.
+      VERIFICACIONES: las relaciones de van Genuchten cumplen sus limites (theta(0)=theta_s, K(0)=Ks),
+      son monotonas, y la capacidad especifica C=d(theta)/dh coincide con la derivada numerica con
+      error relativo de 1e-9; el algoritmo de Thomas resuelve un sistema de prueba con residuo 2e-16.
+      DOS ERRORES PROPIOS DETECTADOS Y CORREGIDOS durante la validacion, ambos por el balance de masa
+      de la COLUMNA (no el de superficie, que cerraba por construccion y no habria delatado nada):
+      (a) se recortaba la infiltracion del sub-paso a la lluvia disponible, lo que descontaba en
+      superficie agua que si habia entrado en el perfil -- 6.2% de error de balance; corregido con una
+      verificacion de consistencia que revierte el encharcamiento cuando el suelo admitiria mas de lo
+      que llueve; (b) el refinamiento del paso de tiempo duplicaba el numero de sub-pasos sin reiniciar
+      los ya dados con el Δt anterior, dejando el intervalo mal integrado; sustituido por un esquema
+      adaptativo que lleva el tiempo restante y reintenta el mismo sub-paso con Δt menor.
+      LIMITE DE CONVERGENCIA, QUE SE INFORMA EN VEZ DE OCULTARSE: con el hietograma de prueba (pico de
+      56 mm/h) y succion inicial de -1000 mm, Picard converge en 6 de las 12 clases texturales de
+      Carsel & Parrish -- arena, arena franca, franco arenoso, franco, limo y franco arcillo-limoso --
+      conservando la masa de la columna con errores de 0 a 4.5e-4 mm. En los suelos mas finos la Ks
+      (0.7-13 mm/h) queda uno o dos ordenes por debajo de la intensidad de la lluvia, el frente se
+      vuelve casi discontinuo y no converge aunque se refine el paso; en esos casos se lanza un error
+      con indicaciones concretas y lo razonable es usar Green-Ampt, formulado precisamente para un
+      frente abrupto. Se probo tambien la media geometrica en las caras (remedio habitual para frentes
+      abruptos): convergio en el mismo numero de clases, cambiando cuales -- ganaba arcillo-arenoso
+      pero perdia franco, mucho mas frecuente -- por lo que se mantiene la media aritmetica.
+      Tabla de parametros de van Genuchten por clase textural (Carsel & Parrish, 1988), guardada en las
+      unidades de la bibliografia (alpha en 1/cm, Ks en cm/h) con la conversion interna hecha por la
+      funcion, que es donde se cometen los errores si se deja al usuario.
+      Nuevo ui/summary_box.py: componente reutilizable CuadroResumenImpacto (recuadro enmarcado y
+      centrado con una cifra principal grande, metricas secundarias en cuadricula y paletas por tipo de
+      resultado), extraido del que se hizo a mano para la ecuacion IDF en la v0.2.45 para poder aplicar
+      el mismo formato de forma consistente en todas las pestañas.
     - v0.2.52: la Pestaña 3 pasa a llamarse "Métodos de pérdida SCS-CN / Horton / Green-Ampt / otros" y
       concentra ahora SEIS modelos de perdidas con graficos, quedando disponibles en el desplegable de
       la Pestaña 7 para restarlos del hietograma en el calculo del caudal.

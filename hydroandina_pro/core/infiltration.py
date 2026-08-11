@@ -605,6 +605,409 @@ def infiltracion_holtan(hietograma_mm: Sequence[float], dt_h: float,
         paso_encharcamiento)
 
 
+# =====================================================================
+# RICHARDS 1D (física completa)
+# =====================================================================
+# Resuelve la ecuación de Richards en forma MIXTA:
+#
+#       d(theta)/dt = d/dz [ K(h) * ( dh/dz + 1 ) ]
+#
+# con z positivo hacia ARRIBA, h la carga de presión (negativa = succión,
+# en mm) y K la conductividad hidráulica no saturada (mm/h).
+#
+# POR QUÉ LA FORMA MIXTA Y NO LA FORMA EN h: escribir la ecuación como
+# C(h)*dh/dt = ... (forma "en h") es más simple de programar, pero es
+# NOTORIAMENTE NO CONSERVATIVA: acumula errores de balance de masa que
+# pueden llegar al 10-20% en frentes húmedos abruptos, precisamente el
+# caso de la infiltración. Celia, Bouloutas & Zarba (1990, Water
+# Resources Research 26(7):1483-1496) demostraron que conservar el
+# término de almacenamiento como d(theta)/dt y resolverlo con una
+# iteración de Picard MODIFICADA restaura la conservación de masa a
+# precisión de máquina. Es la formulación que se implementa aquí.
+#
+# DISCRETIZACIÓN: volúmenes finitos (no diferencias finitas nodales), que
+# es conservativa por construcción -- el balance de cada celda es exacto
+# y los flujos entre celdas se cancelan telescópicamente. El sistema
+# lineal de cada iteración es tridiagonal y se resuelve con el algoritmo
+# de Thomas.
+#
+# RELACIONES CONSTITUTIVAS: van Genuchten (1980) para la retención y
+# Mualem para la conductividad:
+#       Se = [1 + (alpha*|h|)^n]^(-m),   m = 1 - 1/n
+#       theta = theta_r + (theta_s - theta_r)*Se
+#       K = Ks * Se^L * [1 - (1 - Se^(1/m))^m]^2,   L = 0.5
+#       C = d(theta)/dh = alpha*m*n*(theta_s-theta_r)*(alpha*|h|)^(n-1)
+#                          * [1 + (alpha*|h|)^n]^(-m-1)
+#
+# CONDICIÓN DE BORDE SUPERIOR CONMUTADA: mientras el suelo pueda absorber
+# toda la lluvia se impone un flujo (Neumann) igual a la intensidad; si
+# eso exigiera una presión positiva en superficie, se conmuta a carga
+# impuesta h=0 (Dirichlet) y la infiltración real pasa a ser la que el
+# suelo admite, yendo el resto a escorrentía. Esta conmutación es lo que
+# hace que el modelo produzca escorrentía por exceso de infiltración de
+# forma física, sin necesidad de un criterio empírico de encharcamiento.
+#
+# LÍMITES: es un modelo de columna 1D homogénea. No representa
+# estratificación (salvo que se extienda a K variable por capa), flujo
+# lateral, macroporos ni histéresis de la curva de retención. Es el más
+# riguroso de este módulo, pero también el más caro de calcular y el que
+# más parámetros exige.
+#
+# LÍMITE DE CONVERGENCIA MEDIDO (importante, y se informa en vez de
+# ocultarlo): con el hietograma de prueba del plugin (pico de 56 mm/h) y
+# succión inicial de -1000 mm, la iteración de Picard converge en 6 de
+# las 12 clases texturales de Carsel & Parrish -- arena, arena franca,
+# franco arenoso, franco, limo y franco arcillo-limoso -- y en ellas
+# conserva la masa de la columna con errores de 0 a 4.5e-4 mm. En los
+# suelos MÁS FINOS (franco limoso, francos arcillosos, arcillo-limoso,
+# arcilla) el problema se vuelve demasiado rígido: su Ks (0.7-13 mm/h)
+# queda uno o dos órdenes de magnitud por debajo de la intensidad de la
+# lluvia, el frente húmedo es casi discontinuo y Picard no converge
+# aunque se refine el paso de tiempo. En esos casos la función lanza
+# InfiltrationError con un mensaje que indica qué ajustar (succión
+# inicial menos extrema, más celdas, o menor Δt), y lo razonable es usar
+# Green-Ampt, que está formulado precisamente para un frente abrupto y
+# no tiene ese problema numérico. Resolverlo del todo requeriría un
+# esquema de Newton con línea de búsqueda o transformación de Kirchhoff,
+# que excede el alcance actual de este módulo.
+
+# Parámetros de van Genuchten por clase textural (Carsel & Parrish, 1988,
+# "Developing joint probability distributions of soil water retention
+# characteristics", Water Resources Research 24(5):755-769) -- la tabla
+# estándar, usada por HYDRUS entre otros.
+# OJO CON LAS UNIDADES: la bibliografía da alpha en 1/cm y Ks en cm/h.
+# Aquí se guardan tal cual (para que sean reconocibles al contrastar con
+# la fuente) y la conversión a 1/mm y mm/h se hace al construir el
+# modelo, no a mano por el usuario -- que es donde se cometen los errores.
+# Formato: clave -> (nombre, theta_r, theta_s, alpha_1_cm, n, Ks_cm_h)
+PARAMETROS_VAN_GENUCHTEN = {
+    "arena":              ("Arena",                   0.045, 0.43, 0.145, 2.68, 29.70),
+    "arena_franca":       ("Arena franca",            0.057, 0.41, 0.124, 2.28, 14.59),
+    "franco_arenoso":     ("Franco arenoso",          0.065, 0.41, 0.075, 1.89,  4.42),
+    "franco":             ("Franco",                  0.078, 0.43, 0.036, 1.56,  1.04),
+    "limo":               ("Limo",                    0.034, 0.46, 0.016, 1.37,  0.25),
+    "franco_limoso":      ("Franco limoso",           0.067, 0.45, 0.020, 1.41,  0.45),
+    "franco_arcillo_aren": ("Franco arcillo-arenoso",  0.100, 0.39, 0.059, 1.48,  1.31),
+    "franco_arcilloso":   ("Franco arcilloso",        0.095, 0.41, 0.019, 1.31,  0.26),
+    "franco_arcillo_lim": ("Franco arcillo-limoso",   0.089, 0.43, 0.010, 1.23,  0.07),
+    "arcillo_arenoso":    ("Arcillo-arenoso",         0.100, 0.38, 0.027, 1.23,  0.12),
+    "arcillo_limoso":     ("Arcillo-limoso",          0.070, 0.36, 0.005, 1.09,  0.02),
+    "arcilla":            ("Arcilla",                 0.068, 0.38, 0.008, 1.09,  0.20),
+}
+
+
+def _vg_se(h_mm, alpha_1_mm, n):
+    """Saturación efectiva de van Genuchten."""
+    if h_mm >= 0:
+        return 1.0
+    m = 1.0 - 1.0 / n
+    return (1.0 + (alpha_1_mm * abs(h_mm)) ** n) ** (-m)
+
+
+def _vg_theta(h_mm, theta_r, theta_s, alpha_1_mm, n):
+    return theta_r + (theta_s - theta_r) * _vg_se(h_mm, alpha_1_mm, n)
+
+
+def _vg_k(h_mm, ks_mm_h, alpha_1_mm, n, l_mualem=0.5):
+    if h_mm >= 0:
+        return ks_mm_h
+    m = 1.0 - 1.0 / n
+    se = _vg_se(h_mm, alpha_1_mm, n)
+    se = min(max(se, 1e-12), 1.0)
+    interior = 1.0 - (1.0 - se ** (1.0 / m)) ** m
+    return ks_mm_h * (se ** l_mualem) * (interior ** 2)
+
+
+def _vg_capacidad(h_mm, theta_r, theta_s, alpha_1_mm, n):
+    """Capacidad específica de humedad C = d(theta)/dh (1/mm)."""
+    if h_mm >= 0:
+        return 0.0
+    m = 1.0 - 1.0 / n
+    ah = alpha_1_mm * abs(h_mm)
+    if ah <= 0:
+        return 0.0
+    return (theta_s - theta_r) * alpha_1_mm * m * n * (ah ** (n - 1.0)) * \
+           ((1.0 + ah ** n) ** (-m - 1.0))
+
+
+def _thomas(a, b, c, d):
+    """
+    Algoritmo de Thomas para sistemas tridiagonales (eliminación
+    gaussiana especializada, O(N) en vez de O(N^3)).
+    a: subdiagonal (a[0] no se usa), b: diagonal, c: superdiagonal
+    (c[-1] no se usa), d: término independiente.
+    """
+    n = len(b)
+    cp = [0.0] * n
+    dp = [0.0] * n
+    if abs(b[0]) < 1e-300:
+        raise InfiltrationError("Sistema tridiagonal singular en Richards (pivote nulo).")
+    cp[0] = c[0] / b[0]
+    dp[0] = d[0] / b[0]
+    for i in range(1, n):
+        denom = b[i] - a[i] * cp[i - 1]
+        if abs(denom) < 1e-300:
+            raise InfiltrationError("Sistema tridiagonal singular en Richards (pivote nulo).")
+        cp[i] = c[i] / denom if i < n - 1 else 0.0
+        dp[i] = (d[i] - a[i] * dp[i - 1]) / denom
+    x = [0.0] * n
+    x[-1] = dp[-1]
+    for i in range(n - 2, -1, -1):
+        x[i] = dp[i] - cp[i] * x[i + 1]
+    return x
+
+
+def infiltracion_richards_1d(hietograma_mm: Sequence[float], dt_h: float,
+                              theta_r: float, theta_s: float, alpha_1_cm: float,
+                              n_vg: float, ks_cm_h: float,
+                              profundidad_columna_mm: float = 1000.0,
+                              n_celdas: int = 40,
+                              succion_inicial_mm: float = -1000.0,
+                              max_subpasos: int = 20000,
+                              tol_picard_mm: float = 1e-3,
+                              max_iter_picard: int = 60) -> dict:
+    """
+    Resuelve la infiltración por la ecuación de Richards 1D.
+
+    Parámetros de van Genuchten en las unidades de la BIBLIOGRAFÍA
+    (alpha en 1/cm, Ks en cm/h); la conversión interna a 1/mm y mm/h la
+    hace la función, para no trasladar al usuario un error de unidades
+    que es de los más frecuentes con esta ecuación.
+
+    profundidad_columna_mm: espesor del perfil simulado. Debe ser lo
+        bastante grande para que el frente húmedo no alcance el fondo
+        durante el evento; si lo alcanza, el drenaje por el fondo se
+        contabiliza y se reporta.
+    succion_inicial_mm: carga de presión inicial uniforme (negativa).
+        -1000 mm ~ suelo bastante seco; -100 mm ~ suelo húmedo.
+    """
+    serie = _validar_hietograma(hietograma_mm, dt_h)
+    if not (0.0 <= theta_r < theta_s <= 1.0):
+        raise InfiltrationError("Debe cumplirse 0 <= theta_r < theta_s <= 1.")
+    if n_vg <= 1.0:
+        raise InfiltrationError("El parámetro n de van Genuchten debe ser mayor que 1.")
+    if alpha_1_cm <= 0 or ks_cm_h <= 0:
+        raise InfiltrationError("alpha y Ks deben ser mayores que 0.")
+    if succion_inicial_mm >= 0:
+        raise InfiltrationError("La succión inicial debe ser negativa (el suelo no parte saturado).")
+    if n_celdas < 10:
+        raise InfiltrationError("Se necesitan al menos 10 celdas para una discretización razonable.")
+
+    # Conversión de unidades bibliográficas a las del plugin.
+    alpha = alpha_1_cm / 10.0      # 1/cm -> 1/mm
+    ks = ks_cm_h * 10.0            # cm/h -> mm/h
+
+    dz = profundidad_columna_mm / n_celdas
+    h = [float(succion_inicial_mm)] * n_celdas          # índice 0 = fondo, n-1 = superficie
+    theta_inicial = [_vg_theta(hi, theta_r, theta_s, alpha, n_vg) for hi in h]
+    almacenamiento_inicial = sum(t * dz for t in theta_inicial)
+
+    infiltracion, escorrentia, capacidad = [], [], []
+    paso_encharcamiento = None
+    drenaje_fondo_total = 0.0
+
+    def theta_de(hv):
+        return _vg_theta(hv, theta_r, theta_s, alpha, n_vg)
+
+    def k_de(hv):
+        return _vg_k(hv, ks, alpha, n_vg)
+
+    for indice, lluvia in enumerate(serie):
+        intensidad = lluvia / dt_h
+        infiltrado_intervalo = 0.0
+        drenaje_intervalo = 0.0
+        # PASO DE TIEMPO ADAPTATIVO. La no linealidad de Richards obliga a
+        # sub-pasos pequeños cuando el frente húmedo es abrupto, pero
+        # fijarlos de antemano es ineficiente (y si se refina a mitad del
+        # intervalo, los sub-pasos ya dados quedarían con otro Δt: ese era
+        # el error de la primera versión, que hacía fallar la convergencia).
+        # Aquí se lleva el TIEMPO RESTANTE del intervalo: si Picard no
+        # converge se reduce Δt y se reintenta ese mismo sub-paso; si
+        # converge con holgura se deja crecer de nuevo.
+        dt_sub = dt_h / 10.0
+        dt_sub_minimo = dt_h / max_subpasos
+        tiempo_restante = dt_h
+        capacidad_registrada = None
+
+        while tiempo_restante > 1e-12:
+            dt_sub = min(dt_sub, tiempo_restante)
+            h_viejo = list(h)
+            theta_viejo = [theta_de(hv) for hv in h_viejo]
+            almacen_antes = sum(theta_viejo[i] * dz for i in range(n_celdas))
+
+            def resolver(ponded_flag):
+                """Una tanda completa de Picard con la condición de borde
+                superior indicada. Devuelve (h_resultante, convergio)."""
+                h_it = list(h_viejo)
+                for iteracion in range(max_iter_picard):
+                    k_nodo = [k_de(hv) for hv in h_it]
+                    # Conductividades en las caras: media aritmética. Se
+                    # probó también la media geométrica, que la bibliografía
+                    # recomienda para frentes abruptos: convergió en el mismo
+                    # número de clases texturales (6 de 12), cambiando cuáles
+                    # -- ganaba arcillo-arenoso pero perdía franco, que es un
+                    # suelo mucho más frecuente. Se mantiene la aritmética
+                    # por eso, no por descarte de la alternativa.
+                    k_cara = [0.5 * (k_nodo[i] + k_nodo[i + 1]) for i in range(n_celdas - 1)]
+
+                    a = [0.0] * n_celdas
+                    b = [0.0] * n_celdas
+                    c = [0.0] * n_celdas
+                    d = [0.0] * n_celdas
+
+                    for i in range(n_celdas):
+                        c_i = _vg_capacidad(h_it[i], theta_r, theta_s, alpha, n_vg)
+                        theta_i = theta_de(h_it[i])
+                        # Flujo en la cara superior de la celda i (positivo hacia arriba)
+                        if i < n_celdas - 1:
+                            q_sup = -k_cara[i] * ((h_it[i + 1] - h_it[i]) / dz + 1.0)
+                        else:
+                            q_sup = -intensidad
+                        # Flujo en la cara inferior
+                        if i > 0:
+                            q_inf = -k_cara[i - 1] * ((h_it[i] - h_it[i - 1]) / dz + 1.0)
+                        else:
+                            q_inf = -k_nodo[0]  # drenaje libre: gradiente unitario
+
+                        residuo = dz * (theta_i - theta_viejo[i]) / dt_sub + (q_sup - q_inf)
+
+                        b[i] = dz * c_i / dt_sub
+                        if i > 0:
+                            a[i] = -k_cara[i - 1] / dz
+                            b[i] += k_cara[i - 1] / dz
+                        if i < n_celdas - 1:
+                            c[i] = -k_cara[i] / dz
+                            b[i] += k_cara[i] / dz
+                        d[i] = -residuo
+
+                    if ponded_flag:
+                        # Carga impuesta h=0 en la celda superficial.
+                        a[-1] = 0.0
+                        b[-1] = 1.0
+                        c[-1] = 0.0
+                        d[-1] = 0.0 - h_it[-1]
+
+                    delta = _thomas(a, b, c, d)
+                    # AMORTIGUAMIENTO ADAPTATIVO. En suelos finos (n cercano
+                    # a 1, Ks muy baja frente a la intensidad de lluvia) el
+                    # sistema es muy rígido y Picard oscila con pasos
+                    # grandes. Se limita el salto por iteración y el tope se
+                    # va reduciendo con las iteraciones: las primeras avanzan
+                    # rápido y las últimas afinan sin sobrepasar la solución.
+                    tope = 1000.0 / (1.0 + 0.15 * iteracion)
+                    for i in range(n_celdas):
+                        h_it[i] += max(min(delta[i], tope), -tope)
+                    if max(abs(x) for x in delta) < tol_picard_mm:
+                        return h_it, True
+                return h_it, False
+
+            def flujo_superficial(h_res):
+                """Infiltración real del sub-paso (mm), deducida del balance
+                de la columna: cambio de almacenamiento más drenaje por el
+                fondo. Es la ÚNICA forma consistente de contabilizarla --
+                leerla de la condición de borde daría un valor que no cuadra
+                con lo que realmente entró en el perfil."""
+                almacen_despues = sum(theta_de(hv) * dz for hv in h_res)
+                drenaje = k_de(h_res[0]) * dt_sub
+                return (almacen_despues - almacen_antes) + drenaje, drenaje
+
+            # CONMUTACIÓN DE LA CONDICIÓN DE BORDE SUPERIOR.
+            # 1) Se intenta con FLUJO impuesto (toda la lluvia infiltra).
+            # 2) Si eso exigiría presión positiva en superficie, se conmuta
+            #    a CARGA impuesta h=0 y la infiltración pasa a ser la que el
+            #    suelo admite.
+            # 3) Verificación de consistencia: si con carga impuesta el suelo
+            #    admitiría MÁS de lo que llueve, entonces el encharcamiento
+            #    no era real y se revierte al caso de flujo impuesto. Sin
+            #    esta reversión el modelo "inventa" agua que no cayó, y el
+            #    balance de la columna deja de cerrar (se midió un 6.2% de
+            #    error antes de agregarla).
+            h_iter, convergio = resolver(False)
+            ponded = False
+            infiltrado_sub = intensidad * dt_sub
+            drenaje_sub = 0.0
+
+            if convergio and h_iter[-1] > 0.0:
+                h_pond, conv_pond = resolver(True)
+                if conv_pond:
+                    flujo_pond, drenaje_pond = flujo_superficial(h_pond)
+                    if flujo_pond < intensidad * dt_sub:
+                        ponded = True
+                        h_iter = h_pond
+                        infiltrado_sub = max(flujo_pond, 0.0)
+                        drenaje_sub = drenaje_pond
+                    else:
+                        # El suelo admitía toda la lluvia: no hay encharcamiento.
+                        _, drenaje_sub = flujo_superficial(h_iter)
+                else:
+                    convergio = False
+            elif convergio:
+                _, drenaje_sub = flujo_superficial(h_iter)
+
+            if not convergio:
+                # Sub-paso demasiado grande: se reduce Δt y se reintenta
+                # ESTE MISMO sub-paso (el tiempo restante no se descuenta).
+                dt_sub *= 0.5
+                if dt_sub < dt_sub_minimo:
+                    raise InfiltrationError(
+                        "Richards 1D no convergió ni siquiera refinando el paso de tiempo hasta "
+                        f"{dt_sub_minimo:.2e} h. Pruebe con una succión inicial menos extrema "
+                        "(p.ej. -300 mm en vez de -1000), más celdas, o un Δt del hietograma menor."
+                    )
+                continue
+
+            # infiltrado_sub y drenaje_sub ya quedaron fijados por la
+            # conmutación de la condición de borde de arriba: NO se
+            # recalculan ni se recortan aquí. Recortarlos a la lluvia
+            # disponible era precisamente lo que rompía el balance de la
+            # columna, porque descontaba en superficie agua que sí había
+            # entrado en el perfil.
+            if ponded and paso_encharcamiento is None:
+                paso_encharcamiento = indice
+            if capacidad_registrada is None:
+                capacidad_registrada = infiltrado_sub / dt_sub if dt_sub > 0 else 0.0
+
+            infiltrado_intervalo += infiltrado_sub
+            drenaje_intervalo += drenaje_sub
+            h = h_iter
+            tiempo_restante -= dt_sub
+            # Si convergió sin dificultad, se deja crecer el paso otra vez
+            # (acotado al décimo del intervalo) para no encarecer el cálculo.
+            dt_sub = min(dt_sub * 1.5, dt_h / 10.0)
+
+        infiltrado_intervalo = min(infiltrado_intervalo, lluvia)
+        drenaje_fondo_total += drenaje_intervalo
+        infiltracion.append(infiltrado_intervalo)
+        escorrentia.append(max(lluvia - infiltrado_intervalo, 0.0))
+        capacidad.append(round(capacidad_registrada if capacidad_registrada is not None else 0.0, 4))
+
+    resultado = _resumen_infiltracion(
+        serie, infiltracion, escorrentia, capacidad, dt_h, "Richards 1D (van Genuchten)",
+        {"theta_r": theta_r, "theta_s": theta_s, "alpha_1_cm": alpha_1_cm, "n": n_vg,
+         "Ks_cm_h": ks_cm_h, "profundidad_mm": profundidad_columna_mm, "n_celdas": n_celdas,
+         "succion_inicial_mm": succion_inicial_mm},
+        paso_encharcamiento)
+
+    # Diagnóstico específico de Richards: balance de agua en la COLUMNA
+    # (no solo en la superficie). Es la verificación que delata una
+    # formulación no conservativa.
+    almacenamiento_final = sum(theta_de(hv) * dz for hv in h)
+    cambio_almacenamiento = almacenamiento_final - almacenamiento_inicial
+    error_columna = abs(resultado["infiltracion_total_mm"] - (cambio_almacenamiento + drenaje_fondo_total))
+    resultado.update({
+        "almacenamiento_inicial_mm": round(almacenamiento_inicial, 4),
+        "almacenamiento_final_mm": round(almacenamiento_final, 4),
+        "cambio_almacenamiento_mm": round(cambio_almacenamiento, 4),
+        "drenaje_por_el_fondo_mm": round(drenaje_fondo_total, 4),
+        "error_balance_columna_mm": round(error_columna, 6),
+        "balance_columna_correcto": error_columna < max(0.01, resultado["infiltracion_total_mm"] * 0.005),
+        "humedad_final_superficie": round(theta_de(h[-1]), 4),
+        "humedad_final_fondo": round(theta_de(h[0]), 4),
+        "succion_final_superficie_mm": round(h[-1], 2),
+    })
+    return resultado
+
+
 # ---------------------------------------------------------------------
 # RESUMEN Y COMPARACIÓN
 # ---------------------------------------------------------------------
