@@ -3284,8 +3284,8 @@ class HydroAndinaProDialog(QDialog):
         v.addWidget(self.canvas_hidrograma)
 
         gb_directos = QGroupBox(
-            "Verificación cruzada — fórmulas de caudal máximo DIRECTO (Témez, Mac Math, Creager), "
-            "para comparar contra el caudal SCS/Snyder/Clark de arriba"
+            "Verificación cruzada — fórmulas de caudal máximo DIRECTO (Racional, Témez, Mac Math, "
+            "Creager), para comparar contra el caudal SCS/Snyder/Clark de arriba"
         )
         v_dir = QVBoxLayout(gb_directos)
         _lbl_auto_15 = QLabel(
@@ -3333,10 +3333,150 @@ class HydroAndinaProDialog(QDialog):
 
         self.tabla_resultado_caudales_directos = crear_tabla_parametros()
         v_dir.addWidget(self.tabla_resultado_caudales_directos)
-
-        self.canvas_comparacion_qmax = HydrographCanvas(self, width=6.5, height=4.8)
-        v_dir.addWidget(self.canvas_comparacion_qmax)
         v.addWidget(gb_directos)
+
+        gb_envolventes = QGroupBox(
+            "Fórmulas envolventes / regionales adicionales (Dicken, Ryves, Inglis, Myer, Kresnik, "
+            "Francou-Rodier, Ventura, Bürkli-Ziegler, Crippen & Bue, Iszkowski)"
+        )
+        v_env = QVBoxLayout(gb_envolventes)
+        lbl_env_info = QLabel(
+            "Catálogo de fórmulas ENVOLVENTES de distintas escuelas regionales: India/Commonwealth "
+            "(Dicken, Ryves, Inglis), global/IAHS (Francou-Rodier), EE. UU. (Myer, Crippen & Bue/USGS), "
+            "Europa central/alpina (Kresnik), Iberoamericana/Europa del Este (Ventura, Iszkowski) y "
+            "drenaje urbano suizo (Bürkli-Ziegler). A diferencia de Témez/Mac Math/Creager de arriba, "
+            "son en su mayoría curvas ajustadas contra crecidas MÁXIMAS OBSERVADAS de una región "
+            "concreta: los coeficientes por defecto abajo son puntos de partida orientativos de la "
+            "bibliografía general, NO valores calibrados para los Andes peruanos -- úselas como "
+            "verificación de orden de magnitud / techo probable, no como caudal de diseño final sin "
+            "calibración local. Reutilizan C, I, A y S ya ingresados arriba (S se toma como S%/100 en m/m)."
+        )
+        lbl_env_info.setWordWrap(True)
+        v_env.addWidget(lbl_env_info)
+
+        f_env = QFormLayout()
+        f_env.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.spin_env_dicken = QDoubleSpinBox()
+        self.spin_env_dicken.setRange(1.0, 30.0)
+        self.spin_env_dicken.setValue(11.0)
+        f_env.addRow("Coef. de Dicken C_D (6-9 interior, 14-28 costero/monzónico):", self.spin_env_dicken)
+        self.spin_env_ryves = QDoubleSpinBox()
+        self.spin_env_ryves.setRange(1.0, 15.0)
+        self.spin_env_ryves.setValue(8.5)
+        f_env.addRow("Coef. de Ryves C_R (6.8 interior, hasta 10.2 costero/montaña):", self.spin_env_ryves)
+        self.spin_env_myer = QDoubleSpinBox()
+        self.spin_env_myer.setRange(0.001, 1.0)
+        self.spin_env_myer.setDecimals(3)
+        self.spin_env_myer.setSingleStep(0.005)
+        self.spin_env_myer.setValue(0.05)
+        f_env.addRow("Coef. de Myer C_M (0.005-1.0; 1.0 = envolvente máxima histórica EE.UU.):", self.spin_env_myer)
+        self.spin_env_kresnik = QDoubleSpinBox()
+        self.spin_env_kresnik.setRange(0.1, 5.0)
+        self.spin_env_kresnik.setValue(1.0)
+        f_env.addRow("Coef. de Kresnik C_K (0.2 llana, 2.0-3.0 alpina):", self.spin_env_kresnik)
+        self.spin_env_fr = QDoubleSpinBox()
+        self.spin_env_fr.setRange(1.0, 7.0)
+        self.spin_env_fr.setDecimals(2)
+        self.spin_env_fr.setValue(4.5)
+        f_env.addRow(
+            "K de Francou-Rodier (2-3 árido, 4-5 templado/tropical, 5.5-6 extremo mundial):", self.spin_env_fr)
+        self.spin_env_ventura = QDoubleSpinBox()
+        self.spin_env_ventura.setRange(1.0, 60.0)
+        self.spin_env_ventura.setValue(20.0)
+        f_env.addRow("Coef. de Ventura C_v (10-40 según torrencialidad):", self.spin_env_ventura)
+        self.spin_env_usgs_kr = QDoubleSpinBox()
+        self.spin_env_usgs_kr.setRange(0.5, 200.0)
+        self.spin_env_usgs_kr.setValue(10.0)
+        f_env.addRow("kR de Crippen & Bue (USGS, multiplicador regional):", self.spin_env_usgs_kr)
+        self.spin_env_usgs_b = QDoubleSpinBox()
+        self.spin_env_usgs_b.setRange(0.10, 1.0)
+        self.spin_env_usgs_b.setDecimals(3)
+        self.spin_env_usgs_b.setValue(0.55)
+        f_env.addRow("b de Crippen & Bue (exponente regional, típico 0.40-0.65):", self.spin_env_usgs_b)
+        self.spin_env_iszkowski_ci = QDoubleSpinBox()
+        self.spin_env_iszkowski_ci.setRange(0.01, 20.0)
+        self.spin_env_iszkowski_ci.setDecimals(3)
+        self.spin_env_iszkowski_ci.setValue(1.0)
+        f_env.addRow("Ci de Iszkowski (coef. regional, sin rango bibliográfico acotado):", self.spin_env_iszkowski_ci)
+        self.spin_env_iszkowski_m = QDoubleSpinBox()
+        self.spin_env_iszkowski_m.setRange(0.001, 5.0)
+        self.spin_env_iszkowski_m.setDecimals(3)
+        self.spin_env_iszkowski_m.setValue(0.3)
+        f_env.addRow("m de Iszkowski (factor de forma de la cuenca, p.ej. A/L²):", self.spin_env_iszkowski_m)
+        v_env.addLayout(f_env)
+
+        btn_calc_env = QPushButton("Calcular fórmulas envolventes")
+        btn_calc_env.clicked.connect(self._on_calcular_caudales_envolventes)
+        limitar_ancho_boton(btn_calc_env)
+        v_env.addWidget(btn_calc_env)
+
+        self.tabla_resultado_envolventes = crear_tabla_parametros()
+        v_env.addWidget(self.tabla_resultado_envolventes)
+        v.addWidget(gb_envolventes)
+
+        gb_seccion_pendiente = QGroupBox(
+            "Método indirecto Sección-Pendiente (aforo post-crecida, ecuación de Manning) + caudal crítico"
+        )
+        v_sp = QVBoxLayout(gb_seccion_pendiente)
+        lbl_sp_info = QLabel(
+            "A diferencia de las fórmulas de arriba (que ESTIMAN el caudal de diseño a partir de la "
+            "cuenca), este es un método INDIRECTO de AFORO: reconstruye el caudal pico de una crecida "
+            "YA OCURRIDA a partir de evidencia de campo levantada después del evento (marcas de agua, "
+            "sección transversal y pendiente de la línea de energía medidas en el tramo), aplicando la "
+            "ecuación de Manning. Útil para calibrar/verificar los coeficientes de las fórmulas "
+            "envolventes de arriba contra un caudal real observado en la zona de estudio."
+        )
+        lbl_sp_info.setWordWrap(True)
+        v_sp.addWidget(lbl_sp_info)
+
+        f_sp = QFormLayout()
+        f_sp.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.spin_sp_area = QDoubleSpinBox()
+        self.spin_sp_area.setRange(0.01, 100000.0)
+        self.spin_sp_area.setValue(30.0)
+        f_sp.addRow("Área mojada A (m², medida en la sección aforada):", self.spin_sp_area)
+        self.spin_sp_radio_h = QDoubleSpinBox()
+        self.spin_sp_radio_h.setRange(0.01, 500.0)
+        self.spin_sp_radio_h.setDecimals(3)
+        self.spin_sp_radio_h.setValue(1.2)
+        f_sp.addRow("Radio hidráulico R = A/P (m):", self.spin_sp_radio_h)
+        self.spin_sp_pendiente = QDoubleSpinBox()
+        self.spin_sp_pendiente.setRange(0.0001, 1.0)
+        self.spin_sp_pendiente.setDecimals(4)
+        self.spin_sp_pendiente.setValue(0.0100)
+        f_sp.addRow("Pendiente de la línea de energía S (m/m):", self.spin_sp_pendiente)
+        self.spin_sp_manning_n = QDoubleSpinBox()
+        self.spin_sp_manning_n.setRange(0.010, 0.200)
+        self.spin_sp_manning_n.setDecimals(3)
+        self.spin_sp_manning_n.setValue(0.035)
+        f_sp.addRow("Coeficiente de rugosidad de Manning n:", self.spin_sp_manning_n)
+        self.spin_sp_area_critica = QDoubleSpinBox()
+        self.spin_sp_area_critica.setRange(0.0, 100000.0)
+        self.spin_sp_area_critica.setValue(0.0)
+        f_sp.addRow("Área crítica Ac (m², opcional, 0 = no calcular Qc):", self.spin_sp_area_critica)
+        self.spin_sp_ancho_critico = QDoubleSpinBox()
+        self.spin_sp_ancho_critico.setRange(0.01, 1000.0)
+        self.spin_sp_ancho_critico.setValue(10.0)
+        f_sp.addRow("Ancho superficial crítico Bc (m, solo si Ac > 0):", self.spin_sp_ancho_critico)
+        v_sp.addLayout(f_sp)
+
+        btn_calc_sp = QPushButton("Calcular Sección-Pendiente / caudal crítico")
+        btn_calc_sp.clicked.connect(self._on_calcular_seccion_pendiente)
+        limitar_ancho_boton(btn_calc_sp)
+        v_sp.addWidget(btn_calc_sp)
+
+        self.tabla_resultado_seccion_pendiente = crear_tabla_parametros()
+        v_sp.addWidget(self.tabla_resultado_seccion_pendiente)
+        v.addWidget(gb_seccion_pendiente)
+
+        v.addWidget(QLabel(
+            "<b>Comparación gráfica — TODOS los métodos de caudal máximo calculados en esta pestaña</b> "
+            "(se actualiza automáticamente al calcular cualquiera de los cuatro bloques de arriba: "
+            "SCS/Snyder/Clark, Racional/Témez/Mac Math/Creager, las 10 fórmulas envolventes, y/o "
+            "Sección-Pendiente/caudal crítico):"
+        ))
+        self.canvas_comparacion_qmax = HydrographCanvas(self, width=6.5, height=4.8)
+        v.addWidget(self.canvas_comparacion_qmax)
 
         v.addWidget(QLabel("<b>Cuadro resumen final:</b>"))
         self.texto_resumen_caudales = QTextBrowser()
@@ -3367,10 +3507,39 @@ class HydroAndinaProDialog(QDialog):
             hay_algo = True
             html += (
                 "<p><b>Métodos directos (verificación cruzada)</b><br>"
+                f"Racional = {directos['Racional_Q_m3s']} m³/s &nbsp;|&nbsp; "
                 f"Témez = {directos['Temez_Q_m3s']} m³/s &nbsp;|&nbsp; "
                 f"Mac Math = {directos['MacMath_Q_m3s']} m³/s &nbsp;|&nbsp; "
                 f"Creager = {directos['Creager_Q_m3s']} m³/s</p><hr>"
             )
+        envolventes = self.resultados_hidraulica_drenaje.get(
+            "Caudales envolventes (10 fórmulas regionales)"
+        )
+        if envolventes:
+            hay_algo = True
+            html += (
+                "<p><b>Fórmulas envolventes / regionales (verificación cruzada)</b><br>"
+                f"Dicken = {envolventes['dicken_Q_m3s']} m³/s &nbsp;|&nbsp; "
+                f"Ryves = {envolventes['ryves_Q_m3s']} m³/s &nbsp;|&nbsp; "
+                f"Inglis = {envolventes['inglis_Q_m3s']} m³/s &nbsp;|&nbsp; "
+                f"Myer = {envolventes['myer_Q_m3s']} m³/s<br>"
+                f"Kresnik = {envolventes['kresnik_Q_m3s']} m³/s &nbsp;|&nbsp; "
+                f"Francou-Rodier = {envolventes['francou_rodier_Q_m3s']} m³/s &nbsp;|&nbsp; "
+                f"Ventura = {envolventes['ventura_Q_m3s']} m³/s &nbsp;|&nbsp; "
+                f"Bürkli-Ziegler = {envolventes['burkli_ziegler_Q_m3s']} m³/s<br>"
+                f"Crippen & Bue = {envolventes['crippen_bue_Q_m3s']} m³/s &nbsp;|&nbsp; "
+                f"Iszkowski = {envolventes['iszkowski_Q_m3s']} m³/s</p><hr>"
+            )
+        seccion_pendiente = self.resultados_hidraulica_drenaje.get("Sección-Pendiente / caudal crítico")
+        if seccion_pendiente:
+            hay_algo = True
+            html += (
+                "<p><b>Método indirecto (aforo post-crecida)</b><br>"
+                f"Sección-Pendiente (Manning) = {seccion_pendiente['Q_seccion_pendiente_m3s']} m³/s"
+            )
+            if seccion_pendiente.get("Q_critico_m3s") is not None:
+                html += f" &nbsp;|&nbsp; Caudal crítico (Fr=1) = {seccion_pendiente['Q_critico_m3s']} m³/s"
+            html += "</p><hr>"
         if not hay_algo:
             html += "<p style='color:#666666'>Aún no se ha calculado ningún caudal en esta pestaña.</p>"
         else:
@@ -3456,11 +3625,14 @@ class HydroAndinaProDialog(QDialog):
             )
             qp_scs = self.hidrograma_resultado.get("caudal_pico_m3s") if self.hidrograma_resultado else None
             self.resultados_hidraulica_drenaje["Caudales directos (Témez/Mac Math/Creager)"] = {
-                "tipo": "Caudales directos", "Temez_Q_m3s": r["temez"]["Q_m3_s"],
+                "tipo": "Caudales directos", "Racional_Q_m3s": r["racional"]["Q_m3_s"],
+                "Temez_Q_m3s": r["temez"]["Q_m3_s"],
                 "MacMath_Q_m3s": r["mac_math"]["Q_m3_s"], "Creager_Q_m3s": r["creager"]["Q_m3_s"],
                 "Qp_SCS_Snyder_Clark_m3s": qp_scs,
             }
             filas_directos = [
+                ("Racional (simple, sin K)", r["racional"]["Q_m3_s"], "m³/s",
+                 "sin corrección de uniformidad -- compárese con Témez (mismo método + K)"),
                 ("Témez", r["temez"]["Q_m3_s"], "m³/s", f"K = {r['temez']['coeficiente_uniformidad_K']}"),
                 ("Mac Math", r["mac_math"]["Q_m3_s"], "m³/s"),
                 ("Creager", r["creager"]["Q_m3_s"], "m³/s", r["creager"]["nota"]),
@@ -3471,18 +3643,124 @@ class HydroAndinaProDialog(QDialog):
                 )
             poblar_tabla_parametros(self.tabla_resultado_caudales_directos, filas_directos)
 
-            nombres_metodos = ["Témez", "Mac Math", "Creager"]
-            valores_metodos = [r["temez"]["Q_m3_s"], r["mac_math"]["Q_m3_s"], r["creager"]["Q_m3_s"]]
-            if qp_scs is not None:
-                metodo_hidrograma = self.hidrograma_resultado.get("metodo", "SCS/Snyder/Clark")
-                nombres_metodos.insert(0, str(metodo_hidrograma))
-                valores_metodos.insert(0, qp_scs)
-            self.canvas_comparacion_qmax.plot_comparacion_metodos(nombres_metodos, valores_metodos)
+            self._actualizar_grafico_comparacion_caudales()
             self._actualizar_texto_resumen_caudales()
             if hasattr(self, "texto_resumen_hidraulica"):
                 self._actualizar_texto_resumen_hidraulica()
         except direct_discharge_methods.DirectDischargeError as e:
             QMessageBox.warning(self, "No se pudo calcular", str(e))
+
+    def _on_calcular_caudales_envolventes(self):
+        try:
+            pendiente_m_m = self.spin_dir_s.value() / 100.0
+            r = direct_discharge_methods.comparar_metodos_envolventes(
+                area_km2=self.spin_dir_a.value(), pendiente_m_m=pendiente_m_m,
+                coef_escorrentia_c=self.spin_dir_c.value(), intensidad_mm_h=self.spin_dir_i.value(),
+                coeficiente_dicken=self.spin_env_dicken.value(), coeficiente_ryves=self.spin_env_ryves.value(),
+                coeficiente_myer=self.spin_env_myer.value(), coeficiente_kresnik=self.spin_env_kresnik.value(),
+                k_francou_rodier=self.spin_env_fr.value(), coeficiente_ventura=self.spin_env_ventura.value(),
+                k_regional_usgs=self.spin_env_usgs_kr.value(), exponente_b_usgs=self.spin_env_usgs_b.value(),
+                coeficiente_iszkowski=self.spin_env_iszkowski_ci.value(),
+                factor_forma_iszkowski=self.spin_env_iszkowski_m.value(),
+            )
+            self.resultados_hidraulica_drenaje[
+                "Caudales envolventes (10 fórmulas regionales)"
+            ] = {
+                "tipo": "Caudales envolventes",
+                **{f"{clave}_Q_m3s": datos["Q_m3_s"] for clave, datos in r.items()},
+            }
+            filas_env = [
+                ("Dicken", r["dicken"]["Q_m3_s"], "m³/s", r["dicken"]["nota"]),
+                ("Ryves", r["ryves"]["Q_m3_s"], "m³/s", r["ryves"]["nota"]),
+                ("Inglis", r["inglis"]["Q_m3_s"], "m³/s", r["inglis"]["nota"]),
+                ("Myer", r["myer"]["Q_m3_s"], "m³/s", r["myer"]["nota"]),
+                ("Kresnik", r["kresnik"]["Q_m3_s"], "m³/s", r["kresnik"]["nota"]),
+                ("Francou-Rodier", r["francou_rodier"]["Q_m3_s"], "m³/s", r["francou_rodier"]["nota"]),
+                ("Ventura", r["ventura"]["Q_m3_s"], "m³/s", r["ventura"]["nota"]),
+                ("Bürkli-Ziegler", r["burkli_ziegler"]["Q_m3_s"], "m³/s", r["burkli_ziegler"]["nota"]),
+                ("Crippen & Bue (USGS)", r["crippen_bue"]["Q_m3_s"], "m³/s", r["crippen_bue"]["nota"]),
+                ("Iszkowski", r["iszkowski"]["Q_m3_s"], "m³/s", r["iszkowski"]["nota"]),
+            ]
+            qp_scs = self.hidrograma_resultado.get("caudal_pico_m3s") if self.hidrograma_resultado else None
+            if qp_scs is not None:
+                filas_env.append(
+                    ("Qp SCS/Snyder/Clark (referencia, calculado arriba)", qp_scs, "m³/s")
+                )
+            poblar_tabla_parametros(self.tabla_resultado_envolventes, filas_env)
+
+            self._actualizar_grafico_comparacion_caudales()
+            self._actualizar_texto_resumen_caudales()
+            if hasattr(self, "texto_resumen_hidraulica"):
+                self._actualizar_texto_resumen_hidraulica()
+        except direct_discharge_methods.DirectDischargeError as e:
+            QMessageBox.warning(self, "No se pudo calcular", str(e))
+
+    def _on_calcular_seccion_pendiente(self):
+        try:
+            r_sp = direct_discharge_methods.caudal_seccion_pendiente_manning(
+                area_mojada_m2=self.spin_sp_area.value(), radio_hidraulico_m=self.spin_sp_radio_h.value(),
+                pendiente_m_m=self.spin_sp_pendiente.value(), manning_n=self.spin_sp_manning_n.value(),
+            )
+            filas_sp = [
+                ("Caudal (Sección-Pendiente, Manning)", r_sp["Q_m3_s"], "m³/s"),
+                ("Velocidad media", r_sp["velocidad_m_s"], "m/s"),
+            ]
+            q_critico = None
+            if self.spin_sp_area_critica.value() > 0:
+                r_qc = direct_discharge_methods.caudal_critico(
+                    area_critica_m2=self.spin_sp_area_critica.value(),
+                    ancho_superficial_m=self.spin_sp_ancho_critico.value(),
+                )
+                q_critico = r_qc["Q_m3_s"]
+                filas_sp.append(("Caudal crítico (Fr=1)", q_critico, "m³/s",
+                                  "referencia de control de flujo del tramo aforado"))
+            self.resultados_hidraulica_drenaje["Sección-Pendiente / caudal crítico"] = {
+                "tipo": "Sección-Pendiente", "Q_seccion_pendiente_m3s": r_sp["Q_m3_s"], "Q_critico_m3s": q_critico,
+            }
+            poblar_tabla_parametros(self.tabla_resultado_seccion_pendiente, filas_sp)
+            self._actualizar_grafico_comparacion_caudales()
+            self._actualizar_texto_resumen_caudales()
+            if hasattr(self, "texto_resumen_hidraulica"):
+                self._actualizar_texto_resumen_hidraulica()
+        except direct_discharge_methods.DirectDischargeError as e:
+            QMessageBox.warning(self, "No se pudo calcular", str(e))
+
+    def _actualizar_grafico_comparacion_caudales(self):
+        """Gráfico de barras ÚNICO (Pestaña 7) que compara el caudal pico
+        de TODOS los métodos ya calculados en esta pestaña -- SCS/Snyder/
+        Clark, Racional/Témez/Mac Math/Creager, las 10 fórmulas
+        envolventes/regionales y Sección-Pendiente/caudal crítico si se
+        calcularon -- sin excepción y sin importar el orden en que el
+        usuario los haya calculado (se llama al final de los botones de
+        cálculo de esta pestaña, así que siempre refleja todo lo
+        disponible en ese momento)."""
+        nombres, valores = [], []
+        if self.hidrograma_resultado:
+            nombres.append(str(self.hidrograma_resultado.get("metodo", "SCS/Snyder/Clark")))
+            valores.append(self.hidrograma_resultado["caudal_pico_m3s"])
+        directos = self.resultados_hidraulica_drenaje.get("Caudales directos (Témez/Mac Math/Creager)")
+        if directos:
+            nombres += ["Racional", "Témez", "Mac Math", "Creager"]
+            valores += [directos["Racional_Q_m3s"], directos["Temez_Q_m3s"],
+                        directos["MacMath_Q_m3s"], directos["Creager_Q_m3s"]]
+        envolventes = self.resultados_hidraulica_drenaje.get("Caudales envolventes (10 fórmulas regionales)")
+        if envolventes:
+            nombres += ["Dicken", "Ryves", "Inglis", "Myer", "Kresnik", "Francou-Rodier", "Ventura",
+                        "Bürkli-Ziegler", "Crippen & Bue", "Iszkowski"]
+            valores += [envolventes[f"{clave}_Q_m3s"] for clave in
+                        ["dicken", "ryves", "inglis", "myer", "kresnik", "francou_rodier", "ventura",
+                         "burkli_ziegler", "crippen_bue", "iszkowski"]]
+        seccion_pendiente = self.resultados_hidraulica_drenaje.get("Sección-Pendiente / caudal crítico")
+        if seccion_pendiente:
+            nombres.append("Sección-Pendiente (aforo)")
+            valores.append(seccion_pendiente["Q_seccion_pendiente_m3s"])
+            if seccion_pendiente.get("Q_critico_m3s") is not None:
+                nombres.append("Caudal crítico")
+                valores.append(seccion_pendiente["Q_critico_m3s"])
+        if nombres:
+            self.canvas_comparacion_qmax.plot_comparacion_metodos(
+                nombres, valores, titulo="Comparación de TODOS los métodos de caudal máximo"
+            )
 
     def _on_calcular_hidrograma(self):
         if not self.morfometria_resultados:
@@ -3578,6 +3856,7 @@ class HydroAndinaProDialog(QDialog):
                 resultado["tiempos_h"], resultado["caudal_m3s"], metodo_ui,
                 resultado["caudal_pico_m3s"], resultado["tiempo_pico_h"],
             )
+            self._actualizar_grafico_comparacion_caudales()
             self._actualizar_texto_resumen_caudales()
 
         except Exception as e:

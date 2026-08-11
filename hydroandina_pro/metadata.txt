@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.2.45
+version=0.2.46
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,34 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.2.46: ampliación mayor de la Pestaña 7 (Caudales Máximos) -- de 4 a 17 métodos de estimación
+      de caudal pico, todos comparables entre sí en un único gráfico y cuadro resumen.
+      (1) 10 FÓRMULAS ENVOLVENTES/REGIONALES nuevas (core/direct_discharge_methods.py): Dicken (1865,
+      India norte/centro), Ryves (1884, India sur/costera), Inglis (1930, Ghats occidentales),
+      Myer/Myer-Jarvis (EE. UU.), Kresnik (Europa central/alpina), Francou-Rodier (envolvente mundial
+      IAHS), Ventura (España/mediterránea), Bürkli-Ziegler (drenaje urbano suizo), Crippen & Bue
+      (USGS) e Iszkowski (Europa del Este/Sudamérica). Reutilizan los mismos campos C/I/A/S/Tc ya
+      ingresados en la pestaña, con el coeficiente regional de cada fórmula editable (rango típico de
+      la bibliografía indicado junto a cada campo) y advertencia explícita de que son curvas
+      ENVOLVENTES ajustadas contra crecidas máximas OBSERVADAS de una región concreta: los valores por
+      defecto son puntos de partida orientativos, NO coeficientes calibrados para los Andes peruanos.
+      (2) MÉTODO RACIONAL simple (sin el coeficiente de uniformidad K), agregado junto a
+      Témez/Mac Math/Creager para poder ver el efecto de K comparando ambos resultados lado a lado.
+      (3) MÉTODO INDIRECTO SECCIÓN-PENDIENTE (ecuación de Manning) + caudal crítico (Fr=1): a
+      diferencia de todo lo anterior, no ESTIMA el caudal de diseño desde la cuenca sino que
+      RECONSTRUYE el caudal pico de una crecida ya ocurrida a partir de evidencia de campo
+      (marcas de agua, sección transversal y pendiente de la línea de energía medidas tras el evento)
+      -- la base del aforo indirecto post-crecida, útil para calibrar los coeficientes de las
+      envolventes de arriba contra un caudal real observado en la zona.
+      (4) El gráfico de "Comparación de métodos" (antes solo Témez/Mac Math/Creager, dentro de ese
+      grupo) se unificó en un ÚNICO gráfico de barras al final de la pestaña que muestra TODOS los
+      métodos calculados sin excepción -- SCS/Snyder/Clark + Racional/Témez/Mac Math/Creager + las 10
+      envolventes + Sección-Pendiente/caudal crítico -- actualizado automáticamente sea cual sea el
+      orden en que el usuario calcule cada bloque (se llama desde los 4 botones de cálculo de la
+      pestaña); y el cuadro resumen final ahora lista también los 10 caudales envolventes, el
+      Racional y el aforo indirecto (antes solo lluvia-escorrentía + Témez/Mac Math/Creager).
+      Se mantiene el Mac Math ya existente sin cambios (no se agrega una segunda variante con otra
+      convención de unidades de pendiente, para no tener dos "Mac Math" distintos en el mismo plugin).
     - v0.2.45: mejoras de presentación en la sección IDF de la Pestaña 5 (Precipitación Máx 24h).
       (1) La ecuación IDF combinada (i = K*Tr^m/t^n) ya no se muestra como una simple etiqueta de texto:
       ahora tiene su propio cuadro resumen enmarcado y centrado (borde azul, fondo tenue), con la
