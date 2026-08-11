@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.2.47
+version=0.2.48
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,48 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.2.48: análisis de frecuencia (Pestaña 5) notablemente más riguroso — dos mejoras solicitadas
+      (ítems 2 y 1 de la lista de mejoras) que además cambian el resultado en casos reales.
+      (1) TRES PRUEBAS DE BONDAD DE AJUSTE en vez de una. Además de Kolmogorov-Smirnov se aplican ahora
+      ANDERSON-DARLING y CHI-CUADRADO a cada una de las 9 distribuciones. El motivo no es cosmético:
+      KS mide la máxima distancia entre curva teórica y empírica y es poco sensible a las COLAS, que es
+      justo donde se lee la precipitación de diseño (Tr=100, 500, 1000 años). Verificado con series
+      sintéticas: con datos claramente log-normales, KS ACEPTABA tanto la Normal (D=0.143 < 0.176) como
+      la Log-Gumbel, mientras Anderson-Darling las rechazaba correctamente (A²=1.95 y 1.70 contra un
+      crítico de 0.751). Anderson-Darling usa los valores críticos tabulados para parámetros estimados
+      en normal/log-normal y Gumbel/log-Gumbel (D'Agostino & Stephens, 1986); para las demás
+      distribuciones la bibliografía no publica un valor crítico específico, así que se usa el del caso
+      general y se MARCA con un asterisco en la tabla y en el tooltip que ese "pasa" es permisivo — no
+      se inventa un valor crítico. Chi-cuadrado usa CLASES EQUIPROBABLES (bordes en los cuantiles
+      teóricos j/k, frecuencia esperada idéntica en todas las clases, que es la forma recomendada y de
+      mayor potencia) y descuenta un grado de libertad por cada parámetro estimado. Su valor crítico no
+      necesita tabla: Chi²(k) es exactamente una Gamma(k/2, 2), así que se obtiene invirtiendo la
+      función gamma incompleta que el módulo ya implementaba — verificado contra tabla publicada para
+      gl=1,2,5,10,20 y alpha=0.05/0.01, coincidiendo hasta la cuarta decimal.
+      CAMBIO DE CRITERIO EN LA SELECCIÓN AUTOMÁTICA: "mejor ajuste" ya no se decide solo por el menor D
+      de KS, sino primero por CUÁNTAS de las 3 pruebas supera cada distribución, desempatando por D. En
+      2 de 6 series sintéticas de prueba el criterio cambia la distribución elegida, y en ambos casos
+      recupera la distribución que REALMENTE generó los datos (log-normal), donde el criterio anterior
+      elegía una GEV que fallaba una prueba. Se conserva el criterio antiguo accesible por código
+      (mejor_ajuste(..., solo_ks=True)) para poder reproducir resultados de versiones anteriores.
+      (2) AJUSTE POR MOMENTOS-L (Hosking 1990; Hosking & Wallis 1997) para las 8 distribuciones que
+      todavía usaban momentos ordinarios (la GEV ya se ajustaba así desde el inicio), seleccionable
+      desde un desplegable en la interfaz. Los momentos ordinarios elevan las desviaciones al cuadrado
+      y al cubo, así que un único dato extremo domina el ajuste — y estas son, por construcción, series
+      de valores extremos de solo 20-40 años, con un coeficiente de sesgo muestral muy inestable. Los
+      momentos-L son combinaciones lineales de los estadísticos de orden (ningún dato entra elevado a
+      una potencia) y son el estándar actual en análisis regional de frecuencias.
+      VERIFICACIÓN: se comprobó que las relaciones exactas se cumplen (con n=200000, la Normal recupera
+      mu=80.014/sigma=15.017 frente a los 80/15 reales, y la Gumbel xi=69.996/alpha=13.96 frente a
+      70/14, con t3=0.16989 contra el valor teórico 0.1699); y se verificó la propiedad que DEFINE el
+      método -- que los momentos-L teóricos de la distribución ajustada reproduzcan los muestrales --
+      integrando numéricamente la función cuantil de cada ajuste. Esa comprobación DETECTÓ UN ERROR en
+      la fórmula de sigma de Pearson III (razón de funciones gamma invertida y división por sqrt(alpha)
+      en vez de multiplicación): daba 13.8% de error en l2 y 14.9% en l3 pese a ser una distribución de
+      3 parámetros que debe reproducirlos casi exactamente. Corregido a
+      sigma = l2*sqrt(pi)*sqrt(alpha)*Gamma(alpha)/Gamma(alpha+1/2) (verificado en el caso alpha=1,
+      exponencial, donde l2 = beta/2), el error bajó a 0.231% y 1.55%. Log-Pearson III comparte el
+      mismo estimador y quedó corregida también.
     - v0.2.47: la Pestaña 7 pasa de 17 a 31 métodos de estimación de caudal máximo, con dos secciones
       nuevas y un gráfico comparativo rediseñado.
       (1) ESCUELAS REGIONALES ADICIONALES (8 fórmulas): Santa María (Chile, cuencas andinas de alta

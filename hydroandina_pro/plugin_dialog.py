@@ -322,6 +322,7 @@ class HydroAndinaProDialog(QDialog):
         self.serie_precip_anual = None
         self.resultados_frecuencia = {}
         self.mejor_ajuste_clave = None
+        self.metodo_ajuste_usado = "momentos_l"
         self.p24_disenio = {}
         self.periodos_retorno_actuales = []
         self.idf_resultados = {}  # curvas/ecuaciones IDF derivadas de p24_disenio (pestaña 5)
@@ -2236,20 +2237,63 @@ class HydroAndinaProDialog(QDialog):
         v.addWidget(gb_manual)
 
         gb_analisis = QGroupBox("2. Análisis de frecuencia")
-        h_a = QHBoxLayout(gb_analisis)
+        v_analisis = QVBoxLayout(gb_analisis)
+        h_a = QHBoxLayout()
+        v_analisis.addLayout(h_a)
         self.combo_alpha_ks = QComboBox()
         self.combo_alpha_ks.addItems(["0.10", "0.05", "0.01"])
         self.combo_alpha_ks.setCurrentText("0.05")
-        h_a.addWidget(QLabel("Nivel de significancia KS (alpha):"))
+        h_a.addWidget(QLabel("Nivel de significancia (alpha):"))
         h_a.addWidget(self.combo_alpha_ks)
+
+        self.combo_metodo_ajuste = QComboBox()
+        self.combo_metodo_ajuste.addItem("Momentos-L (Hosking) — recomendado", "momentos_l")
+        self.combo_metodo_ajuste.addItem("Momentos ordinarios (clásico)", "momentos")
+        h_a.addWidget(QLabel("Método de ajuste:"))
+        h_a.addWidget(self.combo_metodo_ajuste)
+
         self.btn_analizar_frecuencia = QPushButton("Ajustar distribuciones y calcular precipitaciones de diseño")
         self.btn_analizar_frecuencia.clicked.connect(self._on_analizar_frecuencia)
+        limitar_ancho_boton(self.btn_analizar_frecuencia)
         h_a.addWidget(self.btn_analizar_frecuencia)
+        h_a.addStretch()
+
+        lbl_metodo_ajuste = QLabel(
+            "<b>Método de ajuste de parámetros:</b> los <b>momentos ordinarios</b> (media, desviación y "
+            "sesgo) elevan las desviaciones al cuadrado y al cubo, así que un solo dato extremo pesa "
+            "muchísimo — y estas series son, por construcción, series de valores extremos, a menudo de "
+            "solo 20-40 años. El coeficiente de sesgo muestral es especialmente inestable en muestras "
+            "cortas. Los <b>momentos-L</b> son combinaciones lineales de los estadísticos de orden "
+            "(ningún dato entra elevado a una potencia): son mucho más robustos ante valores atípicos y "
+            "menos sesgados en series cortas, y son hoy el estándar en análisis regional de frecuencias "
+            "(Hosking &amp; Wallis, 1997). La GEV de este plugin ya se ajustaba así desde el inicio; "
+            "desde la v0.2.48 las otras 8 distribuciones también pueden hacerlo. Cambie el método y "
+            "vuelva a ajustar para comparar el efecto sobre su propia serie."
+        )
+        lbl_metodo_ajuste.setWordWrap(True)
+        v_analisis.addWidget(lbl_metodo_ajuste)
         v.addWidget(gb_analisis)
 
-        self.tabla_distribuciones = QTableWidget(0, 5)
+        lbl_pruebas_bondad = QLabel(
+            "Cada distribución se somete a <b>tres</b> pruebas de bondad de ajuste, no solo a "
+            "Kolmogorov-Smirnov: <b>KS</b> mide la máxima distancia entre la curva teórica y la "
+            "empírica (es más sensible al CENTRO de la distribución), <b>Anderson-Darling</b> pondera "
+            "mucho más las COLAS, y <b>Chi-cuadrado</b> compara frecuencias por clases equiprobables. "
+            "La diferencia importa: la precipitación de diseño se lee en la cola alta (Tr=100, 500, "
+            "1000 años), así que una distribución puede pasar KS holgadamente y aun así ajustar mal "
+            "justo donde se la va a usar — caso verificado en pruebas de este plugin, donde KS aceptó "
+            "una Normal para datos claramente log-normales y AD/χ² la rechazaron. Un asterisco (*) "
+            "junto a AD indica que su valor crítico es el del caso general y por tanto <i>permisivo</i>, "
+            "porque para esa distribución la bibliografía no publica uno específico para parámetros "
+            "estimados de la propia muestra."
+        )
+        lbl_pruebas_bondad.setWordWrap(True)
+        v.addWidget(lbl_pruebas_bondad)
+
+        self.tabla_distribuciones = QTableWidget(0, 8)
         self.tabla_distribuciones.setHorizontalHeaderLabels(
-            ["Distribución", "Parámetros", "D (KS)", "D crítico", "¿Pasa KS?"]
+            ["Distribución", "Parámetros", "D (KS)", "D crít.", "A² (AD)", "A² crít.",
+             "χ² (p-valor)", "Pruebas que pasa"]
         )
         # Antes las 5 columnas estaban en modo Stretch parejo, lo que
         # dejaba D(KS)/D crítico/¿Pasa KS? (textos cortos) demasiado
@@ -2259,13 +2303,11 @@ class HydroAndinaProDialog(QDialog):
         cabecera_dist = self.tabla_distribuciones.horizontalHeader()
         cabecera_dist.setSectionResizeMode(0, QHeaderView.Interactive)
         cabecera_dist.setSectionResizeMode(1, QHeaderView.Stretch)
-        cabecera_dist.setSectionResizeMode(2, QHeaderView.Fixed)
-        cabecera_dist.setSectionResizeMode(3, QHeaderView.Fixed)
-        cabecera_dist.setSectionResizeMode(4, QHeaderView.Fixed)
-        self.tabla_distribuciones.setColumnWidth(0, 220)
-        self.tabla_distribuciones.setColumnWidth(2, 80)
-        self.tabla_distribuciones.setColumnWidth(3, 80)
-        self.tabla_distribuciones.setColumnWidth(4, 80)
+        for _col_fija in (2, 3, 4, 5, 6, 7):
+            cabecera_dist.setSectionResizeMode(_col_fija, QHeaderView.Fixed)
+        self.tabla_distribuciones.setColumnWidth(0, 200)
+        for _col_fija, _ancho in ((2, 70), (3, 70), (4, 70), (5, 70), (6, 95), (7, 150)):
+            self.tabla_distribuciones.setColumnWidth(_col_fija, _ancho)
         v.addWidget(self.tabla_distribuciones)
 
         self.canvas_frecuencia = FrequencyCanvas(self, width=6.5, height=4.8)
@@ -3033,7 +3075,9 @@ class HydroAndinaProDialog(QDialog):
         try:
             datos = self.serie_precip_anual.valores_mm
             alpha = float(self.combo_alpha_ks.currentText())
-            resultados = frequency_analysis.analizar_todas(datos, alpha_ks=alpha)
+            metodo_ajuste = self.combo_metodo_ajuste.currentData() or "momentos_l"
+            resultados = frequency_analysis.analizar_todas(datos, alpha_ks=alpha, metodo=metodo_ajuste)
+            self.metodo_ajuste_usado = metodo_ajuste
             mejor = frequency_analysis.mejor_ajuste(resultados)
             self.resultados_frecuencia = resultados
             self.mejor_ajuste_clave = mejor
@@ -3047,13 +3091,14 @@ class HydroAndinaProDialog(QDialog):
             for clave, r in resultados.items():
                 row = self.tabla_distribuciones.rowCount()
                 self.tabla_distribuciones.insertRow(row)
-                nombre = r["nombre"] + ("  ★ mejor ajuste" if clave == mejor else "")
+                nombre = r["nombre"] + (
+                    f"  ★ mejor ajuste ({frequency_analysis._cuenta_pruebas_pasadas(r)}/3 pruebas)"
+                    if clave == mejor else "")
                 self.tabla_distribuciones.setItem(row, 0, QTableWidgetItem(nombre))
                 if r["error"]:
                     self.tabla_distribuciones.setItem(row, 1, QTableWidgetItem(f"ERROR: {r['error']}"))
-                    self.tabla_distribuciones.setItem(row, 2, QTableWidgetItem(""))
-                    self.tabla_distribuciones.setItem(row, 3, QTableWidgetItem(""))
-                    self.tabla_distribuciones.setItem(row, 4, QTableWidgetItem(""))
+                    for _col_vacia in range(2, 8):
+                        self.tabla_distribuciones.setItem(row, _col_vacia, QTableWidgetItem(""))
                 else:
                     simbolos = SIMBOLOS_PARAMETROS_DISTRIBUCION.get(clave, {})
                     params_str = ", ".join(
@@ -3062,7 +3107,43 @@ class HydroAndinaProDialog(QDialog):
                     self.tabla_distribuciones.setItem(row, 1, QTableWidgetItem(params_str))
                     self.tabla_distribuciones.setItem(row, 2, QTableWidgetItem(str(r["D_ks"])))
                     self.tabla_distribuciones.setItem(row, 3, QTableWidgetItem(str(r["D_critico"])))
-                    self.tabla_distribuciones.setItem(row, 4, QTableWidgetItem("Sí" if r["pasa_ks"] else "No"))
+
+                    ad = r.get("ad") or {}
+                    if "pasa" in ad:
+                        # El asterisco marca que el valor crítico es el del
+                        # caso general (permisivo): ver la nota sobre AD
+                        # arriba de la tabla y en core/frequency_analysis.py.
+                        marca = "*" if ad.get("critico_aproximado") else ""
+                        self.tabla_distribuciones.setItem(
+                            row, 4, QTableWidgetItem(f"{ad['A2_modificado']}"))
+                        item_ad_crit = QTableWidgetItem(f"{ad['A2_critico']}{marca}")
+                        item_ad_crit.setToolTip(ad.get("tipo_critico", ""))
+                        self.tabla_distribuciones.setItem(row, 5, item_ad_crit)
+                    else:
+                        self.tabla_distribuciones.setItem(row, 4, QTableWidgetItem("—"))
+                        item_ad_err = QTableWidgetItem("—")
+                        item_ad_err.setToolTip(str(ad.get("error", "")))
+                        self.tabla_distribuciones.setItem(row, 5, item_ad_err)
+
+                    chi = r.get("chi2") or {}
+                    if "pasa" in chi:
+                        item_chi = QTableWidgetItem(f"{chi['chi2']} (p={chi['p_valor']})")
+                        item_chi.setToolTip(
+                            f"χ² crítico = {chi['chi2_critico']}, {chi['grados_libertad']} grados de "
+                            f"libertad, {chi['n_clases']} clases equiprobables con frecuencia esperada "
+                            f"{chi['frecuencia_esperada_por_clase']} cada una"
+                            + ("" if chi.get("frecuencia_esperada_suficiente")
+                               else " — ATENCIÓN: por debajo del mínimo recomendado de 5, la prueba "
+                                    "pierde validez con esta muestra tan corta")
+                        )
+                        self.tabla_distribuciones.setItem(row, 6, item_chi)
+                    else:
+                        item_chi_err = QTableWidgetItem("no aplicable")
+                        item_chi_err.setToolTip(str(chi.get("error", "")))
+                        self.tabla_distribuciones.setItem(row, 6, item_chi_err)
+
+                    self.tabla_distribuciones.setItem(
+                        row, 7, QTableWidgetItem(frequency_analysis.resumen_pruebas_bondad(r)))
 
             # Recalcula el alto de la tabla ahora que tiene filas (una por
             # distribución, hasta 9): se construyó con 0 filas y nunca
