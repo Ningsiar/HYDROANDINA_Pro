@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.2.55
+version=0.2.56
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,27 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.2.56: *** CORRECCION DE LA CAUSA REAL *** del error "El punto de salida cae fuera de la
+      extension del raster de cauces" en la Pestaña 1, diagnosticada inspeccionando el proyecto real del
+      usuario (MDE en EPSG:3857, Web Mercator).
+      CAUSA: el Paso A (generar red de drenaje) reproyecta el MDE a la zona UTM local SOLO si esa zona
+      ya esta definida, cosa que ocurre al marcar el break point. Si el usuario genera primero la red de
+      drenaje y marca el punto despues -- que es el orden natural, porque la red sirve justamente para
+      elegir donde hacer clic -- el Paso A trabaja con el MDE en su CRS original y deja en cache un
+      raster de cauces en ese CRS. El Paso B despues REUTILIZABA ese cache a ciegas, mientras que el
+      break point se convierte SIEMPRE a UTM. Con un MDE en Web Mercator eso comparaba un punto de
+      X~2.5e5 (UTM) contra un raster de X~-7.9e6 (Web Mercator): millones de metros de separacion, de
+      modo que el ajuste al cauce fallaba SIEMPRE, sin importar donde se hiciera clic, y el mensaje
+      culpaba al punto cuando el problema era el CRS del raster cacheado.
+      CORRECCION: el Paso A registra ahora el CRS con el que calculo el flujo, y el Paso B solo reutiliza
+      ese resultado si coincide con el suyo; si no, lo recalcula en el CRS correcto informandolo en la
+      barra de estado en vez de fallar.
+      NOTA SOBRE LA v0.2.55: el ajuste de resolucion de GRASS que se hizo alli es una mejora real de
+      robustez y se mantiene, pero NO era la causa de este error -- se diagnostico sin ver el proyecto.
+      Ademas, ninguna version instalada ese dia llego a ejecutarse en la sesion de QGIS del usuario:
+      QGIS cachea los modulos de Python en memoria, y copiar los .py al disco no afecta a un proceso ya
+      iniciado. Se recomienda instalar el complemento Plugin Reloader para recargar el plugin sin
+      reiniciar QGIS y evitar diagnosticar sobre codigo antiguo.
     - v0.2.55: correccion en la delimitacion (Pestaña 1) del error "El punto de salida cae fuera de la
       extension del raster de cauces", reportado por el usuario.
       CAUSA RAIZ: la cadena de delimitacion fijaba GRASS_REGION_PARAMETER (la EXTENSION) en todas las

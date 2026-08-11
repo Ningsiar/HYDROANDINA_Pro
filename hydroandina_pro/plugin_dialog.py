@@ -772,6 +772,9 @@ class HydroAndinaProDialog(QDialog):
             capa_red = obtener_capa(resultado_red["red_drenaje_vector"], context, es_raster=False, nombre="red_drenaje_stream_network")
             QgsProject.instance().addMapLayer(capa_red)
             self.resultado_flujo_paso_a = resultado_flujo  # guardar para reutilizar en el Paso B
+            # Se guarda tambien el CRS en que se calculo: el Paso B solo puede
+            # reutilizarlo si coincide con el suyo (ver la nota en _on_run_delineation).
+            self.crs_flujo_paso_a = dem_layer.crs().authid()
             self.lbl_estado_tab1.setText(
                 "Estado: red de drenaje generada (Paso A completado). Ahora seleccione el punto de "
                 "salida sobre un cauce visible en el mapa, y pulse el Paso B para delimitar la cuenca."
@@ -972,9 +975,33 @@ class HydroAndinaProDialog(QDialog):
             # Si el Paso A (generar red de drenaje) ya se ejecutó en esta
             # sesión, reutiliza su resultado de flujo en vez de recalcularlo
             # (ahorra tiempo, que puede ser significativo con MDE grandes).
-            if getattr(self, "resultado_flujo_paso_a", None) is not None:
-                flujo = self.resultado_flujo_paso_a
+            #
+            # PERO SOLO SI SE CALCULÓ EN EL MISMO CRS (corrección v0.2.56).
+            # El Paso A trabaja con el MDE tal como está en el proyecto, que
+            # puede estar en cualquier CRS (p.ej. EPSG:3857 si viene de un
+            # servicio web), mientras que el break point se convierte SIEMPRE
+            # a la zona UTM local y este Paso B reproyecta el MDE a esa misma
+            # zona. Reutilizar a ciegas el resultado del Paso A comparaba
+            # entonces un punto en UTM (X del orden de 2.5e5) contra un
+            # ráster de cauces en Web Mercator (X del orden de -7.9e6): el
+            # punto quedaba a millones de metros del ráster y el snap fallaba
+            # SIEMPRE con "el punto de salida cae fuera de la extensión del
+            # ráster de cauces", sin importar dónde se hiciera clic.
+            crs_paso_a = getattr(self, "crs_flujo_paso_a", None)
+            crs_actual = dem_layer.crs().authid()
+            flujo_cacheado = getattr(self, "resultado_flujo_paso_a", None)
+            if flujo_cacheado is not None and crs_paso_a == crs_actual:
+                flujo = flujo_cacheado
                 self.lbl_estado_tab1.setText("Reutilizando el cálculo de flujo del Paso A...")
+            elif flujo_cacheado is not None:
+                self.lbl_estado_tab1.setText(
+                    f"El Paso A se calculó en {crs_paso_a} y la delimitación trabaja en {crs_actual}: "
+                    "recalculando el flujo en el CRS correcto..."
+                )
+                flujo = delineation.calcular_flujo(
+                    dem_layer, umbral_acumulacion=self.spin_umbral.value(),
+                    context=context, feedback=feedback,
+                )
             else:
                 flujo = delineation.calcular_flujo(
                     dem_layer, umbral_acumulacion=self.spin_umbral.value(),
