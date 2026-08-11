@@ -919,6 +919,36 @@ class HydroAndinaProDialog(QDialog):
         self.lbl_estado_tab1.setText("Estado: break point definido. MDE se reproyectará a "
                                       f"{self.utm_crs.authid()} al ejecutar la delimitación.")
 
+    def _zona_utm_desde_capa(self, capa):
+        """
+        Zona UTM que corresponde al CENTRO de una capa, devuelta como
+        (QgsCoordinateReferenceSystem, lon, lat).
+
+        POR QUÉ EXISTE (v0.2.57): la zona se derivaba solo de la longitud
+        del punto clicado. Si esa longitud sale mal por cualquier motivo
+        (un CRS de proyecto inconsistente, un punto cargado desde un
+        archivo con CRS mal declarado, o un cambio de CRS entre el clic y
+        el cálculo), TODA la cadena se ejecuta en una zona equivocada y
+        los síntomas aparecen mucho más abajo y sin relación aparente con
+        la causa -- se observó un caso real en el que un MDE de Sicuani
+        (lon -71.2, zona 19S) acabó reproyectado a la zona 3S, cuyo
+        meridiano central está en -165° (en el Pacífico), produciendo
+        eastings de 13 millones de metros y un "punto fuera del MDE" cuyo
+        origen era imposible de adivinar desde el mensaje.
+        El MDE es el dato autoritativo del análisis: su centro define sin
+        ambigüedad la zona en la que hay que trabajar.
+        """
+        extent = capa.extent()
+        centro = QgsPointXY(extent.center().x(), extent.center().y())
+        wgs84 = QgsCoordinateReferenceSystem("EPSG:4326")
+        if capa.crs() != wgs84:
+            centro = QgsCoordinateTransform(
+                capa.crs(), wgs84, QgsProject.instance()).transform(centro)
+        lon, lat = centro.x(), centro.y()
+        zona = int((lon + 180) / 6) + 1
+        epsg = (32700 if lat < 0 else 32600) + zona
+        return QgsCoordinateReferenceSystem(f"EPSG:{epsg}"), lon, lat
+
     def _on_run_delineation(self):
         dem_layer = self.combo_dem.currentLayer()
         if dem_layer is None:
@@ -929,6 +959,24 @@ class HydroAndinaProDialog(QDialog):
             return
 
         try:
+            # La zona UTM de trabajo se toma del MDE, no del punto: ver la
+            # nota de _zona_utm_desde_capa. Si la que se dedujo al marcar el
+            # punto no coincide, se corrige aquí y se rehace la conversión
+            # del punto a partir de su longitud/latitud guardadas.
+            crs_utm_mde, lon_mde, lat_mde = self._zona_utm_desde_capa(dem_layer)
+            if self.utm_crs is None or self.utm_crs.authid() != crs_utm_mde.authid():
+                zona_previa = self.utm_crs.authid() if self.utm_crs else "ninguna"
+                self.utm_crs = crs_utm_mde
+                if self.break_point_lonlat:
+                    lon_bp, lat_bp = self.break_point_lonlat
+                    punto_corregido = QgsCoordinateTransform(
+                        QgsCoordinateReferenceSystem("EPSG:4326"), self.utm_crs,
+                        QgsProject.instance()).transform(QgsPointXY(lon_bp, lat_bp))
+                    self.break_point_xy = (punto_corregido.x(), punto_corregido.y())
+                self.lbl_estado_tab1.setText(
+                    f"Zona UTM corregida a {crs_utm_mde.authid()} según el centro del MDE "
+                    f"(lon {lon_mde:.4f}, lat {lat_mde:.4f}); antes era {zona_previa}."
+                )
             # Reproyectar el MDE a la zona UTM local si su CRS difiere
             if dem_layer.crs().authid() != self.utm_crs.authid():
                 self.lbl_estado_tab1.setText(f"Reproyectando MDE a {self.utm_crs.authid()}...")
@@ -957,13 +1005,32 @@ class HydroAndinaProDialog(QDialog):
             extent_dem = dem_layer.extent()
             px, py = self.break_point_xy
             if not extent_dem.contains(QgsPointXY(px, py)):
+                # Se informa también en LONGITUD/LATITUD, que es donde el
+                # problema se ve de inmediato: comparar dos pares de
+                # coordenadas UTM no dice nada si la zona misma es la
+                # equivocada, mientras que en grados se detecta al instante
+                # si el punto y el MDE están en sitios distintos del planeta.
+                lon_bp = lat_bp = None
+                if self.break_point_lonlat:
+                    lon_bp, lat_bp = self.break_point_lonlat
+                detalle_grados = (
+                    f"\n\nEn coordenadas geográficas:\n"
+                    f"  MDE (centro):   lon {lon_mde:.4f}, lat {lat_mde:.4f}\n"
+                    f"  Punto de salida: lon {lon_bp:.4f}, lat {lat_bp:.4f}"
+                    if lon_bp is not None else ""
+                )
+                if lon_bp is not None and abs(lon_bp - lon_mde) > 1.0:
+                    detalle_grados += (
+                        "\n\nEl punto y el MDE están en longitudes muy distintas: el punto de salida no "
+                        "corresponde a este MDE. Vuelva a marcarlo sobre el MDE cargado."
+                    )
                 raise RuntimeError(
-                    "El punto de salida (break point) cae fuera de la extensión del MDE "
-                    f"(extensión del MDE en {self.utm_crs.authid()}: "
-                    f"X=[{extent_dem.xMinimum():.1f}, {extent_dem.xMaximum():.1f}], "
-                    f"Y=[{extent_dem.yMinimum():.1f}, {extent_dem.yMaximum():.1f}]; "
-                    f"punto clicado: X={px:.1f}, Y={py:.1f}). Verifique que hizo clic dentro del área "
-                    "cubierta por el MDE cargado, y que el MDE efectivamente cubre la subcuenca de interés."
+                    "El punto de salida (break point) cae fuera de la extensión del MDE.\n\n"
+                    f"Zona de trabajo: {self.utm_crs.authid()} (deducida del centro del MDE)\n"
+                    f"Extensión del MDE:  X=[{extent_dem.xMinimum():.1f}, {extent_dem.xMaximum():.1f}], "
+                    f"Y=[{extent_dem.yMinimum():.1f}, {extent_dem.yMaximum():.1f}]\n"
+                    f"Punto de salida:    X={px:.1f}, Y={py:.1f}"
+                    + detalle_grados
                 )
 
             self.dem_layer = dem_layer

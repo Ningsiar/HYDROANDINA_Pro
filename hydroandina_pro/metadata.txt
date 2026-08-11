@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.2.56
+version=0.2.57
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,25 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.2.57: *** ZONA UTM EQUIVOCADA *** -- causa del error persistente al delimitar, identificada al
+      ver los numeros reales que ya reportaba el mensaje mejorado.
+      SINTOMA: la delimitacion fallaba con el punto de salida fuera del MDE, con una extension de MDE de
+      X=[13395536, 13427929] -- valores imposibles en UTM, cuyo rango valido de easting es 100000-900000.
+      CAUSA: la zona UTM se deducia UNICAMENTE de la longitud del punto marcado. En el proyecto real del
+      usuario esa longitud salio erronea y se calculo la zona 3S (EPSG:32703), cuyo meridiano central
+      esta en -165 grados, en medio del Pacifico, cuando el MDE (Sicuani, lon -71.20, lat -14.27) esta
+      en la zona 19S (EPSG:32719). Reproyectar el MDE 94 grados fuera de su meridiano central produce
+      esos eastings de 13 millones de metros, y a partir de ahi TODA la cadena trabaja en el sitio
+      equivocado: el sintoma aparece mucho despues y sin relacion aparente con la causa.
+      CORRECCION: la zona de trabajo se deduce ahora del CENTRO DEL MDE, que es el dato autoritativo del
+      analisis y no admite ambiguedad, en vez de la longitud del punto. Si la zona deducida al marcar el
+      punto no coincide, se corrige y se rehace la conversion del punto a partir de su longitud/latitud
+      guardadas, informandolo en la barra de estado en vez de fallar. Verificado con las coordenadas
+      reales del proyecto: el centro del MDE da lon -71.2024, lat -14.2750 -> zona 19 -> EPSG:32719.
+      El mensaje de error informa ademas la posicion del MDE y del punto en LONGITUD/LATITUD, no solo en
+      UTM: comparar dos pares de coordenadas UTM no dice nada si la zona misma es la equivocada, mientras
+      que en grados se ve al instante si estan en sitios distintos del planeta. Si difieren en mas de un
+      grado de longitud, se indica explicitamente que el punto no corresponde a ese MDE.
     - v0.2.56: *** CORRECCION DE LA CAUSA REAL *** del error "El punto de salida cae fuera de la
       extension del raster de cauces" en la Pestaña 1, diagnosticada inspeccionando el proyecto real del
       usuario (MDE en EPSG:3857, Web Mercator).
