@@ -296,18 +296,45 @@ def uh_clark(area_km2: float, tc_h: float, r_storage_h: float, dt_h: float) -> R
 # Utilidad de alto nivel: hidrograma total de crecida para una tormenta
 # ---------------------------------------------------------------------
 def hidrograma_de_crecida(hietograma_total_mm: List[float], dt_h: float, area_km2: float,
-                           s_mm: float, metodo: str, **kwargs_metodo) -> dict:
+                           s_mm: float, metodo: str, modelo_perdidas: str = "scs",
+                           params_perdidas: dict = None, **kwargs_metodo) -> dict:
     """
     hietograma_total_mm: incrementos de lluvia TOTAL (no efectiva) por
         intervalo de duración dt_h, p.ej. de un bloque alterno o de una
         distribución SCS Tipo II ya escalada a la lámina de diseño.
-    metodo: 'scs', 'snyder' o 'clark'.
+    metodo: 'scs', 'snyder' o 'clark' (hidrograma unitario).
+    modelo_perdidas: 'scs' (número de curva, por defecto y comportamiento
+        histórico del plugin), 'green_ampt' u 'horton'. Ver
+        core/infiltration.py.
+    params_perdidas: parámetros del modelo de pérdidas elegido; se ignora
+        con 'scs', que usa s_mm.
     kwargs_metodo: parámetros específicos de cada método (ver las
         funciones uh_scs_triangular / uh_snyder / uh_clark).
     Devuelve dict con 'tiempos_h', 'caudal_m3s', 'caudal_pico_m3s',
     'tiempo_pico_h', y el objeto ResultadoUH del hidrograma unitario usado.
     """
-    lluvia_efectiva = lluvia_efectiva_incremental(hietograma_total_mm, s_mm)
+    # Modelo de PÉRDIDAS: por defecto el número de curva SCS (el que usó
+    # siempre el plugin), o bien Green-Ampt/Horton desde core/infiltration.py.
+    # Los tres producen lo mismo conceptualmente -- la lluvia efectiva que
+    # alimenta el hidrograma unitario -- pero SCS-CN depende solo de la
+    # lámina acumulada mientras que los otros dos responden a la INTENSIDAD
+    # de cada intervalo, de modo que distinguen una tormenta corta e intensa
+    # de una larga y suave con la misma lámina total.
+    detalle_perdidas = None
+    if modelo_perdidas in (None, "scs", "scs_cn"):
+        lluvia_efectiva = lluvia_efectiva_incremental(hietograma_total_mm, s_mm)
+    elif modelo_perdidas in ("green_ampt", "horton"):
+        from . import infiltration
+        params = dict(params_perdidas or {})
+        if modelo_perdidas == "green_ampt":
+            detalle_perdidas = infiltration.infiltracion_green_ampt(
+                hietograma_total_mm, dt_h, **params)
+        else:
+            detalle_perdidas = infiltration.infiltracion_horton(
+                hietograma_total_mm, dt_h, **params)
+        lluvia_efectiva = detalle_perdidas["lluvia_efectiva_incr_mm"]
+    else:
+        raise ValueError("modelo_perdidas debe ser 'scs', 'green_ampt' u 'horton'.")
 
     if metodo == "scs":
         uh = uh_scs_triangular(area_km2, dt_h=dt_h, **kwargs_metodo)
@@ -349,4 +376,6 @@ def hidrograma_de_crecida(hietograma_total_mm: List[float], dt_h: float, area_km
         "volumen_escorrentia_directa_hm3": round(volumen_m3 / 1e6, 5),
         "lamina_efectiva_equivalente_mm": round(lamina_efectiva_equivalente_mm, 2),
         "unit_hydrograph": uh,
+        "modelo_perdidas": modelo_perdidas or "scs",
+        "detalle_perdidas": detalle_perdidas,
     }

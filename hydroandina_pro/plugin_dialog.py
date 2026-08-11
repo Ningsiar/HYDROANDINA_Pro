@@ -35,7 +35,7 @@ from .core import (delineation, morphometry, curve_number, tc_methods, dem_downl
                     design_storm, precip_source, scs_storm_patterns, pour_point_snap,
                     main_channel, landcover_soils, dem_download_asf, hydraulic_structures,
                     cn_generator_bridge, report_generator, project_export,
-                    quality_control, pmp_hershfield, direct_discharge_methods, flood_routing, baseflow,
+                    quality_control, pmp_hershfield, direct_discharge_methods, flood_routing, baseflow, infiltration,
                     data_completion, areal_precipitation, water_yield, scour, soil_loss,
                     sediment_transport, debris_flow, climate_change, mean_flow_models, etp_methods,
                     low_flows, phabsim, groundwater_flow, well_hydraulics, idf_curves)
@@ -3555,6 +3555,123 @@ class HydroAndinaProDialog(QDialog):
         v_h.addLayout(h_dt)
         v.addWidget(gb_hieto)
 
+        # ---------- Modelo de pérdidas por infiltración ----------
+        gb_perdidas = QGroupBox("Modelo de pérdidas por infiltración (lluvia total → lluvia efectiva)")
+        v_pe = QVBoxLayout(gb_perdidas)
+        lbl_pe = QLabel(
+            "Este es el eslabón que convierte el hietograma de arriba en la <b>lluvia efectiva</b> que "
+            "alimenta el hidrograma unitario, y por tanto determina el caudal pico:<br>"
+            "<code>hietograma → [PÉRDIDAS] → lluvia efectiva → hidrograma unitario → Qp</code><br><br>"
+            "<b>SCS — Número de Curva</b> (el que usó siempre el plugin) es un método agregado de "
+            "evento: la abstracción depende solo de la lámina acumulada, así que <b>dos tormentas con "
+            "la misma lámina total dan la misma lluvia efectiva</b> aunque una sea corta e intensa y la "
+            "otra larga y suave. <b>Green-Ampt</b> (físicamente basado: conductividad, succión del "
+            "frente húmedo y déficit de humedad) y <b>Horton</b> (empírico, capacidad que decae "
+            "exponencialmente) comparan la <b>intensidad</b> de cada intervalo contra la capacidad de "
+            "infiltración del momento, así que sí distinguen ambos casos. En una prueba con dos "
+            "tormentas de 115 mm, SCS-CN dio 71.1 mm de lluvia efectiva para las dos, mientras "
+            "Green-Ampt dio 57.3 mm para la intensa y 8.7 mm para la suave. En cuencas altoandinas, "
+            "donde las tormentas convectivas son cortas e intensas, esa diferencia va directa al "
+            "caudal de diseño."
+        )
+        lbl_pe.setWordWrap(True)
+        v_pe.addWidget(lbl_pe)
+
+        h_pe = QHBoxLayout()
+        h_pe.addWidget(QLabel("Modelo:"))
+        self.combo_modelo_perdidas = QComboBox()
+        self.combo_modelo_perdidas.addItem("SCS — Número de Curva (usa el S de la pestaña 3)", "scs")
+        self.combo_modelo_perdidas.addItem("Green-Ampt (físicamente basado)", "green_ampt")
+        self.combo_modelo_perdidas.addItem("Horton (empírico)", "horton")
+        self.combo_modelo_perdidas.currentIndexChanged.connect(self._on_cambiar_modelo_perdidas)
+        h_pe.addWidget(self.combo_modelo_perdidas)
+        h_pe.addStretch()
+        v_pe.addLayout(h_pe)
+
+        self.stack_perdidas = QStackedWidget()
+
+        pag_scs = QWidget()
+        v_scs = QVBoxLayout(pag_scs)
+        lbl_scs = QLabel(
+            "Usa la retención potencial máxima S calculada en la pestaña 3 (Número de Curva). "
+            "No requiere parámetros adicionales aquí.")
+        lbl_scs.setWordWrap(True)
+        v_scs.addWidget(lbl_scs)
+        self.stack_perdidas.addWidget(pag_scs)
+
+        pag_ga = QWidget()
+        f_ga = QFormLayout(pag_ga)
+        f_ga.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.combo_textura_ga = QComboBox()
+        for _clave, (_nombre, _k, _psi, _poro) in infiltration.PARAMETROS_GREEN_AMPT.items():
+            self.combo_textura_ga.addItem(f"{_nombre}  (K={_k} mm/h, ψ={_psi} mm, θe={_poro})", _clave)
+        self.combo_textura_ga.setCurrentIndex(2)
+        self.combo_textura_ga.currentIndexChanged.connect(self._on_cambiar_textura_green_ampt)
+        f_ga.addRow("Clase textural del suelo (Rawls et al., 1983):", self.combo_textura_ga)
+        self.spin_ga_k = QDoubleSpinBox()
+        self.spin_ga_k.setRange(0.01, 500.0)
+        self.spin_ga_k.setDecimals(3)
+        self.spin_ga_k.setValue(10.9)
+        f_ga.addRow("Conductividad hidráulica saturada K (mm/h):", self.spin_ga_k)
+        self.spin_ga_psi = QDoubleSpinBox()
+        self.spin_ga_psi.setRange(1.0, 1000.0)
+        self.spin_ga_psi.setDecimals(2)
+        self.spin_ga_psi.setValue(110.1)
+        f_ga.addRow("Succión del frente húmedo ψ (mm):", self.spin_ga_psi)
+        self.spin_ga_deficit = QDoubleSpinBox()
+        self.spin_ga_deficit.setRange(0.01, 1.0)
+        self.spin_ga_deficit.setDecimals(3)
+        self.spin_ga_deficit.setValue(0.412)
+        f_ga.addRow("Déficit de humedad Δθ (porosidad efectiva × fracción no saturada):",
+                     self.spin_ga_deficit)
+        lbl_ga_aviso = QLabel(
+            "Δθ = porosidad efectiva si el suelo está muy seco; menor si viene húmedo de lluvias "
+            "previas (menos capacidad de almacenamiento y por tanto más escorrentía). Es el parámetro "
+            "más sensible a la condición antecedente. Green-Ampt supone suelo homogéneo y frente "
+            "húmedo abrupto: no representa suelos estratificados ni flujo por macroporos.")
+        lbl_ga_aviso.setWordWrap(True)
+        f_ga.addRow(lbl_ga_aviso)
+        self.stack_perdidas.addWidget(pag_ga)
+
+        pag_ho = QWidget()
+        f_ho = QFormLayout(pag_ho)
+        f_ho.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.combo_grupo_horton = QComboBox()
+        for _g, (_desc, _f0, _fc) in infiltration.PARAMETROS_HORTON.items():
+            self.combo_grupo_horton.addItem(f"{_desc}  (f0={_f0}, fc={_fc} mm/h)", _g)
+        self.combo_grupo_horton.setCurrentIndex(1)
+        self.combo_grupo_horton.currentIndexChanged.connect(self._on_cambiar_grupo_horton)
+        f_ho.addRow("Grupo hidrológico de suelo (el mismo de la pestaña 3):", self.combo_grupo_horton)
+        self.spin_ho_f0 = QDoubleSpinBox()
+        self.spin_ho_f0.setRange(1.0, 1000.0)
+        self.spin_ho_f0.setValue(200.0)
+        f_ho.addRow("Capacidad inicial de infiltración f₀ (mm/h):", self.spin_ho_f0)
+        self.spin_ho_fc = QDoubleSpinBox()
+        self.spin_ho_fc.setRange(0.1, 500.0)
+        self.spin_ho_fc.setValue(13.0)
+        f_ho.addRow("Capacidad final de equilibrio f_c (mm/h):", self.spin_ho_fc)
+        self.spin_ho_k = QDoubleSpinBox()
+        self.spin_ho_k.setRange(0.1, 20.0)
+        self.spin_ho_k.setDecimals(3)
+        self.spin_ho_k.setValue(infiltration.K_HORTON_DEFAULT)
+        f_ho.addRow("Constante de decaimiento k (1/h; rango usual 2-7):", self.spin_ho_k)
+        lbl_ho_aviso = QLabel(
+            "Horton es puramente empírico: sus tres parámetros deberían calibrarse con ensayos de "
+            "infiltrómetro en la zona. Los valores por grupo hidrológico son solo un punto de partida.")
+        lbl_ho_aviso.setWordWrap(True)
+        f_ho.addRow(lbl_ho_aviso)
+        self.stack_perdidas.addWidget(pag_ho)
+
+        v_pe.addWidget(self.stack_perdidas)
+
+        btn_comparar_perdidas = QPushButton("Comparar los 3 modelos de pérdidas con este hietograma")
+        btn_comparar_perdidas.clicked.connect(self._on_comparar_modelos_perdidas)
+        limitar_ancho_boton(btn_comparar_perdidas)
+        v_pe.addWidget(btn_comparar_perdidas)
+        self.tabla_comparacion_perdidas = crear_tabla_parametros()
+        v_pe.addWidget(self.tabla_comparacion_perdidas)
+        v.addWidget(gb_perdidas)
+
         gb_metodo = QGroupBox("Método de transformación")
         h_m = QHBoxLayout(gb_metodo)
         self.combo_metodo_uh = QComboBox()
@@ -4442,6 +4559,92 @@ class HydroAndinaProDialog(QDialog):
         except direct_discharge_methods.DirectDischargeError as e:
             QMessageBox.warning(self, "No se pudo calcular", str(e))
 
+    def _on_cambiar_modelo_perdidas(self):
+        self.stack_perdidas.setCurrentIndex(self.combo_modelo_perdidas.currentIndex())
+
+    def _on_cambiar_textura_green_ampt(self):
+        clave = self.combo_textura_ga.currentData()
+        if clave in infiltration.PARAMETROS_GREEN_AMPT:
+            _nombre, k, psi, porosidad = infiltration.PARAMETROS_GREEN_AMPT[clave]
+            self.spin_ga_k.setValue(k)
+            self.spin_ga_psi.setValue(psi)
+            # Δθ = porosidad efectiva supone suelo inicialmente seco; el
+            # usuario debe reducirlo si viene de lluvias previas.
+            self.spin_ga_deficit.setValue(porosidad)
+
+    def _on_cambiar_grupo_horton(self):
+        grupo = self.combo_grupo_horton.currentData()
+        if grupo in infiltration.PARAMETROS_HORTON:
+            _desc, f0, fc = infiltration.PARAMETROS_HORTON[grupo]
+            self.spin_ho_f0.setValue(f0)
+            self.spin_ho_fc.setValue(fc)
+
+    def _parametros_perdidas_actuales(self):
+        """Devuelve (modelo, params) según el selector, listo para pasar a
+        unit_hydrographs.hidrograma_de_crecida."""
+        modelo = self.combo_modelo_perdidas.currentData()
+        if modelo == "green_ampt":
+            return modelo, {
+                "conductividad_k_mm_h": self.spin_ga_k.value(),
+                "succion_psi_mm": self.spin_ga_psi.value(),
+                "deficit_humedad": self.spin_ga_deficit.value(),
+            }
+        if modelo == "horton":
+            return modelo, {
+                "f0_mm_h": self.spin_ho_f0.value(),
+                "fc_mm_h": self.spin_ho_fc.value(),
+                "k_decaimiento": self.spin_ho_k.value(),
+            }
+        return "scs", None
+
+    def _leer_hietograma_actual(self):
+        import re
+        texto = self.edit_hietograma.toPlainText().strip()
+        return [float(t) for t in re.findall(r"-?\d+(?:\.\d+)?", texto)]
+
+    def _on_comparar_modelos_perdidas(self):
+        hietograma = self._leer_hietograma_actual()
+        if not hietograma:
+            QMessageBox.warning(self, "Falta el hietograma",
+                                 "Genere o ingrese primero el hietograma de diseño (arriba).")
+            return
+        if not self.cn_resultados:
+            QMessageBox.warning(
+                self, "Falta el número de curva",
+                "Calcule el número de curva en la pestaña 3 para poder comparar contra SCS-CN.")
+            return
+        try:
+            dt_h = self.spin_dt_h.value()
+            r = infiltration.comparar_modelos_perdidas(
+                hietograma, dt_h,
+                s_mm_scs=self.cn_resultados["S_mm"],
+                green_ampt={
+                    "conductividad_k_mm_h": self.spin_ga_k.value(),
+                    "succion_psi_mm": self.spin_ga_psi.value(),
+                    "deficit_humedad": self.spin_ga_deficit.value(),
+                },
+                horton={
+                    "f0_mm_h": self.spin_ho_f0.value(),
+                    "fc_mm_h": self.spin_ho_fc.value(),
+                    "k_decaimiento": self.spin_ho_k.value(),
+                },
+            )
+            filas = [("Lluvia total del hietograma", sum(hietograma), "mm")]
+            for clave in ("scs_cn", "green_ampt", "horton"):
+                d = r[clave]
+                comentario = f"coeficiente de escorrentía = {d['coeficiente_escorrentia']}"
+                if d.get("hubo_encharcamiento"):
+                    comentario += f"; encharcamiento a partir de t = {d['tiempo_encharcamiento_h']} h"
+                filas.append((f"Lluvia efectiva — {d['metodo']}",
+                               d["lluvia_efectiva_total_mm"], "mm", comentario))
+            comp = r["comparacion"]
+            filas.append(
+                ("Dispersión entre modelos", comp["dispersion_mm"], "mm",
+                 f"{comp['dispersion_relativa_pct']}% — {comp['nota']}"))
+            poblar_tabla_parametros(self.tabla_comparacion_perdidas, filas)
+        except infiltration.InfiltrationError as e:
+            QMessageBox.warning(self, "No se pudo comparar", str(e))
+
     def _leer_caudales_observados(self):
         valores = []
         for fila in range(self.tabla_caudales_observados.rowCount()):
@@ -4945,6 +5148,7 @@ class HydroAndinaProDialog(QDialog):
             dt_h = self.spin_dt_h.value()
             s_mm = self.cn_resultados["S_mm"]
 
+            modelo_perdidas, params_perdidas = self._parametros_perdidas_actuales()
             metodo_ui = self.combo_metodo_uh.currentText()
             if metodo_ui.startswith("SCS"):
                 # tlag: se usa el de la pestaña 4 si ya se calculó Témez;
@@ -4961,12 +5165,14 @@ class HydroAndinaProDialog(QDialog):
                     tl_h = 0.6 * tc_aprox_h
                 resultado = unit_hydrographs.hidrograma_de_crecida(
                     hietograma, dt_h, g1["A"], s_mm, "scs",
+                    modelo_perdidas=modelo_perdidas, params_perdidas=params_perdidas,
                     tlag_h=tl_h, duracion_efectiva_h=dt_h,
                 )
             elif metodo_ui.startswith("Snyder"):
                 lca = self.spin_lca_km.value() or (lc_km * 0.5)
                 resultado = unit_hydrographs.hidrograma_de_crecida(
                     hietograma, dt_h, g1["A"], s_mm, "snyder",
+                    modelo_perdidas=modelo_perdidas, params_perdidas=params_perdidas,
                     l_km=lc_km, lca_km=lca, ct=self.spin_ct_snyder.value(), cp=self.spin_cp_snyder.value(),
                 )
             else:  # Clark
@@ -4982,13 +5188,22 @@ class HydroAndinaProDialog(QDialog):
                 r_h = self.spin_r_clark.value() or tc_h
                 resultado = unit_hydrographs.hidrograma_de_crecida(
                     hietograma, dt_h, g1["A"], s_mm, "clark",
+                    modelo_perdidas=modelo_perdidas, params_perdidas=params_perdidas,
                     tc_h=tc_h, r_storage_h=r_h,
                 )
 
             self.hidrograma_resultado = resultado
             self.hidrograma_resultado["metodo"] = metodo_ui
             lluvia_efectiva_total = sum(resultado["lluvia_efectiva_incr_mm"])
+            detalle = resultado.get("detalle_perdidas")
+            nombre_perdidas = detalle["metodo"] if detalle else "SCS — Número de Curva"
+            comentario_perdidas = (
+                f"coeficiente de escorrentía = {detalle['coeficiente_escorrentia']}"
+                + (f"; encharcamiento a partir de t = {detalle['tiempo_encharcamiento_h']} h"
+                   if detalle.get("hubo_encharcamiento") else "; no se alcanzó el encharcamiento")
+            ) if detalle else f"S = {s_mm:.1f} mm (pestaña 3)"
             poblar_tabla_parametros(self.tabla_resultado_qp, [
+                ("Modelo de pérdidas usado", nombre_perdidas, "", comentario_perdidas),
                 ("Caudal pico Qp", resultado["caudal_pico_m3s"], "m³/s"),
                 ("Tiempo pico Tp", resultado["tiempo_pico_h"], "h"),
                 ("Lluvia total", sum(hietograma), "mm"),

@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.2.50
+version=0.2.51
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,43 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.2.51: MODELOS DE INFILTRACION GREEN-AMPT Y HORTON (nuevo core/infiltration.py) como
+      alternativa al numero de curva SCS para calcular las perdidas, seleccionables desde la Pestaña 7
+      junto al calculo del hidrograma. No son metodos de caudal: son el eslabon que convierte el
+      hietograma en la LLUVIA EFECTIVA que alimenta el hidrograma unitario, y por tanto determinan
+      directamente el caudal pico:
+          hietograma -> [PERDIDAS: SCS-CN | Green-Ampt | Horton] -> lluvia efectiva -> HU -> Qp
+      POR QUE APORTAN: el SCS-CN es un metodo agregado de evento cuya abstraccion depende solo de la
+      lamina acumulada, de modo que dos tormentas con la misma lamina total dan la MISMA lluvia
+      efectiva aunque una sea corta e intensa y la otra larga y suave. Verificado con dos tormentas de
+      115 mm: SCS-CN dio 71.13 mm en ambas, mientras Green-Ampt dio 57.32 mm para la intensa y 8.67 mm
+      para la suave (factor 6.6x), y Horton 38.71 vs 14.73 mm. En cuencas altoandinas, donde las
+      tormentas convectivas son cortas e intensas, esa diferencia va directa al caudal de diseño.
+      SUTILEZA RESUELTA (que muchas implementaciones de libro de texto omiten): tanto f(t) de Horton
+      como F(t) de Green-Ampt estan escritas en funcion del TIEMPO suponiendo encharcamiento continuo
+      desde t=0. En un hietograma real hay intervalos de lluvia debil o nula en los que toda el agua
+      infiltra y la capacidad NO se consume al ritmo del reloj. Este modulo trabaja siempre con la
+      infiltracion ACUMULADA como variable de estado: en Horton se invierte F(t) por Newton-Raphson
+      para obtener el tiempo equivalente al F ya acumulado, y en Green-Ampt se detecta el instante de
+      encharcamiento dentro de cada intervalo (Chow, Maidment & Mays) integrando la ecuacion implicita
+      solo a partir de ese instante. Se midio el efecto: en un hietograma con una pausa seca, la
+      version ingenua con tiempo de reloj sobreestimaba la lluvia efectiva en un 94% (51.5 frente a
+      26.5 mm), lo que casi duplicaria el caudal de diseño.
+      VERIFICACION: balance de masa exacto (infiltracion + lluvia efectiva = lluvia total, error 0.0e+00
+      en ambos metodos); el residuo de la ecuacion implicita de Green-Ampt resuelta por Newton-Raphson
+      es 0.0e+00; la inversion de F(t) de Horton recupera el tiempo con error de 1e-16 (precision de
+      maquina) para t entre 0.25 y 8 h; y de extremo a extremo la lamina equivalente del hidrograma
+      resultante reproduce la lluvia efectiva en los tres modelos.
+      Incluye las tablas de parametros de referencia: Green-Ampt por clase textural (11 clases, Rawls,
+      Brakensiek & Miller 1983, la tabla que usa tambien HEC-HMS) y Horton por grupo hidrologico de
+      suelo A/B/C/D -- los mismos grupos que ya usa la Pestaña 3 para el numero de curva, de modo que
+      esa clasificacion se reutiliza. Un boton compara los tres modelos de perdidas sobre el mismo
+      hietograma, y la tabla de resultados del hidrograma indica ahora que modelo se uso, su
+      coeficiente de escorrentia y el instante de encharcamiento.
+      TRANSPARENCIA: Green-Ampt supone suelo homogeneo, humedad inicial uniforme y frente humedo
+      abrupto (no representa suelos estratificados ni flujo por macroporos); Horton es puramente
+      empirico y sus tres parametros deberian calibrarse con ensayos de infiltrometro. Los valores
+      tabulados son un punto de partida orientativo.
     - v0.2.50: completa la lista de mejoras solicitada -- items 3, 6 y 4 (los items 5, 2, 1 y 7 se
       entregaron en las v0.2.44, v0.2.48 y v0.2.49).
       (1) ITEM 3 -- BANDAS DE CONFIANZA POR BOOTSTRAP para P24(Tr) en la Pestaña 5. El analisis
