@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.2.43
+version=0.2.44
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,40 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.2.44: *** CORRECCIÓN CRÍTICA *** encontrada al implementar el volumen de escorrentía directa
+      del hidrograma (verificación de conservación de masa: el volumen bajo CUALQUIER hidrograma unitario
+      debe reproducir exactamente 1 mm de lámina sobre toda el área, por definición). Afecta el caudal de
+      diseño (Qp) de la Pestaña 6, usado aguas abajo en TODA la Hidráulica y Drenaje (Pestaña 8) -- revise
+      cualquier cálculo hecho con versiones anteriores.
+      (1) SCS y SNYDER sobreestimaban el caudal pico en un factor de 10. Causa: las constantes clásicas
+      de la bibliografía (2.08 para SCS, 2.75 para Snyder; Aparicio Mijares, Ven Te Chow et al.) dan
+      m3/s POR CENTÍMETRO de lluvia efectiva, no por milímetro -- pero el resto del pipeline de
+      precipitación de este plugin (P24h, S del número de curva, lluvia efectiva) trabaja enteramente en
+      mm. Aplicar esas constantes tal cual a una lluvia en mm multiplicaba el caudal por 10 de más
+      (1 cm = 10 mm). Corregido dividiendo las constantes entre 10 (SCS: 2.08->0.208). Para Snyder la
+      corrección fue más sutil: la fórmula del tiempo base Tb=5.56/qp_específico TAMBIÉN está calibrada
+      para qp "por cm", así que dividir qp entre 10 antes de calcular Tb alargaba Tb otras 10 veces,
+      cancelando el efecto de la corrección (el volumen es 0.5*qp*Tb, y qp/10 * Tb*10 no cambia) -- se
+      corrigió calculando Tb con la constante "por cm" tal cual la bibliografía, y solo convirtiendo a
+      "por mm" el caudal pico final. (2) CLARK perdía ~63% del volumen total: el tránsito por embalse
+      lineal se truncaba abruptamente al final de la curva área-tiempo (Tc), cortando la cola de recesión
+      exponencial del embalse lineal, que en teoría no termina nunca (solo tiende a cero). Corregido
+      extendiendo la recursión con entrada cero hasta que la salida decae bajo el 0.1% del pico.
+      VERIFICACIÓN: se midió con la regla del trapecio, ANTES de corregir, que el volumen bajo cada
+      hidrograma unitario (antes de aplicarlo a ninguna tormenta) era: SCS 9.98x el esperado, Snyder
+      10.01x (para varios Ct/Cp probados), Clark 0.37x. DESPUÉS de corregir: SCS 1.00x, Snyder 1.00x
+      (verificado con 3 combinaciones distintas de Ct/Cp), Clark 0.99x (verificado también con un caso de
+      cola larga, R=6h >> Tc=2h). Con una tormenta de prueba completa (7 incrementos, S=45mm), el error de
+      conservación de masa quedó en 0.02-0.16% para los 3 métodos (antes de corregir, ~900% para SCS/
+      Snyder). El caudal pico SCS del caso de prueba pasó de 908.7 a 90.9 m3/s -- un ejemplo concreto de
+      la magnitud del error. Se revisó también Témez/Mac Math/Creager (core/direct_discharge_methods.py,
+      Pestaña 7): no comparten esta estructura de "hidrograma unitario normalizado a 1mm", son fórmulas
+      directas con conversión de unidades dimensionalmente explícita (p.ej. Témez usa /3.6 para mm/h·km²
+      -> m3/s, una identidad estándar, no una constante empírica ambigua) -- no se encontró el mismo
+      patrón de error ahí.
+      NUEVA FUNCIONALIDAD (item 5 de la lista de mejoras solicitada): volumen de escorrentía directa
+      (integral trapezoidal del hidrograma) agregado a core/unit_hydrographs.py y mostrado en la Pestaña
+      6, junto con la lámina equivalente como verificación visible de conservación de masa en cada corrida.
     - v0.2.43: formato unificado "cuadro de resultado" (Parámetro | Valor | Unidad | Comentario) en TODAS
       las pestañas que antes mostraban resultados como un único QLabel de texto plano multilínea (estilo
       font-family: monospace) -- 15 resultados distintos convertidos: en Hidráulica y Drenaje (Canales,

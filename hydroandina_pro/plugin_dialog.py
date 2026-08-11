@@ -3184,7 +3184,7 @@ class HydroAndinaProDialog(QDialog):
         self.btn_calc_hidrograma.clicked.connect(self._on_calcular_hidrograma)
         v.addWidget(self.btn_calc_hidrograma)
 
-        self.tabla_resultado_qp = crear_tabla_parametros(con_comentario=False)
+        self.tabla_resultado_qp = crear_tabla_parametros()
         v.addWidget(self.tabla_resultado_qp)
 
         self.canvas_hidrograma = HydrographCanvas(self, width=6.5, height=4.8)
@@ -3470,11 +3470,16 @@ class HydroAndinaProDialog(QDialog):
 
             self.hidrograma_resultado = resultado
             self.hidrograma_resultado["metodo"] = metodo_ui
+            lluvia_efectiva_total = sum(resultado["lluvia_efectiva_incr_mm"])
             poblar_tabla_parametros(self.tabla_resultado_qp, [
                 ("Caudal pico Qp", resultado["caudal_pico_m3s"], "m³/s"),
                 ("Tiempo pico Tp", resultado["tiempo_pico_h"], "h"),
                 ("Lluvia total", sum(hietograma), "mm"),
-                ("Lluvia efectiva", sum(resultado["lluvia_efectiva_incr_mm"]), "mm"),
+                ("Lluvia efectiva", lluvia_efectiva_total, "mm"),
+                ("Volumen de escorrentía directa", resultado["volumen_escorrentia_directa_hm3"], "hm³"),
+                ("Volumen de escorrentía directa", resultado["volumen_escorrentia_directa_m3"], "m³",
+                 f"lámina equivalente = {resultado['lamina_efectiva_equivalente_mm']} mm "
+                 f"(vs. lluvia efectiva = {lluvia_efectiva_total:.2f} mm, verificación de conservación de masa)"),
             ])
             self.canvas_hidrograma.plot_hidrograma(
                 resultado["tiempos_h"], resultado["caudal_m3s"], metodo_ui,
