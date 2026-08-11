@@ -61,6 +61,78 @@ class FrequencyCanvas(FigureCanvas):
         self.fig.tight_layout()
         self.draw()
 
+    def plot_no_estacionario(self, comparacion: dict, serie_observada, anios):
+        """
+        Análisis de frecuencia no estacionario en dos paneles:
+
+        ARRIBA: la serie observada con la recta de tendencia ajustada, que
+        es donde se ve si la tendencia es real o la impone un par de años
+        extremos. Se anota la pendiente y su p-valor.
+        ABAJO: la precipitación de diseño estacionaria frente a la que da
+        el modelo no estacionario evaluado en distintos años, para
+        distintos periodos de retorno -- el análisis de sensibilidad que
+        es el uso recomendable de este método. Los años posteriores al
+        último observado se dibujan con trama distinta por ser
+        EXTRAPOLACIÓN.
+        """
+        self.fig.clear()
+        modelo = comparacion["modelo"]
+        ax1 = self.fig.add_subplot(211)
+        ax2 = self.fig.add_subplot(212)
+
+        # --- Panel superior: serie y tendencia ---
+        ax1.plot(anios, serie_observada, "o-", markersize=4, linewidth=1.1,
+                 color="#1F3864", label="Serie observada")
+        p = modelo["parametros"]
+        pendiente = modelo["tendencia_por_año"]
+        if "mu0" in p:
+            intercepto = p["mu0"]
+        else:
+            # Gumbel: xi0 es la posición; la recta de la media va desplazada
+            # por la constante de Euler multiplicada por alpha.
+            intercepto = p["xi0"] + 0.5772156649 * p["alpha"]
+        recta = [intercepto + pendiente * a for a in anios]
+        significativa = modelo["tendencia_significativa_5pct"]
+        ax1.plot(anios, recta, "--", linewidth=2.0,
+                 color="#B3261E" if significativa else "#999999",
+                 label=(f"Tendencia: {modelo['tendencia_por_decada']:+.2f} mm/década "
+                        f"(p={modelo['p_valor_tendencia']:.4f}, "
+                        f"{'significativa' if significativa else 'NO significativa'})"))
+        ax1.set_xlabel("Año")
+        ax1.set_ylabel("Pmax 24h (mm)")
+        ax1.set_title(f"Serie observada y tendencia — {modelo['nombre']}", pad=10)
+        ax1.grid(True, linestyle=":", linewidth=0.5)
+        ax1.legend(fontsize=7.5, loc="upper left", framealpha=0.9)
+
+        # --- Panel inferior: sensibilidad del valor de diseño ---
+        trs = comparacion["periodos_retorno"]
+        anios_eval = comparacion["anios_evaluacion"]
+        x = list(range(len(trs)))
+        ancho = 0.8 / (len(anios_eval) + 1)
+
+        estacionario = [comparacion["tabla"][tr]["estacionario"] for tr in trs]
+        ax2.bar([xi - 0.4 + ancho / 2 for xi in x], estacionario, width=ancho,
+                color="#1F3864", label="Estacionario")
+        paleta = ["#2E7D32", "#EF9F27", "#B3261E"]
+        for j, anio in enumerate(anios_eval):
+            valores = [comparacion["tabla"][tr][anio]["valor"] for tr in trs]
+            es_extrap = comparacion["tabla"][trs[0]][anio]["es_extrapolacion"]
+            ax2.bar([xi - 0.4 + ancho * (j + 1) + ancho / 2 for xi in x], valores, width=ancho,
+                    color=paleta[j % len(paleta)],
+                    hatch="//" if es_extrap else None,
+                    edgecolor="white" if es_extrap else None,
+                    label=f"{anio}" + (" (EXTRAPOLACIÓN)" if es_extrap else ""))
+        ax2.set_xticks(x)
+        ax2.set_xticklabels([str(t) for t in trs])
+        ax2.set_xlabel("Periodo de retorno (años)")
+        ax2.set_ylabel("Pmax 24h de\ndiseño (mm)")
+        ax2.set_title("Sensibilidad del valor de diseño frente al modelo estacionario", pad=10)
+        ax2.grid(True, axis="y", linestyle=":", linewidth=0.5)
+        ax2.legend(fontsize=7, loc="upper left", ncol=2, framealpha=0.9)
+
+        self.fig.tight_layout()
+        self.draw()
+
     def plot_bandas_confianza(self, bandas: dict, datos_observados=None, escala_log: bool = True):
         """
         Curva de frecuencia P24 vs. Tr con la BANDA DE CONFIANZA por

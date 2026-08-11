@@ -110,6 +110,45 @@ class IdfCanvas(FigureCanvas):
         self.fig.tight_layout()
         self.draw()
 
+    def plot_comparacion_metodos_idf(self, resultados_por_metodo: dict, tr_referencia: int,
+                                      escala_log: bool = True):
+        """
+        Compara las curvas IDF que producen los distintos métodos para UN
+        periodo de retorno, que es la forma de ver cuánto difieren entre
+        sí: superponer todas las curvas de todos los Tr sería ilegible.
+        """
+        self.fig.clear()
+        self.ax = self.fig.add_subplot(111)
+        colores = {"sherman": "#1F3864", "dyck_peschke": "#2E7D32",
+                   "bell": "#B3261E", "iila": "#8B5CF6"}
+        estilos = {"sherman": "-", "dyck_peschke": "--", "bell": "-.", "iila": ":"}
+
+        for clave, datos in resultados_por_metodo.items():
+            curvas = datos.get("curvas") or {}
+            if tr_referencia not in curvas:
+                continue
+            puntos = curvas[tr_referencia]
+            if not puntos:
+                continue
+            self.ax.plot([d for d, _ in puntos], [i for _, i in puntos],
+                         estilos.get(clave, "-"), linewidth=2.0, marker="o", markersize=3.5,
+                         color=colores.get(clave, "#666666"), label=datos.get("nombre", clave))
+
+        if escala_log:
+            self.ax.set_xscale("log")
+            self.ax.set_yscale("log")
+            self.ax.set_xlabel("Duración (min, escala log)")
+            self.ax.set_ylabel("Intensidad (mm/h, escala log)")
+        else:
+            self.ax.set_xlabel("Duración (min)")
+            self.ax.set_ylabel("Intensidad (mm/h)")
+        self.ax.set_title(
+            f"Comparación de métodos de generación de curvas IDF — Tr = {tr_referencia} años", pad=12)
+        self.ax.grid(True, which="both", linestyle=":", linewidth=0.5)
+        self.ax.legend(fontsize=8, loc="upper right", framealpha=0.9)
+        self.fig.tight_layout()
+        self.draw()
+
     def guardar_figura(self, ruta_png: str):
         """Exporta las curvas IDF actualmente dibujadas a un PNG de alta
         resolución (300 dpi), para incluir en el expediente técnico."""

@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.2.58
+version=0.2.59
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,35 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.2.59: Pestaña 5 ampliada -- grafico del analisis no estacionario y tres metodos mas de
+      generacion de curvas IDF, todos con su grafico y su cuadro resumen de alto impacto.
+      GRAFICO DEL ANALISIS NO ESTACIONARIO (antes solo tenia tablas): dos paneles. Arriba, la serie
+      observada con la recta de tendencia ajustada -- que es donde se ve si la tendencia es real o la
+      imponen dos anos extremos -- anotando la pendiente por decada y su p-valor, y dibujada en gris
+      cuando NO es significativa para que se lea de un vistazo. Abajo, la precipitacion de diseño
+      estacionaria frente a la del modelo no estacionario evaluado en varios anos y periodos de
+      retorno; los anos posteriores al ultimo observado se dibujan con TRAMA RAYADA por ser
+      extrapolacion, no como una barra mas.
+      TRES METODOS NUEVOS DE CURVAS IDF: DYCK Y PESCHKE (Grobe), que es el escalamiento potencial con
+      el exponente fijado en 0.25 -- se implementa aparte, y no llamando al de Sherman con n=0.25, para
+      que quede explicito en los resultados que metodo se uso y para que un cambio futuro del valor por
+      defecto de Sherman no altere en silencio estas curvas; FREDERICH BELL (1969), con su rango de
+      validez declarado (5-120 min, 2-100 anos) COMPROBADO y advertido cuando se sale de el, y con la
+      lluvia de referencia P(60min,10anos) estimable desde la P24h por Dyck-Peschke -- el factor
+      resultante, 0.4518, es coherente con el 0.4 que suele citarse en la practica peruana -- marcando
+      siempre si fue estimada o aportada; e IILA-SENAMHI-UNI (1983), con su cambio de expresion en las
+      3 horas, que es parte del modelo original.
+      DECISION EXPLICITA SOBRE IILA: sus parametros a, K, b y n son REGIONALES por subzona pluviometrica
+      y el plugin NO los incorpora ni los supone. Inventar una tabla de parametros daria curvas de
+      aspecto creible y sin ningun respaldo, que es justamente el tipo de error que no se detecta al
+      revisar un informe; el usuario debe tomarlos de la publicacion IILA-SENAMHI para su subzona, y si
+      no ingresa el parametro a el metodo simplemente se omite de la comparacion.
+      VERIFICACION: Bell reproduce su formula con diferencia 0.00e+00 contra el calculo independiente;
+      Dyck-Peschke coincide exactamente (0.00e+00) con el escalamiento de Sherman a n=0.25; el
+      comparador omite los metodos sin datos suficientes en vez de rellenarlos. En el caso de prueba,
+      los cuatro metodos dieron intensidades a 60 min y Tr=100 entre 42.9 y 57.4 mm/h -- 25% de
+      dispersion, que se traslada de forma practicamente proporcional al caudal de diseño y por eso se
+      destaca en el cuadro de impacto, con color segun su magnitud.
     - v0.2.58: *** CORRECCION CRITICA *** de las estadisticas del MDE recortado a la cuenca, que
       falseaban TODA la morfometria. Reportado por el usuario: cota minima 0.0 m s.n.m. en una cuenca
       altoandina cuyo minimo real es 3525 m, y pendiente media de 3167% (88.2 grados).

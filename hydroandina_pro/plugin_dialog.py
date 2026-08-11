@@ -3064,6 +3064,14 @@ class HydroAndinaProDialog(QDialog):
         h_tabla_ne.addWidget(self.tabla_sensibilidad_no_est)
         h_tabla_ne.addStretch()
         v_ne.addLayout(h_tabla_ne)
+
+        self.cuadro_no_estacionario = CuadroResumenImpacto(ancho_maximo=700)
+        self.cuadro_no_estacionario.actualizar(
+            titulo="SIN ANALIZAR", valor_principal="—",
+            subtitulo="Pulse «Analizar tendencia» para evaluar la estacionariedad de la serie")
+        centrar_en_layout(self.cuadro_no_estacionario, v_ne)
+        self.canvas_no_estacionario = FrequencyCanvas(self, width=6.8, height=6.2)
+        v_ne.addWidget(self.canvas_no_estacionario)
         v.addWidget(gb_no_est)
 
         # ------- Bandas de confianza (bootstrap) -------
@@ -3263,6 +3271,81 @@ class HydroAndinaProDialog(QDialog):
         self.canvas_idf_cartesiano = IdfCanvas(self, width=7.6, height=5.2)
         v_idf.addWidget(self.canvas_idf_cartesiano)
 
+        # ---- Métodos alternativos de generación de curvas IDF ----
+        gb_metodos_idf = QGroupBox(
+            "5. Otros métodos de generación de curvas IDF — Dyck-Peschke (Grobe), "
+            "Frederich Bell (1969) e IILA-SENAMHI-UNI (1983)")
+        v_mi = QVBoxLayout(gb_metodos_idf)
+        lbl_mi = QLabel(
+            "Las curvas de arriba usan el escalamiento genérico de Sherman con el exponente n que usted "
+            "elija. Estos tres métodos se apoyan en información distinta y son los más usados en la "
+            "práctica peruana, así que conviene compararlos antes de adoptar uno para diseño:<br><br>"
+            "<b>Dyck y Peschke (Grobe)</b> — es el mismo escalamiento pero con n fijado en 0.25. No "
+            "requiere calibrar nada: se aplica directo sobre la P24h. Su límite es el mismo: un "
+            "exponente único no distingue el régimen pluviográfico de una región a otra.<br>"
+            "<b>Frederich Bell (1969)</b> — deducido de lluvias convectivas de varias regiones del "
+            "mundo. Necesita como referencia la lluvia de 60 min y 10 años; si no la tiene, el plugin "
+            "la estima de su P24h(10 años). <b>Válido solo para 5–120 min y 2–100 años</b>: fuera de "
+            "ese rango el plugin lo advierte en vez de callarlo.<br>"
+            "<b>IILA-SENAMHI-UNI (1983)</b> — el estudio oficial de la hidrología del Perú. Sus "
+            "parámetros a, K, b y n son <b>REGIONALES por subzona pluviométrica</b>: debe tomarlos de "
+            "esa publicación para su cuenca. El plugin no los supone ni los inventa, porque unos "
+            "parámetros arbitrarios darían curvas de aspecto creíble y sin ningún respaldo."
+        )
+        lbl_mi.setWordWrap(True)
+        v_mi.addWidget(lbl_mi)
+
+        f_mi = QFormLayout()
+        f_mi.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.spin_bell_p60 = QDoubleSpinBox()
+        self.spin_bell_p60.setRange(0.0, 500.0)
+        self.spin_bell_p60.setDecimals(3)
+        self.spin_bell_p60.setValue(0.0)
+        f_mi.addRow("Bell — P(60 min, 10 años) en mm (0 = estimar desde la P24h):", self.spin_bell_p60)
+        self.spin_iila_a = QDoubleSpinBox()
+        self.spin_iila_a.setRange(0.0, 500.0)
+        self.spin_iila_a.setDecimals(3)
+        self.spin_iila_a.setValue(0.0)
+        f_mi.addRow("IILA — parámetro a (0 = omitir este método):", self.spin_iila_a)
+        self.spin_iila_k = QDoubleSpinBox()
+        self.spin_iila_k.setRange(0.0, 5.0)
+        self.spin_iila_k.setDecimals(4)
+        self.spin_iila_k.setValue(0.5530)
+        f_mi.addRow("IILA — parámetro K:", self.spin_iila_k)
+        self.spin_iila_b = QDoubleSpinBox()
+        self.spin_iila_b.setRange(0.0, 10.0)
+        self.spin_iila_b.setDecimals(4)
+        self.spin_iila_b.setValue(0.4000)
+        f_mi.addRow("IILA — parámetro b (h):", self.spin_iila_b)
+        self.spin_iila_n = QDoubleSpinBox()
+        self.spin_iila_n.setRange(0.01, 1.5)
+        self.spin_iila_n.setDecimals(4)
+        self.spin_iila_n.setValue(0.2540)
+        f_mi.addRow("IILA — parámetro n:", self.spin_iila_n)
+        self.combo_tr_comparacion_idf = QComboBox()
+        f_mi.addRow("Periodo de retorno para comparar los métodos:", self.combo_tr_comparacion_idf)
+        v_mi.addLayout(f_mi)
+
+        self.btn_metodos_idf = QPushButton("Generar y comparar los métodos de IDF")
+        self.btn_metodos_idf.clicked.connect(self._on_calcular_metodos_idf)
+        limitar_ancho_boton(self.btn_metodos_idf)
+        v_mi.addWidget(self.btn_metodos_idf)
+
+        self.cuadro_metodos_idf = CuadroResumenImpacto(ancho_maximo=760)
+        self.cuadro_metodos_idf.actualizar(
+            titulo="SIN CALCULAR", valor_principal="—",
+            subtitulo="Compara la intensidad de diseño que da cada método para el mismo Tr")
+        centrar_en_layout(self.cuadro_metodos_idf, v_mi)
+
+        self.tabla_metodos_idf = crear_tabla_parametros()
+        v_mi.addWidget(self.tabla_metodos_idf)
+        self.canvas_metodos_idf_log = IdfCanvas(self, width=7.4, height=4.8)
+        v_mi.addWidget(self.canvas_metodos_idf_log)
+        v_mi.addWidget(QLabel("Mismas curvas en escala cartesiana:"))
+        self.canvas_metodos_idf_cart = IdfCanvas(self, width=7.4, height=4.8)
+        v_mi.addWidget(self.canvas_metodos_idf_cart)
+        v_idf.addWidget(gb_metodos_idf)
+
         v.addWidget(gb_idf)
 
         self._agregar_pestaña_con_scroll(tab, "5. Precipitación Máx 24h")
@@ -3320,8 +3403,134 @@ class HydroAndinaProDialog(QDialog):
                             "Nada garantiza que siga siendo lineal ni que persista.")
                     self.tabla_sensibilidad_no_est.setItem(fila, col, item)
             ajustar_alto_tabla(self.tabla_sensibilidad_no_est, filas_visibles_max=12)
+
+            # Cuadro de impacto: la conclusión es lo que debe verse primero,
+            # y el color comunica si hay o no evidencia para abandonar el
+            # análisis estacionario.
+            significativa = modelo["tendencia_significativa_5pct"]
+            tr_ref = 100 if 100 in comp["periodos_retorno"] else comp["periodos_retorno"][-1]
+            fila_ref = comp["tabla"][tr_ref]
+            dif_ultimo = fila_ref[a_fin]["diferencia_vs_estacionario_pct"]
+            self.cuadro_no_estacionario.actualizar(
+                titulo="ANÁLISIS DE FRECUENCIA NO ESTACIONARIO",
+                valor_principal=(f"Tendencia = {modelo['tendencia_por_decada']:+.2f} mm/década"
+                                  + ("  (SIGNIFICATIVA)" if significativa else "  (no significativa)")),
+                subtitulo=(f"{modelo['nombre']} · periodo {modelo['anio_inicial']}–"
+                            f"{modelo['anio_final']} ({modelo['n_datos']} años)"),
+                metricas=[("p-valor", f"{modelo['p_valor_tendencia']:.4f}"),
+                           ("R² de la tendencia", f"{modelo['r2_tendencia']:.4f}"),
+                           (f"P24 estacionaria (Tr={tr_ref})", f"{fila_ref['estacionario']:.1f} mm"),
+                           (f"Cambio en {a_fin}", f"{dif_ultimo:+.1f}%")],
+                leyenda=("hay evidencia estadística de tendencia: verifique que tenga causa física "
+                          "antes de usarla en diseño" if significativa else
+                          "sin evidencia suficiente: use el valor ESTACIONARIO como valor de diseño"),
+                tipo="atencion" if significativa else "exito",
+            )
+            self.canvas_no_estacionario.plot_no_estacionario(comp, datos, anios)
         except Exception as e:
             QMessageBox.critical(self, "Error en el análisis no estacionario", str(e))
+
+    def _on_calcular_metodos_idf(self):
+        if not self.p24_disenio:
+            QMessageBox.warning(
+                self, "Falta el análisis de frecuencia",
+                "Calcule primero el análisis de frecuencia (sección 2) para obtener las P24h de diseño.")
+            return
+        try:
+            p24_por_tr = dict(self.p24_disenio)
+            periodos = sorted(p24_por_tr.keys())
+
+            # Bell necesita P(60min,10años). Si el usuario no la aporta, se
+            # estima desde la P24h de 10 años -- y se deja constancia de que
+            # es una estimación, no un dato medido.
+            p60 = self.spin_bell_p60.value()
+            p60_estimada = False
+            if p60 <= 0:
+                tr_ref = 10 if 10 in p24_por_tr else min(periodos, key=lambda t: abs(t - 10))
+                p60 = idf_curves.p60_10_desde_p24(p24_por_tr[tr_ref])
+                p60_estimada = True
+
+            parametros_iila = None
+            if self.spin_iila_a.value() > 0:
+                parametros_iila = {
+                    "parametro_a": self.spin_iila_a.value(), "parametro_k": self.spin_iila_k.value(),
+                    "parametro_b": self.spin_iila_b.value(), "parametro_n": self.spin_iila_n.value(),
+                }
+
+            resultados = idf_curves.comparar_metodos_idf(
+                p24_por_tr, exponente_sherman=self.spin_exponente_idf.value(),
+                p60_10_mm=p60, parametros_iila=parametros_iila,
+            )
+            self.metodos_idf_resultado = resultados
+
+            # El desplegable de Tr se rellena con los periodos disponibles.
+            tr_actual = self.combo_tr_comparacion_idf.currentData()
+            self.combo_tr_comparacion_idf.blockSignals(True)
+            self.combo_tr_comparacion_idf.clear()
+            for tr in periodos:
+                self.combo_tr_comparacion_idf.addItem(f"{tr} años", tr)
+            if tr_actual in periodos:
+                self.combo_tr_comparacion_idf.setCurrentIndex(periodos.index(tr_actual))
+            elif 100 in periodos:
+                self.combo_tr_comparacion_idf.setCurrentIndex(periodos.index(100))
+            self.combo_tr_comparacion_idf.blockSignals(False)
+            tr_comp = self.combo_tr_comparacion_idf.currentData() or periodos[-1]
+
+            # Tabla e intensidades a 60 min, que es la duración de
+            # referencia habitual para comparar métodos entre sí.
+            filas, intensidades_60 = [], {}
+            for clave, datos in resultados.items():
+                curva = (datos.get("curvas") or {}).get(tr_comp) or []
+                i60 = next((i for d, i in curva if abs(d - 60.0) < 1e-9), None)
+                if i60 is not None:
+                    intensidades_60[datos["nombre"]] = i60
+                comentario = ""
+                if clave == "bell":
+                    comentario = ("P(60min,10años) = "
+                                  f"{datos['P60_10_mm']} mm"
+                                  + (" (ESTIMADA desde la P24h)" if p60_estimada else " (aportada)"))
+                    if datos.get("advertencias"):
+                        comentario += " — " + datos["advertencias"][0]
+                elif clave == "iila":
+                    pa = datos["parametros"]
+                    comentario = (f"a={pa['a']}, K={pa['K']}, b={pa['b']}, n={pa['n']} — "
+                                  "parámetros REGIONALES: verifique que sean los de su subzona")
+                filas.append((f"Intensidad a 60 min — {datos['nombre']}",
+                               round(i60, 3) if i60 is not None else "—", "mm/h", comentario))
+            if len(intensidades_60) > 1:
+                vmax, vmin = max(intensidades_60.values()), min(intensidades_60.values())
+                filas.append(
+                    ("Dispersión entre métodos", round(vmax - vmin, 3), "mm/h",
+                     f"{(vmax - vmin) / vmax * 100:.1f}% — la intensidad se traslada de forma "
+                     "prácticamente proporcional al caudal de diseño"))
+            poblar_tabla_parametros(self.tabla_metodos_idf, filas)
+
+            if intensidades_60:
+                nombre_max = max(intensidades_60, key=intensidades_60.get)
+                nombre_min = min(intensidades_60, key=intensidades_60.get)
+                vmax, vmin = intensidades_60[nombre_max], intensidades_60[nombre_min]
+                dispersion_pct = (vmax - vmin) / vmax * 100 if vmax else 0.0
+                self.cuadro_metodos_idf.actualizar(
+                    titulo=f"INTENSIDAD DE DISEÑO A 60 MIN — Tr = {tr_comp} AÑOS",
+                    valor_principal=f"{vmin:.1f} – {vmax:.1f} mm/h  según el método",
+                    subtitulo=f"{len(intensidades_60)} métodos comparados sobre la misma P24h",
+                    metricas=[("Máxima", f"{vmax:.1f} mm/h"), ("Mínima", f"{vmin:.1f} mm/h"),
+                               ("Dispersión", f"{dispersion_pct:.1f}%"),
+                               ("Métodos", str(len(intensidades_60)))],
+                    leyenda=f"máxima: {nombre_max}  ·  mínima: {nombre_min}",
+                    tipo="alerta" if dispersion_pct > 40 else
+                         ("atencion" if dispersion_pct > 20 else "exito"),
+                )
+
+            self.canvas_metodos_idf_log.plot_comparacion_metodos_idf(resultados, tr_comp, escala_log=True)
+            self.canvas_metodos_idf_cart.plot_comparacion_metodos_idf(resultados, tr_comp, escala_log=False)
+
+            avisos = (resultados.get("bell") or {}).get("advertencias") or []
+            if avisos:
+                QMessageBox.information(
+                    self, "Avisos del método de Bell", "\n\n".join(avisos))
+        except Exception as e:
+            QMessageBox.critical(self, "Error generando las curvas IDF", str(e))
 
     def _on_calcular_bandas_confianza(self):
         if not self.resultados_frecuencia:
