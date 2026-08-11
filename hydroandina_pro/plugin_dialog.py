@@ -45,7 +45,7 @@ from .ui.hydrograph_canvas import HydrographCanvas
 from .ui.frequency_canvas import FrequencyCanvas
 from .ui.idf_canvas import IdfCanvas
 from .ui.infiltration_canvas import InfiltrationCanvas
-from .ui.summary_box import CuadroResumenImpacto, centrar_en_layout
+from .ui.summary_box import CuadroResumenImpacto, ResumenFinal, centrar_en_layout
 from .ui.pasteable_table import TablaPegable
 from .ui.cross_section_canvas import SeccionTransversalCanvas
 from .ui.cav_canvas import CavCanvas
@@ -1931,8 +1931,7 @@ class HydroAndinaProDialog(QDialog):
         v.addWidget(gb_infil)
 
         v.addWidget(QLabel("<b>Cuadro resumen final de la pestaña:</b>"))
-        self.texto_resumen_pestana3 = QTextBrowser()
-        self.texto_resumen_pestana3.setMinimumHeight(200)
+        self.texto_resumen_pestana3 = ResumenFinal()
         v.addWidget(self.texto_resumen_pestana3)
 
         self._agregar_pestaña_con_scroll(
@@ -5119,8 +5118,7 @@ class HydroAndinaProDialog(QDialog):
         v.addWidget(self.canvas_comparacion_qmax)
 
         v.addWidget(QLabel("<b>Cuadro resumen final:</b>"))
-        self.texto_resumen_caudales = QTextBrowser()
-        self.texto_resumen_caudales.setMinimumHeight(140)
+        self.texto_resumen_caudales = ResumenFinal()
         v.addWidget(self.texto_resumen_caudales)
         self._actualizar_texto_resumen_caudales()
 
@@ -6043,8 +6041,7 @@ class HydroAndinaProDialog(QDialog):
         # estructura. Se actualiza automáticamente al calcular cada una
         # (ver _actualizar_texto_resumen_hidraulica).
         v.addWidget(QLabel("<b>Cuadro resumen final — todas las estructuras calculadas en esta sesión:</b>"))
-        self.texto_resumen_hidraulica = QTextBrowser()
-        self.texto_resumen_hidraulica.setMinimumHeight(160)
+        self.texto_resumen_hidraulica = ResumenFinal()
         v.addWidget(self.texto_resumen_hidraulica)
         self._actualizar_texto_resumen_hidraulica()
 
@@ -7222,8 +7219,7 @@ class HydroAndinaProDialog(QDialog):
         v_r.addWidget(self.canvas_granulometria_socavacion)
 
         v_r.addWidget(QLabel("<b>Cuadro resumen final:</b>"))
-        self.texto_resumen_socavacion = QTextBrowser()
-        self.texto_resumen_socavacion.setMinimumHeight(160)
+        self.texto_resumen_socavacion = ResumenFinal()
         v_r.addWidget(self.texto_resumen_socavacion)
 
         v.addWidget(gb_resultados)
@@ -7859,8 +7855,7 @@ class HydroAndinaProDialog(QDialog):
         v.addWidget(gb_sig)
 
         v.addWidget(QLabel("<b>Cuadro resumen final:</b>"))
-        self.texto_resumen_suelo = QTextBrowser()
-        self.texto_resumen_suelo.setMinimumHeight(160)
+        self.texto_resumen_suelo = ResumenFinal()
         v.addWidget(self.texto_resumen_suelo)
 
         self._agregar_pestaña_con_scroll(tab, "11. Pérdida en Suelos")
@@ -8263,8 +8258,7 @@ class HydroAndinaProDialog(QDialog):
         v.addWidget(gb_resultados)
 
         v.addWidget(QLabel("<b>Cuadro resumen final:</b>"))
-        self.texto_resumen_sedimentos = QTextBrowser()
-        self.texto_resumen_sedimentos.setMinimumHeight(160)
+        self.texto_resumen_sedimentos = ResumenFinal()
         v.addWidget(self.texto_resumen_sedimentos)
 
         self._agregar_pestaña_con_scroll(tab, "12. Sedimentos en Suspensión y Transporte")
@@ -8699,8 +8693,7 @@ class HydroAndinaProDialog(QDialog):
         v.addWidget(gb_resultados)
 
         v.addWidget(QLabel("<b>Cuadro resumen final — mejor propuesta:</b>"))
-        self.texto_resumen_flujo = QTextBrowser()
-        self.texto_resumen_flujo.setMinimumHeight(150)
+        self.texto_resumen_flujo = ResumenFinal()
         v.addWidget(self.texto_resumen_flujo)
 
         self._agregar_pestaña_con_scroll(tab, "13. Flujos Hiperconcentrados/Lodos/Detritos")
@@ -8831,8 +8824,7 @@ class HydroAndinaProDialog(QDialog):
 
         gb_marco = QGroupBox("0. Marco de referencia CMIP6 (informativo)")
         v_marco = QVBoxLayout(gb_marco)
-        self.texto_marco_cmip6 = QTextBrowser()
-        self.texto_marco_cmip6.setMinimumHeight(160)
+        self.texto_marco_cmip6 = ResumenFinal()
         html_marco = "<b>Escenarios SSP-RCP (forzamiento radiativo hacia 2100):</b><ul>"
         for nombre, info in climate_change.ESCENARIOS_SSP_RCP.items():
             html_marco += f"<li><b>{nombre}</b> ({info['forzamiento_w_m2_2100']} W/m²): {info['descripcion']}</li>"
@@ -8929,8 +8921,7 @@ class HydroAndinaProDialog(QDialog):
         v.addWidget(gb_sesgo)
 
         v.addWidget(QLabel("<b>Cuadro resumen final:</b>"))
-        self.texto_resumen_cc = QTextBrowser()
-        self.texto_resumen_cc.setMinimumHeight(160)
+        self.texto_resumen_cc = ResumenFinal()
         v.addWidget(self.texto_resumen_cc)
 
         self._agregar_pestaña_con_scroll(tab, "14. Cambio Climático - Escenarios")
@@ -9152,8 +9143,7 @@ class HydroAndinaProDialog(QDialog):
         v.addWidget(gb_resultados)
 
         v.addWidget(QLabel("<b>Cuadro resumen final:</b>"))
-        self.texto_resumen_qm = QTextBrowser()
-        self.texto_resumen_qm.setMinimumHeight(220)
+        self.texto_resumen_qm = ResumenFinal()
         v.addWidget(self.texto_resumen_qm)
 
         self._on_cambiar_modelo_qm(self.combo_modelo_qm.currentText())
@@ -9447,8 +9437,7 @@ class HydroAndinaProDialog(QDialog):
         v.addWidget(self.canvas_comparacion_minimos)
 
         v.addWidget(QLabel("<b>Cuadro resumen final:</b>"))
-        self.texto_resumen_minimos = QTextBrowser()
-        self.texto_resumen_minimos.setMinimumHeight(160)
+        self.texto_resumen_minimos = ResumenFinal()
         v.addWidget(self.texto_resumen_minimos)
 
         self._agregar_pestaña_con_scroll(tab, "16. Caudales Mínimos")
@@ -9695,8 +9684,7 @@ class HydroAndinaProDialog(QDialog):
         v.addWidget(gb_resultados)
 
         v.addWidget(QLabel("<b>Cuadro resumen final:</b>"))
-        self.texto_resumen_phabsim = QTextBrowser()
-        self.texto_resumen_phabsim.setMinimumHeight(180)
+        self.texto_resumen_phabsim = ResumenFinal()
         v.addWidget(self.texto_resumen_phabsim)
 
         self._agregar_pestaña_con_scroll(tab, "17. Caudal Ecológico - PHABSIM")
@@ -10014,8 +10002,7 @@ class HydroAndinaProDialog(QDialog):
         v.addWidget(gb_calib)
 
         v.addWidget(QLabel("<b>Cuadro resumen final:</b>"))
-        self.texto_resumen_flujo_subterraneo = QTextBrowser()
-        self.texto_resumen_flujo_subterraneo.setMinimumHeight(150)
+        self.texto_resumen_flujo_subterraneo = ResumenFinal()
         v.addWidget(self.texto_resumen_flujo_subterraneo)
 
         self._agregar_pestaña_con_scroll(tab, "18. Flujo Subterráneo")
@@ -10285,8 +10272,7 @@ class HydroAndinaProDialog(QDialog):
         v.addWidget(self.canvas_comparacion_radios)
 
         v.addWidget(QLabel("<b>Cuadro resumen final:</b>"))
-        self.texto_resumen_pozo = QTextBrowser()
-        self.texto_resumen_pozo.setMinimumHeight(180)
+        self.texto_resumen_pozo = ResumenFinal()
         v.addWidget(self.texto_resumen_pozo)
 
         self._agregar_pestaña_con_scroll(tab, "19. Hidráulica de Pozos")

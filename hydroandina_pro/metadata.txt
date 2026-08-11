@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.2.59
+version=0.2.60
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,28 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.2.60: los CUADROS RESUMEN FINALES de las 14 pestañas que los tienen se ven ahora COMPLETOS,
+      sin barra de desplazamiento propia, y con formato de alto impacto.
+      PROBLEMA: se creaban como QTextBrowser con setMinimumHeight(140-200), de modo que el propio
+      navegador de texto mostraba su barra de desplazamiento en cuanto el contenido superaba ese alto
+      -- que es lo NORMAL, porque el resumen crece a medida que el usuario calcula mas cosas en la
+      pestaña. El resultado era que justo el cuadro pensado para dar la vision de conjunto obligaba a
+      hacer scroll DENTRO de el, escondiendo parte de los resultados; ademas rompia la impresion y la
+      exportacion de la pestaña, que solo capturaban la parte visible.
+      CORRECCION: nuevo componente ResumenFinal en ui/summary_box.py que desactiva su barra vertical y
+      recalcula su alto a partir del tamaño real del documento cada vez que cambia el contenido, con lo
+      que siempre se ve entero. La pestaña ya tiene su propio scroll, asi que crecer no es problema: se
+      desplaza la pestaña, no el cuadro. Lleva ademas el mismo marco, fondo y bordes redondeados que los
+      cuadros de impacto, para que se lea como un bloque destacado y no como un parrafo mas.
+      VERIFICADO en cinco tamaños de contenido: vacio, 2, 6, 25 y 60 filas -> altos de 120, 120, 222,
+      697 y 1572 px, SIN barra de desplazamiento en ninguno.
+      Aplicado a las 14 pestañas con resumen final: Metodos de perdida, Caudales Maximos, Hidraulica y
+      Drenaje, Socavacion, Perdida en Suelos, Sedimentos, Flujos Hiperconcentrados, Cambio Climatico
+      (2 cuadros), Caudales Medios, Caudales Minimos, PHABSIM, Flujo Subterraneo e Hidraulica de Pozos.
+      SOBRE AGREGAR GRAFICOS COMPARATIVOS: se audito el plugin buscando pestañas con resumen pero sin
+      grafico y NO se encontro ninguna -- hay 42 lienzos repartidos, varios creados en metodos
+      auxiliares (Socavacion 3, Perdida en Suelos 3, Sedimentos 4, Hidraulica y Drenaje 7, etc.), por
+      lo que no se agrego ninguno redundante.
     - v0.2.59: Pestaña 5 ampliada -- grafico del analisis no estacionario y tres metodos mas de
       generacion de curvas IDF, todos con su grafico y su cuadro resumen de alto impacto.
       GRAFICO DEL ANALISIS NO ESTACIONARIO (antes solo tenia tablas): dos paneles. Arriba, la serie

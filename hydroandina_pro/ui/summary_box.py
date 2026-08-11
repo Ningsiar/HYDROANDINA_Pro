@@ -20,7 +20,7 @@ formato de forma consistente en todas las pestañas.
 """
 from qgis.PyQt.QtCore import Qt
 from qgis.PyQt.QtWidgets import (QFrame, QVBoxLayout, QHBoxLayout, QGridLayout,
-                                  QLabel, QWidget)
+                                  QLabel, QWidget, QTextBrowser)
 
 
 # Paletas por tipo de resultado, para que el color comunique el estado
@@ -153,6 +153,59 @@ class CuadroResumenImpacto(QFrame):
             self._grid.addWidget(lbl_val, 1, columna)
         self._contenedor_metricas.setVisible(bool(metricas))
         self._linea_inf.setVisible(bool(metricas))
+
+
+class ResumenFinal(QTextBrowser):
+    """
+    Cuadro resumen final de una pestaña, que SE AJUSTA A SU CONTENIDO en
+    vez de tener un alto fijo.
+
+    MOTIVO: los resúmenes finales se creaban con setMinimumHeight(140) y
+    el navegador de texto mostraba su propia barra de desplazamiento en
+    cuanto el contenido superaba ese alto -- que es lo normal, porque el
+    resumen crece a medida que el usuario calcula más cosas en la
+    pestaña. El resultado era que justo el cuadro pensado para dar la
+    visión de conjunto obligaba a hacer scroll DENTRO de él, escondiendo
+    parte de los resultados y rompiendo además la impresión/exportación
+    de la pestaña.
+
+    Aquí se desactiva la barra vertical y se recalcula el alto a partir
+    del tamaño real del documento cada vez que cambia el contenido, de
+    modo que siempre se ve completo. La pestaña entera ya tiene su propio
+    scroll (ver _agregar_pestaña_con_scroll), así que crecer no es
+    problema: simplemente se desplaza la pestaña, no el cuadro.
+    """
+
+    def __init__(self, parent=None, alto_minimo: int = 120, tipo: str = "info"):
+        super().__init__(parent)
+        self._alto_minimo = alto_minimo
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.setOpenExternalLinks(True)
+        p = PALETAS.get(tipo, PALETAS["info"])
+        self.setStyleSheet(
+            "QTextBrowser {"
+            f"  border: 2px solid {p['borde']};"
+            "   border-radius: 10px;"
+            f"  background-color: {p['fondo']};"
+            "   padding: 10px;"
+            "}"
+        )
+        self.document().contentsChanged.connect(self._ajustar_alto)
+        self.setMinimumHeight(alto_minimo)
+
+    def _ajustar_alto(self):
+        # +2*frameWidth por el borde y un margen extra: sin él, Qt deja el
+        # documento un par de píxeles corto y reaparece la barra.
+        alto_doc = self.document().size().height()
+        margenes = 2 * self.frameWidth() + 24
+        self.setFixedHeight(max(self._alto_minimo, int(alto_doc + margenes)))
+
+    def setHtml(self, texto):
+        super().setHtml(texto)
+        # contentsChanged ya dispara el ajuste, pero se fuerza aquí para
+        # que el alto sea correcto ANTES de que el layout se recalcule.
+        self._ajustar_alto()
 
 
 def centrar_en_layout(widget, layout):
