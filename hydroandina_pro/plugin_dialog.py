@@ -3414,6 +3414,191 @@ class HydroAndinaProDialog(QDialog):
         v_env.addWidget(self.tabla_resultado_envolventes)
         v.addWidget(gb_envolventes)
 
+        # ---------- Escuelas regionales adicionales ----------
+        gb_escuelas = QGroupBox(
+            "Escuelas regionales adicionales — Latinoamérica, Europa clásica y Norteamérica histórica "
+            "(Santa María, Springall, Rocha, Possenti, Lauterburg, Turazza, Kuichling, Murphy)"
+        )
+        v_esc = QVBoxLayout(gb_escuelas)
+        lbl_esc_info = QLabel(
+            "<b>Santa María (Chile)</b> y <b>Rocha (Brasil)</b> son las escuelas más cercanas al contexto de "
+            "este plugin (vertiente andina / sudamericana) — aun así su coeficiente regional es justamente "
+            "lo que absorbe la diferencia entre una cuenca chilena o brasileña y una altoandina peruana, "
+            "así que deben calibrarse. <b>Turazza (Italia)</b> es la precursora del método racional: su "
+            "factor 1/(1+0.05·Tc) REDUCE el caudal, al revés que la K de Témez que lo aumenta — compare "
+            "ambos. <b>Kuichling</b> y <b>Murphy</b> NO tienen coeficiente regional: son envolventes fijas "
+            "calibradas contra crecidas históricas de Nueva York y del este de EE. UU., por lo que fuera de "
+            "esas regiones son solo un techo histórico ajeno (esperable que salgan muy por encima del resto, "
+            "no las tome como estimación transferible). Reutilizan A, L, S, C, I y Tc ya ingresados arriba."
+        )
+        lbl_esc_info.setWordWrap(True)
+        v_esc.addWidget(lbl_esc_info)
+
+        f_esc = QFormLayout()
+        f_esc.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.spin_esc_longitud = QDoubleSpinBox()
+        self.spin_esc_longitud.setRange(0.01, 5000.0)
+        self.spin_esc_longitud.setDecimals(3)
+        self.spin_esc_longitud.setValue(10.0)
+        f_esc.addRow("Longitud del cauce principal L (km, para Possenti):", self.spin_esc_longitud)
+        self.spin_esc_p24 = QDoubleSpinBox()
+        self.spin_esc_p24.setRange(1.0, 1000.0)
+        self.spin_esc_p24.setValue(80.0)
+        f_esc.addRow("Precipitación máxima en 24h P24 (mm, para Springall):", self.spin_esc_p24)
+        self.spin_esc_santa_maria = QDoubleSpinBox()
+        self.spin_esc_santa_maria.setRange(1.0, 80.0)
+        self.spin_esc_santa_maria.setValue(25.0)
+        f_esc.addRow("Coef. de Santa María C_s (15-40, vertiente andina):", self.spin_esc_santa_maria)
+        self.spin_esc_springall = QDoubleSpinBox()
+        self.spin_esc_springall.setRange(0.05, 1.0)
+        self.spin_esc_springall.setDecimals(3)
+        self.spin_esc_springall.setValue(0.50)
+        f_esc.addRow("Coef. de Springall C_sp (0.20-0.80, cobertura/permeabilidad):", self.spin_esc_springall)
+        self.spin_esc_rocha = QDoubleSpinBox()
+        self.spin_esc_rocha.setRange(0.1, 15.0)
+        self.spin_esc_rocha.setDecimals(3)
+        self.spin_esc_rocha.setValue(2.5)
+        f_esc.addRow("Coef. de Rocha C_r (1.5-5.0, factor regional brasileño):", self.spin_esc_rocha)
+        self.spin_esc_area_llana = QDoubleSpinBox()
+        self.spin_esc_area_llana.setRange(0.0, 100000.0)
+        self.spin_esc_area_llana.setDecimals(3)
+        self.spin_esc_area_llana.setValue(0.0)
+        f_esc.addRow("Área llana/de valle A_p (km², para Possenti; 0 = toda la cuenca es montañosa):",
+                      self.spin_esc_area_llana)
+        self.spin_esc_possenti = QDoubleSpinBox()
+        self.spin_esc_possenti.setRange(10.0, 300.0)
+        self.spin_esc_possenti.setValue(90.0)
+        f_esc.addRow("Coef. de Possenti C_p (70-120, torrencialidad):", self.spin_esc_possenti)
+        self.spin_esc_lauterburg = QDoubleSpinBox()
+        self.spin_esc_lauterburg.setRange(0.1, 6.0)
+        self.spin_esc_lauterburg.setDecimals(3)
+        self.spin_esc_lauterburg.setValue(1.0)
+        f_esc.addRow("Coef. de Lauterburg C_l (0.8-2.5, climático/estacional):", self.spin_esc_lauterburg)
+        v_esc.addLayout(f_esc)
+
+        h_esc_btn = QHBoxLayout()
+        btn_autocompletar_esc = QPushButton("Autocompletar L y P24 de otras pestañas")
+        btn_autocompletar_esc.clicked.connect(self._on_autocompletar_escuelas_regionales)
+        limitar_ancho_boton(btn_autocompletar_esc)
+        h_esc_btn.addWidget(btn_autocompletar_esc)
+        btn_calc_esc = QPushButton("Calcular escuelas regionales")
+        btn_calc_esc.clicked.connect(self._on_calcular_escuelas_regionales)
+        limitar_ancho_boton(btn_calc_esc)
+        h_esc_btn.addWidget(btn_calc_esc)
+        h_esc_btn.addStretch()
+        v_esc.addLayout(h_esc_btn)
+
+        self.tabla_resultado_escuelas = crear_tabla_parametros()
+        v_esc.addWidget(self.tabla_resultado_escuelas)
+        v.addWidget(gb_escuelas)
+
+        # ---------- Métodos complementarios con datos adicionales ----------
+        gb_complementarios = QGroupBox(
+            "Métodos complementarios que requieren datos adicionales "
+            "(Giandotti, Sokolovsky, Alekseev, Pettis, Fuller, Gumbel-FFA, Talbot)"
+        )
+        v_comp = QVBoxLayout(gb_complementarios)
+        lbl_comp_info = QLabel(
+            "Estos necesitan información que las fórmulas de arriba no piden: cotas de la cuenca "
+            "(Giandotti), lámina de escorrentía y duración de la crecida (Sokolovsky), parámetros "
+            "climáticos y de vegetación (Alekseev), o directamente una SERIE DE CAUDALES AFORADOS "
+            "(Fuller, Gumbel-FFA). <b>Si dispone de una estación de aforo en la cuenca, Fuller y "
+            "Gumbel-FFA son la estimación más confiable de toda esta pestaña</b>, porque extrapolan a "
+            "partir del caudal real del río en vez de una curva ajustada en otra región del mundo. "
+            "<b>Talbot</b> es distinto a todos: NO devuelve un caudal sino el ÁREA DE SECCIÓN (m²) que "
+            "requiere la obra de arte, por eso no aparece en el gráfico comparativo de caudales."
+        )
+        lbl_comp_info.setWordWrap(True)
+        v_comp.addWidget(lbl_comp_info)
+
+        f_comp = QFormLayout()
+        f_comp.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.spin_comp_cota_media = QDoubleSpinBox()
+        self.spin_comp_cota_media.setRange(0.0, 9000.0)
+        self.spin_comp_cota_media.setValue(4000.0)
+        f_comp.addRow("Cota media de la cuenca (m.s.n.m., Giandotti):", self.spin_comp_cota_media)
+        self.spin_comp_cota_minima = QDoubleSpinBox()
+        self.spin_comp_cota_minima.setRange(0.0, 9000.0)
+        self.spin_comp_cota_minima.setValue(3500.0)
+        f_comp.addRow("Cota mínima / de salida (m.s.n.m., Giandotti):", self.spin_comp_cota_minima)
+        self.spin_comp_lambda_giandotti = QDoubleSpinBox()
+        self.spin_comp_lambda_giandotti.setRange(0.01, 1.0)
+        self.spin_comp_lambda_giandotti.setDecimals(3)
+        self.spin_comp_lambda_giandotti.setValue(0.15)
+        f_comp.addRow("λ de Giandotti (empírico, absorbe la conversión de unidades):",
+                       self.spin_comp_lambda_giandotti)
+        self.spin_comp_lamina_sokolovsky = QDoubleSpinBox()
+        self.spin_comp_lamina_sokolovsky.setRange(0.1, 1000.0)
+        self.spin_comp_lamina_sokolovsky.setValue(30.0)
+        f_comp.addRow("Lámina de escorrentía h (mm, Sokolovsky; puede usar la lluvia efectiva de la Pestaña 6):",
+                       self.spin_comp_lamina_sokolovsky)
+        self.spin_comp_duracion_sokolovsky = QDoubleSpinBox()
+        self.spin_comp_duracion_sokolovsky.setRange(0.1, 200.0)
+        self.spin_comp_duracion_sokolovsky.setValue(6.0)
+        f_comp.addRow("Duración de la crecida T (h, Sokolovsky):", self.spin_comp_duracion_sokolovsky)
+        self.spin_comp_alekseev_hp = QDoubleSpinBox()
+        self.spin_comp_alekseev_hp.setRange(0.001, 1.0)
+        self.spin_comp_alekseev_hp.setDecimals(4)
+        self.spin_comp_alekseev_hp.setValue(0.0850)
+        f_comp.addRow("Hp de Alekseev (lámina de lluvia en METROS, no mm):", self.spin_comp_alekseev_hp)
+        self.spin_comp_alekseev_n = QDoubleSpinBox()
+        self.spin_comp_alekseev_n.setRange(0.1, 3.0)
+        self.spin_comp_alekseev_n.setDecimals(3)
+        self.spin_comp_alekseev_n.setValue(0.600)
+        f_comp.addRow("n de Alekseev (exponente climático):", self.spin_comp_alekseev_n)
+        self.spin_comp_alekseev_mu = QDoubleSpinBox()
+        self.spin_comp_alekseev_mu.setRange(0.001, 1.0)
+        self.spin_comp_alekseev_mu.setDecimals(3)
+        self.spin_comp_alekseev_mu.setValue(0.100)
+        f_comp.addRow("μ de Alekseev (vegetación/cobertura; con μ=1 sobreestima mucho, calibrar):",
+                       self.spin_comp_alekseev_mu)
+        self.spin_comp_pettis_p = QDoubleSpinBox()
+        self.spin_comp_pettis_p.setRange(0.1, 200.0)
+        self.spin_comp_pettis_p.setValue(18.0)
+        f_comp.addRow("P de Pettis (precip. de Tr=100 años en 5 días, en CENTÍMETROS):", self.spin_comp_pettis_p)
+        self.spin_comp_pettis_cp = QDoubleSpinBox()
+        self.spin_comp_pettis_cp.setRange(0.1, 5.0)
+        self.spin_comp_pettis_cp.setDecimals(3)
+        self.spin_comp_pettis_cp.setValue(1.0)
+        f_comp.addRow("Cp de Pettis:", self.spin_comp_pettis_cp)
+        self.spin_comp_q_medio = QDoubleSpinBox()
+        self.spin_comp_q_medio.setRange(0.0, 100000.0)
+        self.spin_comp_q_medio.setDecimals(3)
+        self.spin_comp_q_medio.setValue(0.0)
+        f_comp.addRow("Media de caudales máximos anuales AFORADOS (m³/s; 0 = omitir Fuller y Gumbel-FFA):",
+                       self.spin_comp_q_medio)
+        self.spin_comp_q_desv = QDoubleSpinBox()
+        self.spin_comp_q_desv.setRange(0.0, 100000.0)
+        self.spin_comp_q_desv.setDecimals(3)
+        self.spin_comp_q_desv.setValue(0.0)
+        f_comp.addRow("Desviación estándar de esos caudales (m³/s, Gumbel-FFA):", self.spin_comp_q_desv)
+        self.spin_comp_tr = QDoubleSpinBox()
+        self.spin_comp_tr.setRange(1.01, 10000.0)
+        self.spin_comp_tr.setValue(100.0)
+        f_comp.addRow("Periodo de retorno Tr (años, para Fuller y Gumbel-FFA):", self.spin_comp_tr)
+        self.spin_comp_talbot_ct = QDoubleSpinBox()
+        self.spin_comp_talbot_ct.setRange(0.05, 2.0)
+        self.spin_comp_talbot_ct.setDecimals(3)
+        self.spin_comp_talbot_ct.setValue(0.450)
+        f_comp.addRow("Ct de Talbot (~1.0 montañoso rocoso, ~0.2 llano permeable):", self.spin_comp_talbot_ct)
+        v_comp.addLayout(f_comp)
+
+        h_comp_btn = QHBoxLayout()
+        btn_autocompletar_comp = QPushButton("Autocompletar cotas y lámina de otras pestañas")
+        btn_autocompletar_comp.clicked.connect(self._on_autocompletar_complementarios)
+        limitar_ancho_boton(btn_autocompletar_comp)
+        h_comp_btn.addWidget(btn_autocompletar_comp)
+        btn_calc_comp = QPushButton("Calcular métodos complementarios")
+        btn_calc_comp.clicked.connect(self._on_calcular_metodos_complementarios)
+        limitar_ancho_boton(btn_calc_comp)
+        h_comp_btn.addWidget(btn_calc_comp)
+        h_comp_btn.addStretch()
+        v_comp.addLayout(h_comp_btn)
+
+        self.tabla_resultado_complementarios = crear_tabla_parametros()
+        v_comp.addWidget(self.tabla_resultado_complementarios)
+        v.addWidget(gb_complementarios)
+
         gb_seccion_pendiente = QGroupBox(
             "Método indirecto Sección-Pendiente (aforo post-crecida, ecuación de Manning) + caudal crítico"
         )
@@ -3529,6 +3714,34 @@ class HydroAndinaProDialog(QDialog):
                 f"Bürkli-Ziegler = {envolventes['burkli_ziegler_Q_m3s']} m³/s<br>"
                 f"Crippen & Bue = {envolventes['crippen_bue_Q_m3s']} m³/s &nbsp;|&nbsp; "
                 f"Iszkowski = {envolventes['iszkowski_Q_m3s']} m³/s</p><hr>"
+            )
+        escuelas = self.resultados_hidraulica_drenaje.get("Caudales escuelas regionales (8 fórmulas)")
+        if escuelas:
+            hay_algo = True
+            html += (
+                "<p><b>Escuelas regionales (Latinoamérica / Europa clásica / Norteamérica histórica)</b><br>"
+                f"Santa María = {escuelas['santa_maria_Q_m3s']} m³/s &nbsp;|&nbsp; "
+                f"Springall = {escuelas['springall_Q_m3s']} m³/s &nbsp;|&nbsp; "
+                f"Rocha = {escuelas['rocha_Q_m3s']} m³/s &nbsp;|&nbsp; "
+                f"Possenti = {escuelas['possenti_Q_m3s']} m³/s<br>"
+                f"Lauterburg = {escuelas['lauterburg_Q_m3s']} m³/s &nbsp;|&nbsp; "
+                f"Turazza = {escuelas['turazza_Q_m3s']} m³/s &nbsp;|&nbsp; "
+                f"Kuichling = {escuelas['kuichling_Q_m3s']} m³/s &nbsp;|&nbsp; "
+                f"Murphy = {escuelas['murphy_Q_m3s']} m³/s</p><hr>"
+            )
+        complementarios = self.resultados_hidraulica_drenaje.get(
+            "Caudales complementarios (Giandotti/Sokolovsky/...)")
+        if complementarios:
+            hay_algo = True
+            partes = []
+            for etiqueta, clave in [("Giandotti", "giandotti"), ("Sokolovsky", "sokolovsky"),
+                                     ("Alekseev", "alekseev"), ("Pettis", "pettis"),
+                                     ("Fuller", "fuller"), ("Gumbel-FFA", "gumbel_ffa")]:
+                if f"{clave}_Q_m3s" in complementarios:
+                    partes.append(f"{etiqueta} = {complementarios[f'{clave}_Q_m3s']} m³/s")
+            html += (
+                "<p><b>Métodos complementarios (datos adicionales)</b><br>"
+                + " &nbsp;|&nbsp; ".join(partes) + "</p><hr>"
             )
         seccion_pendiente = self.resultados_hidraulica_drenaje.get("Sección-Pendiente / caudal crítico")
         if seccion_pendiente:
@@ -3695,6 +3908,168 @@ class HydroAndinaProDialog(QDialog):
         except direct_discharge_methods.DirectDischargeError as e:
             QMessageBox.warning(self, "No se pudo calcular", str(e))
 
+    def _on_autocompletar_escuelas_regionales(self):
+        mensajes = []
+        if self.morfometria_resultados.get("lc_km"):
+            self.spin_esc_longitud.setValue(self.morfometria_resultados["lc_km"])
+            mensajes.append("L (longitud del cauce principal) desde la morfometría (pestaña 2).")
+        if self.p24_disenio:
+            # Se toma el Tr más alto disponible: es el escenario de diseño
+            # más desfavorable, coherente con el carácter de "envolvente"
+            # de las fórmulas de esta sección.
+            tr_max = max(self.p24_disenio.keys())
+            self.spin_esc_p24.setValue(self.p24_disenio[tr_max])
+            mensajes.append(f"P24 = {self.p24_disenio[tr_max]} mm (Tr={tr_max} años) desde la pestaña 5.")
+        if not mensajes:
+            QMessageBox.warning(
+                self, "Nada que autocompletar",
+                "Calcule primero la morfometría (pestaña 2) y/o el análisis de frecuencia (pestaña 5)."
+            )
+            return
+        QMessageBox.information(self, "Autocompletado", "Se autocompletó:\n- " + "\n- ".join(mensajes))
+
+    def _on_calcular_escuelas_regionales(self):
+        try:
+            area_km2 = self.spin_dir_a.value()
+            area_llana = min(self.spin_esc_area_llana.value(), area_km2)
+            r = direct_discharge_methods.comparar_escuelas_regionales(
+                area_km2=area_km2, longitud_cauce_km=self.spin_esc_longitud.value(),
+                pendiente_pct=self.spin_dir_s.value(), p24_mm=self.spin_esc_p24.value(),
+                coef_escorrentia_c=self.spin_dir_c.value(), intensidad_mm_h=self.spin_dir_i.value(),
+                tc_horas=self.spin_dir_tc.value(), area_llana_km2=area_llana,
+                coeficiente_santa_maria=self.spin_esc_santa_maria.value(),
+                coeficiente_springall=self.spin_esc_springall.value(),
+                coeficiente_rocha=self.spin_esc_rocha.value(),
+                coeficiente_possenti=self.spin_esc_possenti.value(),
+                coeficiente_lauterburg=self.spin_esc_lauterburg.value(),
+            )
+            self.resultados_hidraulica_drenaje["Caudales escuelas regionales (8 fórmulas)"] = {
+                "tipo": "Caudales escuelas regionales",
+                **{f"{clave}_Q_m3s": datos["Q_m3_s"] for clave, datos in r.items()},
+            }
+            poblar_tabla_parametros(self.tabla_resultado_escuelas, [
+                ("Santa María (Chile)", r["santa_maria"]["Q_m3_s"], "m³/s", r["santa_maria"]["nota"]),
+                ("Springall (México)", r["springall"]["Q_m3_s"], "m³/s", r["springall"]["nota"]),
+                ("Rocha (Brasil)", r["rocha"]["Q_m3_s"], "m³/s", r["rocha"]["nota"]),
+                ("Possenti (Italia)", r["possenti"]["Q_m3_s"], "m³/s", r["possenti"]["nota"]),
+                ("Lauterburg (Suiza)", r["lauterburg"]["Q_m3_s"], "m³/s", r["lauterburg"]["nota"]),
+                ("Turazza (Italia)", r["turazza"]["Q_m3_s"], "m³/s",
+                 f"factor de amortiguamiento = {r['turazza']['factor_amortiguamiento']} — {r['turazza']['nota']}"),
+                ("Kuichling (Nueva York)", r["kuichling"]["Q_m3_s"], "m³/s", r["kuichling"]["nota"]),
+                ("Murphy (este de EE. UU.)", r["murphy"]["Q_m3_s"], "m³/s", r["murphy"]["nota"]),
+            ])
+            self._actualizar_grafico_comparacion_caudales()
+            self._actualizar_texto_resumen_caudales()
+            if hasattr(self, "texto_resumen_hidraulica"):
+                self._actualizar_texto_resumen_hidraulica()
+        except direct_discharge_methods.DirectDischargeError as e:
+            QMessageBox.warning(self, "No se pudo calcular", str(e))
+
+    def _on_autocompletar_complementarios(self):
+        mensajes = []
+        g1 = self.morfometria_resultados.get("g1")
+        if g1:
+            self.spin_comp_cota_media.setValue(g1["Zmed"])
+            self.spin_comp_cota_minima.setValue(g1["Zmin"])
+            mensajes.append(f"Cotas media ({g1['Zmed']} m) y mínima ({g1['Zmin']} m) desde la morfometría.")
+        if self.hidrograma_resultado:
+            lamina = sum(self.hidrograma_resultado.get("lluvia_efectiva_incr_mm", []))
+            if lamina > 0:
+                self.spin_comp_lamina_sokolovsky.setValue(lamina)
+                mensajes.append(f"Lámina de escorrentía = {lamina:.2f} mm (lluvia efectiva del hidrograma).")
+        if self.p24_disenio:
+            tr_max = max(self.p24_disenio.keys())
+            # Alekseev pide la lámina en METROS, no en mm.
+            self.spin_comp_alekseev_hp.setValue(self.p24_disenio[tr_max] / 1000.0)
+            mensajes.append(f"Hp de Alekseev = {self.p24_disenio[tr_max] / 1000.0:.4f} m (P24 de Tr={tr_max}).")
+        if not mensajes:
+            QMessageBox.warning(
+                self, "Nada que autocompletar",
+                "Calcule primero la morfometría (pestaña 2), el hidrograma (pestaña 7) y/o el análisis "
+                "de frecuencia (pestaña 5)."
+            )
+            return
+        QMessageBox.information(self, "Autocompletado", "Se autocompletó:\n- " + "\n- ".join(mensajes))
+
+    def _on_calcular_metodos_complementarios(self):
+        try:
+            area_km2 = self.spin_dir_a.value()
+            longitud_km = self.spin_esc_longitud.value()
+            filas = []
+            resultados = {"tipo": "Caudales complementarios"}
+
+            r_gia = direct_discharge_methods.caudal_giandotti(
+                area_km2=area_km2, longitud_cauce_km=longitud_km,
+                cota_media_m=self.spin_comp_cota_media.value(),
+                cota_minima_m=self.spin_comp_cota_minima.value(),
+                p_max_mm=self.spin_esc_p24.value(),
+                coeficiente_lambda=self.spin_comp_lambda_giandotti.value(),
+            )
+            resultados["giandotti_Q_m3s"] = r_gia["Q_m3_s"]
+            filas.append(("Giandotti", r_gia["Q_m3_s"], "m³/s",
+                           f"Tc de Giandotti = {r_gia['Tc_giandotti_h']} h — {r_gia['nota']}"))
+
+            r_sok = direct_discharge_methods.caudal_sokolovsky(
+                area_km2=area_km2, lamina_escorrentia_mm=self.spin_comp_lamina_sokolovsky.value(),
+                duracion_horas=self.spin_comp_duracion_sokolovsky.value(),
+            )
+            resultados["sokolovsky_Q_m3s"] = r_sok["Q_m3_s"]
+            filas.append(("Sokolovsky", r_sok["Q_m3_s"], "m³/s", r_sok["nota"]))
+
+            r_ale = direct_discharge_methods.caudal_alekseev(
+                area_km2=area_km2, tc_horas=self.spin_dir_tc.value(),
+                hp_m=self.spin_comp_alekseev_hp.value(), n_clima=self.spin_comp_alekseev_n.value(),
+                mu_vegetacion=self.spin_comp_alekseev_mu.value(),
+            )
+            resultados["alekseev_Q_m3s"] = r_ale["Q_m3_s"]
+            filas.append(("Alekseev", r_ale["Q_m3_s"], "m³/s", r_ale["nota"]))
+
+            r_pet = direct_discharge_methods.caudal_pettis(
+                area_km2=area_km2, longitud_cauce_km=longitud_km,
+                p100_5dias_cm=self.spin_comp_pettis_p.value(), coeficiente_cp=self.spin_comp_pettis_cp.value(),
+            )
+            resultados["pettis_Q_m3s"] = r_pet["Q_m3_s"]
+            filas.append(("Pettis (USACE)", r_pet["Q_m3_s"], "m³/s", r_pet["nota"]))
+
+            # Fuller y Gumbel-FFA solo tienen sentido si el usuario aportó
+            # la serie AFORADA de caudales máximos anuales.
+            q_medio = self.spin_comp_q_medio.value()
+            if q_medio > 0:
+                r_ful = direct_discharge_methods.caudal_fuller(
+                    caudal_medio_anual_m3_s=q_medio, area_km2=area_km2,
+                    periodo_retorno_anios=self.spin_comp_tr.value(),
+                )
+                resultados["fuller_Q_m3s"] = r_ful["Q_m3_s"]
+                filas.append(("Fuller", r_ful["Q_m3_s"], "m³/s",
+                               f"factor Tr = {r_ful['factor_Tr']}, factor pico instantáneo = "
+                               f"{r_ful['factor_pico_instantaneo']} — {r_ful['nota']}"))
+                r_gum = direct_discharge_methods.caudal_gumbel_ffa(
+                    media_caudales_m3_s=q_medio, desviacion_caudales_m3_s=self.spin_comp_q_desv.value(),
+                    periodo_retorno_anios=self.spin_comp_tr.value(),
+                )
+                resultados["gumbel_ffa_Q_m3s"] = r_gum["Q_m3_s"]
+                filas.append(("Gumbel-FFA (caudales aforados)", r_gum["Q_m3_s"], "m³/s",
+                               f"KT = {r_gum['KT']} — {r_gum['nota']}"))
+            else:
+                filas.append(("Fuller / Gumbel-FFA", "no calculados", "—",
+                               "Requieren la media (y desviación) de los caudales máximos anuales "
+                               "AFORADOS; ingrésela arriba para habilitarlos."))
+
+            r_tal = direct_discharge_methods.area_alcantarilla_talbot(
+                area_ha=area_km2 * 100.0, coeficiente_ct=self.spin_comp_talbot_ct.value(),
+            )
+            filas.append(("Talbot — área de la obra de arte", r_tal["area_seccion_m2"], "m²",
+                           f"NO es un caudal: es la sección requerida. {r_tal['nota']}"))
+
+            self.resultados_hidraulica_drenaje["Caudales complementarios (Giandotti/Sokolovsky/...)"] = resultados
+            poblar_tabla_parametros(self.tabla_resultado_complementarios, filas)
+            self._actualizar_grafico_comparacion_caudales()
+            self._actualizar_texto_resumen_caudales()
+            if hasattr(self, "texto_resumen_hidraulica"):
+                self._actualizar_texto_resumen_hidraulica()
+        except direct_discharge_methods.DirectDischargeError as e:
+            QMessageBox.warning(self, "No se pudo calcular", str(e))
+
     def _on_calcular_seccion_pendiente(self):
         try:
             r_sp = direct_discharge_methods.caudal_seccion_pendiente_manning(
@@ -3734,32 +4109,56 @@ class HydroAndinaProDialog(QDialog):
         usuario los haya calculado (se llama al final de los botones de
         cálculo de esta pestaña, así que siempre refleja todo lo
         disponible en ese momento)."""
-        nombres, valores = [], []
+        nombres, valores, familias = [], [], []
+
+        def _agregar(etiqueta, valor, familia):
+            nombres.append(etiqueta)
+            valores.append(valor)
+            familias.append(familia)
+
         if self.hidrograma_resultado:
-            nombres.append(str(self.hidrograma_resultado.get("metodo", "SCS/Snyder/Clark")))
-            valores.append(self.hidrograma_resultado["caudal_pico_m3s"])
+            _agregar(str(self.hidrograma_resultado.get("metodo", "SCS/Snyder/Clark")),
+                     self.hidrograma_resultado["caudal_pico_m3s"], "Lluvia-escorrentía")
         directos = self.resultados_hidraulica_drenaje.get("Caudales directos (Témez/Mac Math/Creager)")
         if directos:
-            nombres += ["Racional", "Témez", "Mac Math", "Creager"]
-            valores += [directos["Racional_Q_m3s"], directos["Temez_Q_m3s"],
-                        directos["MacMath_Q_m3s"], directos["Creager_Q_m3s"]]
+            for etiqueta, clave in [("Racional", "Racional_Q_m3s"), ("Témez", "Temez_Q_m3s"),
+                                     ("Mac Math", "MacMath_Q_m3s"), ("Creager", "Creager_Q_m3s")]:
+                _agregar(etiqueta, directos[clave], "Directo")
         envolventes = self.resultados_hidraulica_drenaje.get("Caudales envolventes (10 fórmulas regionales)")
         if envolventes:
-            nombres += ["Dicken", "Ryves", "Inglis", "Myer", "Kresnik", "Francou-Rodier", "Ventura",
-                        "Bürkli-Ziegler", "Crippen & Bue", "Iszkowski"]
-            valores += [envolventes[f"{clave}_Q_m3s"] for clave in
-                        ["dicken", "ryves", "inglis", "myer", "kresnik", "francou_rodier", "ventura",
-                         "burkli_ziegler", "crippen_bue", "iszkowski"]]
+            for etiqueta, clave in [("Dicken", "dicken"), ("Ryves", "ryves"), ("Inglis", "inglis"),
+                                     ("Myer", "myer"), ("Kresnik", "kresnik"),
+                                     ("Francou-Rodier", "francou_rodier"), ("Ventura", "ventura"),
+                                     ("Bürkli-Ziegler", "burkli_ziegler"), ("Crippen & Bue", "crippen_bue"),
+                                     ("Iszkowski", "iszkowski")]:
+                _agregar(etiqueta, envolventes[f"{clave}_Q_m3s"], "Envolvente")
+        escuelas = self.resultados_hidraulica_drenaje.get("Caudales escuelas regionales (8 fórmulas)")
+        if escuelas:
+            for etiqueta, clave in [("Santa María", "santa_maria"), ("Springall", "springall"),
+                                     ("Rocha", "rocha"), ("Possenti", "possenti"),
+                                     ("Lauterburg", "lauterburg"), ("Turazza", "turazza"),
+                                     ("Kuichling", "kuichling"), ("Murphy", "murphy")]:
+                _agregar(etiqueta, escuelas[f"{clave}_Q_m3s"], "Escuela regional")
+        complementarios = self.resultados_hidraulica_drenaje.get(
+            "Caudales complementarios (Giandotti/Sokolovsky/...)")
+        if complementarios:
+            # Fuller y Gumbel-FFA solo están presentes si el usuario aportó
+            # la serie aforada; Talbot nunca entra (devuelve m², no m³/s).
+            for etiqueta, clave in [("Giandotti", "giandotti"), ("Sokolovsky", "sokolovsky"),
+                                     ("Alekseev", "alekseev"), ("Pettis", "pettis"),
+                                     ("Fuller", "fuller"), ("Gumbel-FFA", "gumbel_ffa")]:
+                if f"{clave}_Q_m3s" in complementarios:
+                    _agregar(etiqueta, complementarios[f"{clave}_Q_m3s"], "Complementario")
         seccion_pendiente = self.resultados_hidraulica_drenaje.get("Sección-Pendiente / caudal crítico")
         if seccion_pendiente:
-            nombres.append("Sección-Pendiente (aforo)")
-            valores.append(seccion_pendiente["Q_seccion_pendiente_m3s"])
+            _agregar("Sección-Pendiente (aforo)", seccion_pendiente["Q_seccion_pendiente_m3s"],
+                     "Aforo indirecto")
             if seccion_pendiente.get("Q_critico_m3s") is not None:
-                nombres.append("Caudal crítico")
-                valores.append(seccion_pendiente["Q_critico_m3s"])
+                _agregar("Caudal crítico", seccion_pendiente["Q_critico_m3s"], "Aforo indirecto")
         if nombres:
             self.canvas_comparacion_qmax.plot_comparacion_metodos(
-                nombres, valores, titulo="Comparación de TODOS los métodos de caudal máximo"
+                nombres, valores, titulo="Comparación de TODOS los métodos de caudal máximo",
+                familias=familias,
             )
 
     def _on_calcular_hidrograma(self):

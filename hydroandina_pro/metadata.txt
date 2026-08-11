@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.2.46
+version=0.2.47
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,50 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.2.47: la Pestaña 7 pasa de 17 a 31 métodos de estimación de caudal máximo, con dos secciones
+      nuevas y un gráfico comparativo rediseñado.
+      (1) ESCUELAS REGIONALES ADICIONALES (8 fórmulas): Santa María (Chile, cuencas andinas de alta
+      pendiente), Springall (México, árido/semiárido), Rocha (Brasil, sudeste con vegetación densa),
+      Possenti (Italia, primera fórmula en diferenciar el aporte de la zona montañosa del de la zona
+      llana: Am aporta completo y Ap solo un tercio), Lauterburg (Suiza/Alpes), Turazza (Italia,
+      precursora del método racional), Kuichling (Nueva York) y Murphy (este de EE. UU.). Santa María
+      y Rocha son las escuelas más cercanas al contexto del plugin (vertiente andina/sudamericana).
+      Turazza es especialmente instructiva: su factor 1/(1+0.05·Tc) REDUCE el caudal racional, al revés
+      que el coeficiente K de Témez que lo aumenta -- ahora pueden compararse ambos lado a lado.
+      Kuichling y Murphy se marcan explícitamente como envolventes FIJAS sin coeficiente regional,
+      calibradas contra crecidas históricas de EE. UU.: fuera de esas regiones son un techo ajeno, no
+      transferible (es esperable que salgan muy por encima del resto).
+      (2) MÉTODOS COMPLEMENTARIOS QUE REQUIEREN DATOS ADICIONALES (7): Giandotti (calcula internamente
+      su propio Tc a partir de las cotas de la cuenca), Sokolovsky (escuela rusa; su constante 0.28 es
+      la conversión estándar 1/3.6 de mm/h·km²→m³/s, no un empírico ambiguo), Alekseev (escuela rusa),
+      Pettis (USACE), Fuller, Gumbel-FFA y Talbot. Fuller y Gumbel-FFA son cualitativamente distintos
+      del resto de la pestaña: extrapolan a un periodo de retorno T a partir de una SERIE DE CAUDALES
+      AFORADOS, no desde la lluvia ni desde el área -- si se dispone de una estación de aforo en la
+      cuenca son la estimación más confiable de toda la pestaña, porque usan el caudal real del río en
+      vez de una curva ajustada en otra región del mundo (se calculan solo si el usuario ingresa la
+      media de la serie; si no, la tabla lo indica en vez de mostrar un valor inventado). Talbot se
+      trata aparte porque NO devuelve un caudal sino el ÁREA DE SECCIÓN (m²) que requiere la obra de
+      arte, así que se excluye deliberadamente del gráfico comparativo de caudales.
+      ADVERTENCIA DE ESCALA EN ALEKSEEV (detectada al probar la fórmula y confirmada por el autor): el
+      factor 1000 que lleva delante convierte Hp de metros a milímetros, de modo que mu no es un
+      coeficiente cercano a 1 sino quien absorbe el resto de la conversión de unidades -- con mu=1.0 el
+      caudal sale un orden de magnitud por encima de todos los demás métodos (exactamente el mismo tipo
+      de trampa que las constantes "por centímetro" de SCS/Snyder corregidas en la v0.2.44). Se
+      documenta en el módulo, se muestra la advertencia en la columna de comentario del resultado, y el
+      valor por defecto de la interfaz es 0.10 (que deja el resultado en el mismo rango que el resto).
+      (3) GRÁFICO COMPARATIVO REDISEÑADO: con ~30 métodos las barras verticales se volvían ilegibles
+      (nombres solapados en el eje X). Ahora ui/hydrograph_canvas.py cambia automáticamente a barras
+      HORIZONTALES ordenadas de mayor a menor caudal cuando hay 9 o más métodos, con el alto de la
+      figura calculado según su número (~0.30 pulgadas por método) para que ninguna etiqueta se solape,
+      y las barras coloreadas por FAMILIA de método (lluvia-escorrentía, directo, envolvente, escuela
+      regional, complementario, aforo indirecto) con su leyenda -- así el orden por magnitud no hace
+      perder la información de a qué grupo pertenece cada resultado. Con pocos métodos se mantiene el
+      gráfico vertical clásico de siempre.
+      (4) Botones de autocompletado en ambas secciones nuevas, que toman L y las cotas media/mínima de
+      la morfometría (pestaña 2), P24 del análisis de frecuencia (pestaña 5, Tr más alto disponible por
+      el carácter envolvente de estas fórmulas) y la lámina de escorrentía de la lluvia efectiva del
+      hidrograma ya calculado. El cuadro resumen final de la pestaña lista también los 15 caudales
+      nuevos.
     - v0.2.46: ampliación mayor de la Pestaña 7 (Caudales Máximos) -- de 4 a 17 métodos de estimación
       de caudal pico, todos comparables entre sí en un único gráfico y cuadro resumen.
       (1) 10 FÓRMULAS ENVOLVENTES/REGIONALES nuevas (core/direct_discharge_methods.py): Dicken (1865,

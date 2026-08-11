@@ -404,3 +404,389 @@ def caudal_critico(area_critica_m2: float, ancho_superficial_m: float, gravedad_
         "metodo": "Caudal crítico (Fr=1)", "Q_m3_s": round(q, 3),
         "Ac_m2": area_critica_m2, "Bc_m": ancho_superficial_m,
     }
+
+
+# ==============================================================================
+# ESCUELAS REGIONALES ADICIONALES (Latinoamérica, Europa clásica, Norteamérica
+# histórica pre-USGS/pre-SCS)
+# ==============================================================================
+# Mismo carácter y las mismas advertencias que el bloque de envolventes de
+# arriba: son curvas ajustadas históricamente contra crecidas máximas
+# OBSERVADAS de una región concreta. Las de Santa María (Chile) y Rocha
+# (Brasil) son las más cercanas al contexto de este plugin (vertiente
+# andina / sudamericana), pero AUN ASÍ requieren calibración local: el
+# coeficiente regional es el que absorbe toda la diferencia entre una
+# cuenca chilena/brasileña y una cuenca altoandina peruana.
+#
+# NOTA sobre Kuichling y Murphy: no tienen coeficiente regional -- son
+# curvas envolventes FIJAS, calibradas contra las crecidas históricas del
+# estado de Nueva York y del este de EE. UU. respectivamente. Fuera de
+# esas regiones son solo una referencia de "techo histórico" de otra
+# parte del mundo, no una estimación transferible; se incluyen por
+# completitud del catálogo comparativo, y sus valores suelen quedar muy
+# por encima del resto (es lo esperable de una envolvente superior).
+
+def caudal_santa_maria(area_km2: float, coeficiente_cs: float = 25.0) -> dict:
+    """Fórmula de Santa María (Chile, cuencas andinas de alta pendiente y
+    respuesta muy rápida): Q = Cs * A^0.60."""
+    if area_km2 <= 0:
+        raise DirectDischargeError("El área debe ser mayor que 0.")
+    q = coeficiente_cs * (area_km2 ** 0.60)
+    return {
+        "metodo": "Santa María (Chile)", "Q_m3_s": round(q, 3),
+        "A_km2": area_km2, "Cs": coeficiente_cs,
+        "nota": "Vertiente andina: Cs=15-40 según latitud y torrencialidad. Escuela regional más cercana a los Andes peruanos.",
+    }
+
+
+def caudal_springall(area_km2: float, p24_mm: float, coeficiente_csp: float = 0.50) -> dict:
+    """Fórmula de Springall (México, cuencas medianas áridas/semiáridas):
+    Q = 1.15 * Csp * A^0.67 * P24^0.5."""
+    if area_km2 <= 0:
+        raise DirectDischargeError("El área debe ser mayor que 0.")
+    if p24_mm <= 0:
+        raise DirectDischargeError("La precipitación máxima en 24h debe ser mayor que 0.")
+    q = 1.15 * coeficiente_csp * (area_km2 ** 0.67) * (p24_mm ** 0.50)
+    return {
+        "metodo": "Springall (México)", "Q_m3_s": round(q, 3),
+        "A_km2": area_km2, "P24_mm": p24_mm, "Csp": coeficiente_csp,
+        "nota": "Zonas áridas/semiáridas de México: Csp=0.20-0.80 según cobertura vegetal y permeabilidad del suelo.",
+    }
+
+
+def caudal_rocha(area_km2: float, pendiente_m_km: float, coeficiente_cr: float = 2.5) -> dict:
+    """Fórmula de Rocha (Brasil, sudeste, cuencas no aforadas con
+    vegetación densa): Q = Cr * A^0.75 * S^0.20, con S en m/km (ojo: NO en
+    m/m ni en %; el llamador debe convertir -- S[m/km] = S[%] * 10)."""
+    if area_km2 <= 0:
+        raise DirectDischargeError("El área debe ser mayor que 0.")
+    if pendiente_m_km <= 0:
+        raise DirectDischargeError("La pendiente debe ser mayor que 0.")
+    q = coeficiente_cr * (area_km2 ** 0.75) * (pendiente_m_km ** 0.20)
+    return {
+        "metodo": "Rocha (Brasil)", "Q_m3_s": round(q, 3),
+        "A_km2": area_km2, "S_m_km": round(pendiente_m_km, 3), "Cr": coeficiente_cr,
+        "nota": "Sudeste de Brasil, vegetación densa: Cr=1.5-5.0. Pendiente en m/km (= S% x 10).",
+    }
+
+
+def caudal_possenti(area_montana_km2: float, area_llana_km2: float, longitud_cauce_km: float,
+                     coeficiente_cp: float = 90.0) -> dict:
+    """Fórmula de Possenti (Italia): Q = (Cp/L) * (Am + 0.33*Ap). Una de
+    las primeras en diferenciar explícitamente el aporte de la zona
+    montañosa (Am, aporta completo) del de la zona llana/de valle (Ap,
+    aporta solo un tercio por su mayor amortiguamiento)."""
+    if longitud_cauce_km <= 0:
+        raise DirectDischargeError("La longitud del cauce principal debe ser mayor que 0.")
+    if area_montana_km2 < 0 or area_llana_km2 < 0:
+        raise DirectDischargeError("Las áreas montañosa y llana no pueden ser negativas.")
+    if (area_montana_km2 + area_llana_km2) <= 0:
+        raise DirectDischargeError("La suma del área montañosa y llana debe ser mayor que 0.")
+    q = (coeficiente_cp / longitud_cauce_km) * (area_montana_km2 + 0.33 * area_llana_km2)
+    return {
+        "metodo": "Possenti (Italia)", "Q_m3_s": round(q, 3),
+        "Am_km2": area_montana_km2, "Ap_km2": area_llana_km2, "L_km": longitud_cauce_km, "Cp": coeficiente_cp,
+        "nota": "Cuencas mixtas: Cp=70-120 (torrencialidad). El área llana aporta solo 1/3 del área montañosa.",
+    }
+
+
+def caudal_lauterburg(area_km2: float, coeficiente_cl: float = 1.0) -> dict:
+    """Fórmula de Lauterburg (Suiza, Alpes): Q = Cl * 0.62*A/(1+0.0008*A)."""
+    if area_km2 <= 0:
+        raise DirectDischargeError("El área debe ser mayor que 0.")
+    q = coeficiente_cl * ((0.62 * area_km2) / (1.0 + 0.0008 * area_km2))
+    return {
+        "metodo": "Lauterburg (Suiza)", "Q_m3_s": round(q, 3),
+        "A_km2": area_km2, "Cl": coeficiente_cl,
+        "nota": "Alpes suizos, drenaje de cuencas de montaña: Cl=0.8-2.5 (climático/estacional).",
+    }
+
+
+def caudal_turazza(coef_escorrentia_c: float, intensidad_mm_h: float, area_km2: float,
+                    tc_horas: float) -> dict:
+    """Fórmula de Turazza (Italia), precursora directa del método
+    racional en Europa continental: Q = (C*I*A/3.6) * 1/(1+0.05*Tc). El
+    segundo factor amortigua el caudal racional puro en función del
+    tiempo de concentración -- mismo propósito que el coeficiente K de
+    Témez, pero con otra formulación (aquí REDUCE el caudal, mientras que
+    la K de Témez lo AUMENTA; compárense ambos resultados)."""
+    if not (0.0 <= coef_escorrentia_c <= 1.0):
+        raise DirectDischargeError("El coeficiente de escorrentía C debe estar entre 0 y 1.")
+    if area_km2 <= 0:
+        raise DirectDischargeError("El área debe ser mayor que 0.")
+    if tc_horas <= 0:
+        raise DirectDischargeError("Tc debe ser mayor que 0.")
+    factor_amortiguamiento = 1.0 / (1.0 + 0.05 * tc_horas)
+    q = ((coef_escorrentia_c * intensidad_mm_h * area_km2) / 3.6) * factor_amortiguamiento
+    return {
+        "metodo": "Turazza (Italia)", "Q_m3_s": round(q, 3),
+        "C": coef_escorrentia_c, "I_mm_h": intensidad_mm_h, "A_km2": area_km2, "Tc_h": tc_horas,
+        "factor_amortiguamiento": round(factor_amortiguamiento, 4),
+        "nota": "Precursora del método racional; el factor 1/(1+0.05·Tc) reduce el caudal (opuesto a la K de Témez).",
+    }
+
+
+def caudal_kuichling(area_km2: float) -> dict:
+    """Ecuación de Kuichling (Nueva York, EE. UU., fines del siglo XIX):
+    Q = A * (4400/(A+170) + 20). Curva envolvente FIJA, sin coeficiente
+    regional."""
+    if area_km2 <= 0:
+        raise DirectDischargeError("El área debe ser mayor que 0.")
+    q = area_km2 * ((4400.0 / (area_km2 + 170.0)) + 20.0)
+    return {
+        "metodo": "Kuichling (Nueva York)", "Q_m3_s": round(q, 3), "A_km2": area_km2,
+        "nota": "Envolvente FIJA (sin coeficiente) del estado de Nueva York. Fuera de esa región es solo un techo histórico ajeno, no transferible.",
+    }
+
+
+def caudal_murphy(area_km2: float) -> dict:
+    """Fórmula de Murphy (ríos del este de EE. UU., primera mitad del
+    siglo XX): Q = 1351*A/(A+93). Curva envolvente FIJA, sin coeficiente
+    regional."""
+    if area_km2 <= 0:
+        raise DirectDischargeError("El área debe ser mayor que 0.")
+    q = (1351.0 * area_km2) / (area_km2 + 93.0)
+    return {
+        "metodo": "Murphy (este de EE. UU.)", "Q_m3_s": round(q, 3), "A_km2": area_km2,
+        "nota": "Envolvente FIJA (sin coeficiente) del este de EE. UU. Fuera de esa región es solo un techo histórico ajeno, no transferible.",
+    }
+
+
+def comparar_escuelas_regionales(area_km2: float, longitud_cauce_km: float, pendiente_pct: float,
+                                  p24_mm: float, coef_escorrentia_c: float, intensidad_mm_h: float,
+                                  tc_horas: float, area_montana_km2: float = None,
+                                  area_llana_km2: float = 0.0, coeficiente_santa_maria: float = 25.0,
+                                  coeficiente_springall: float = 0.50, coeficiente_rocha: float = 2.5,
+                                  coeficiente_possenti: float = 90.0,
+                                  coeficiente_lauterburg: float = 1.0) -> dict:
+    """Calcula las 8 fórmulas de escuelas regionales adicionales
+    (latinoamericana, europea clásica y norteamericana histórica) con los
+    mismos datos ya ingresados en la Pestaña 7.
+
+    area_montana_km2 por defecto (None) = TODA el área de la cuenca, que
+    es el supuesto razonable para una cuenca altoandina; el usuario puede
+    repartir explícitamente entre montaña y llanura para Possenti."""
+    if area_montana_km2 is None:
+        area_montana_km2 = max(area_km2 - area_llana_km2, 0.0)
+    return {
+        "santa_maria": caudal_santa_maria(area_km2, coeficiente_santa_maria),
+        "springall": caudal_springall(area_km2, p24_mm, coeficiente_springall),
+        "rocha": caudal_rocha(area_km2, pendiente_pct * 10.0, coeficiente_rocha),
+        "possenti": caudal_possenti(area_montana_km2, area_llana_km2, longitud_cauce_km, coeficiente_possenti),
+        "lauterburg": caudal_lauterburg(area_km2, coeficiente_lauterburg),
+        "turazza": caudal_turazza(coef_escorrentia_c, intensidad_mm_h, area_km2, tc_horas),
+        "kuichling": caudal_kuichling(area_km2),
+        "murphy": caudal_murphy(area_km2),
+    }
+
+
+# ==============================================================================
+# MÉTODOS COMPLEMENTARIOS QUE REQUIEREN DATOS ADICIONALES
+# ==============================================================================
+# A diferencia de todo lo anterior (que se calcula con A, S, L, C, I, Tc,
+# P24 -- datos que el plugin ya tiene de las pestañas 2/3/4/5), estos
+# necesitan información extra que el usuario debe aportar: cotas de la
+# cuenca (Giandotti), lámina de escorrentía y duración de la crecida
+# (Sokolovsky), parámetros climáticos/de vegetación (Alekseev), o
+# directamente una SERIE DE CAUDALES OBSERVADOS (Fuller, Gumbel-FFA).
+#
+# Fuller y Gumbel-FFA son cualitativamente distintos del resto del
+# módulo: no estiman el caudal desde la lluvia ni desde el área, sino que
+# EXTRAPOLAN a un periodo de retorno T a partir de caudales máximos
+# anuales ya OBSERVADOS en una estación de aforo. Si se dispone de esa
+# serie, son la estimación más confiable de todo este módulo (usan datos
+# reales del río, no una curva ajustada en otra región del mundo).
+
+def caudal_giandotti(area_km2: float, longitud_cauce_km: float, cota_media_m: float,
+                      cota_minima_m: float, p_max_mm: float, coeficiente_lambda: float = 0.15,
+                      tiempo_retardo_h: float = 1.0) -> dict:
+    """Método de Giandotti (Italia/Sudamérica): calcula internamente el
+    tiempo de concentración de Giandotti
+    Tc = (4*sqrt(A) + 1.5*L) / (0.8*sqrt(Hmedia - Hmin))
+    y con él el caudal Q = (A*Pmax)/(Tc + tr) * lambda.
+
+    NOTA DE UNIDADES: el coeficiente lambda (0.15 por defecto) absorbe la
+    conversión de unidades de la expresión (km²·mm/h no da m³/s por sí
+    solo); es un coeficiente empírico calibrado, no un factor físico --
+    verifíquelo contra la referencia que use su institución."""
+    if area_km2 <= 0:
+        raise DirectDischargeError("El área debe ser mayor que 0.")
+    if longitud_cauce_km <= 0:
+        raise DirectDischargeError("La longitud del cauce principal debe ser mayor que 0.")
+    desnivel = cota_media_m - cota_minima_m
+    if desnivel <= 0:
+        raise DirectDischargeError(
+            "La cota media debe ser mayor que la cota mínima (desnivel > 0) para aplicar Giandotti."
+        )
+    tc_h = (4.0 * math.sqrt(area_km2) + 1.5 * longitud_cauce_km) / (0.8 * math.sqrt(desnivel))
+    q = ((area_km2 * p_max_mm) / (tc_h + tiempo_retardo_h)) * coeficiente_lambda
+    return {
+        "metodo": "Giandotti", "Q_m3_s": round(q, 3), "Tc_giandotti_h": round(tc_h, 3),
+        "A_km2": area_km2, "L_km": longitud_cauce_km, "desnivel_m": round(desnivel, 2),
+        "P_max_mm": p_max_mm, "lambda": coeficiente_lambda, "tr_h": tiempo_retardo_h,
+        "nota": "λ (0.15 por defecto) absorbe la conversión de unidades; es empírico, verifíquelo con su referencia.",
+    }
+
+
+def caudal_sokolovsky(area_km2: float, lamina_escorrentia_mm: float, duracion_horas: float,
+                       factor_forma: float = 1.0, delta_lagos: float = 1.0) -> dict:
+    """Fórmula de Sokolovsky (escuela rusa):
+    Q = 0.28 * A * h * f * delta / T, con A en km², h la lámina de
+    escorrentía en mm y T la duración de la crecida en horas.
+
+    El 0.28 es la conversión estándar mm/h·km² -> m³/s (1/3.6 = 0.2778),
+    igual que el /3.6 de Témez: es una identidad de unidades, no un
+    coeficiente empírico ambiguo. f (forma del hidrograma) y delta
+    (atenuación por lagos/embalses naturales) sí son empíricos."""
+    if area_km2 <= 0:
+        raise DirectDischargeError("El área debe ser mayor que 0.")
+    if duracion_horas <= 0:
+        raise DirectDischargeError("La duración de la crecida debe ser mayor que 0.")
+    if lamina_escorrentia_mm <= 0:
+        raise DirectDischargeError("La lámina de escorrentía debe ser mayor que 0.")
+    q = (0.28 * area_km2 * lamina_escorrentia_mm * factor_forma * delta_lagos) / duracion_horas
+    return {
+        "metodo": "Sokolovsky (escuela rusa)", "Q_m3_s": round(q, 3),
+        "A_km2": area_km2, "h_mm": lamina_escorrentia_mm, "T_h": duracion_horas,
+        "f_forma": factor_forma, "delta_lagos": delta_lagos,
+        "nota": "0.28 = 1/3.6 (conversión mm/h·km²→m³/s). Puede usar la lluvia efectiva del hidrograma (Pestaña 6) como lámina h.",
+    }
+
+
+def caudal_alekseev(area_km2: float, tc_horas: float, hp_m: float, n_clima: float,
+                     mu_vegetacion: float) -> dict:
+    """Fórmula de Alekseev (escuela rusa):
+    Q = (1000*Hp*A) / ((Tc+1)^n) * mu, con Hp la lámina de lluvia en
+    METROS, n un exponente climático y mu un coeficiente de vegetación/
+    cobertura.
+
+    *** CUIDADO CON LA ESCALA DE ESTA FÓRMULA ***
+    El factor 1000 delante convierte Hp de metros a milímetros, de modo
+    que el numerador es en realidad Hp[mm]*A[km²] -- un número muy grande.
+    En consecuencia, mu NO es un coeficiente cercano a 1: además del
+    efecto de la vegetación, es mu quien absorbe el resto de la
+    conversión de unidades de la fórmula. Con mu=1.0 el resultado sale
+    típicamente UN ORDEN DE MAGNITUD por encima del de los demás métodos
+    de este módulo para la misma cuenca (mismo tipo de trampa que las
+    constantes "por centímetro" de SCS/Snyder corregidas en la v0.2.44).
+
+    Por eso este módulo NO fija un valor por defecto de mu: debe
+    ingresarse explícitamente, y el llamador debería contrastar el
+    resultado con el resto de métodos antes de darlo por bueno. Como
+    referencia, valores de mu del orden de 0.05-0.15 suelen dejar el
+    resultado en el mismo rango que las demás fórmulas."""
+    if area_km2 <= 0:
+        raise DirectDischargeError("El área debe ser mayor que 0.")
+    if tc_horas < 0:
+        raise DirectDischargeError("Tc no puede ser negativo.")
+    if hp_m <= 0:
+        raise DirectDischargeError("La lámina de lluvia Hp debe ser mayor que 0.")
+    q = ((1000.0 * hp_m * area_km2) / ((tc_horas + 1.0) ** n_clima)) * mu_vegetacion
+    return {
+        "metodo": "Alekseev (escuela rusa)", "Q_m3_s": round(q, 3),
+        "A_km2": area_km2, "Tc_h": tc_horas, "Hp_m": hp_m, "n_clima": n_clima, "mu_veg": mu_vegetacion,
+        "nota": (
+            "OJO CON LA ESCALA: el factor 1000 pasa Hp de m a mm, así que μ absorbe la conversión de "
+            "unidades además de la vegetación -- con μ=1 el caudal sale ~1 orden de magnitud por encima "
+            "del resto de métodos. Contraste siempre con las demás fórmulas antes de darlo por bueno."
+        ),
+    }
+
+
+def caudal_pettis(area_km2: float, longitud_cauce_km: float, p100_5dias_cm: float,
+                   coeficiente_cp: float = 1.0) -> dict:
+    """Fórmula de Pettis (USACE): Q = 1.5 * Cp * P^1.25 * W^0.8, con P la
+    precipitación de 100 años en 5 días consecutivos (en CENTÍMETROS) y W
+    el ancho medio de la cuenca (= A/L, en km)."""
+    if area_km2 <= 0 or longitud_cauce_km <= 0:
+        raise DirectDischargeError("El área y la longitud del cauce deben ser mayores que 0.")
+    if p100_5dias_cm <= 0:
+        raise DirectDischargeError("La precipitación de 100 años en 5 días debe ser mayor que 0.")
+    ancho_medio_km = area_km2 / longitud_cauce_km
+    q = 1.5 * coeficiente_cp * (p100_5dias_cm ** 1.25) * (ancho_medio_km ** 0.8)
+    return {
+        "metodo": "Pettis (USACE)", "Q_m3_s": round(q, 3),
+        "A_km2": area_km2, "L_km": longitud_cauce_km, "W_medio_km": round(ancho_medio_km, 4),
+        "P100_5dias_cm": p100_5dias_cm, "Cp": coeficiente_cp,
+        "nota": "P en CENTÍMETROS y para 5 días consecutivos con Tr=100 años (no es la P24h de la Pestaña 5).",
+    }
+
+
+def caudal_fuller(caudal_medio_anual_m3_s: float, area_km2: float,
+                   periodo_retorno_anios: float) -> dict:
+    """Fórmula de Fuller: Q_T = Qmedio * (1 + 0.8*log10(T)) * (1 + 2*A^-0.3).
+
+    Requiere el caudal máximo anual MEDIO observado (media de la serie de
+    máximos anuales aforados). El primer factor extrapola al periodo de
+    retorno T; el segundo convierte el caudal medio diario a caudal
+    instantáneo de pico (por eso decrece con el área: en cuencas grandes
+    el pico instantáneo se aparta menos del promedio diario)."""
+    if area_km2 <= 0:
+        raise DirectDischargeError("El área debe ser mayor que 0.")
+    if periodo_retorno_anios <= 1.0:
+        raise DirectDischargeError("El periodo de retorno debe ser mayor que 1 año.")
+    if caudal_medio_anual_m3_s <= 0:
+        raise DirectDischargeError("El caudal máximo anual medio observado debe ser mayor que 0.")
+    factor_tr = 1.0 + 0.8 * math.log10(periodo_retorno_anios)
+    factor_pico = 1.0 + 2.0 * (area_km2 ** -0.3)
+    q = caudal_medio_anual_m3_s * factor_tr * factor_pico
+    return {
+        "metodo": "Fuller", "Q_m3_s": round(q, 3), "Q_medio_m3_s": caudal_medio_anual_m3_s,
+        "A_km2": area_km2, "Tr_anios": periodo_retorno_anios,
+        "factor_Tr": round(factor_tr, 4), "factor_pico_instantaneo": round(factor_pico, 4),
+        "nota": "Requiere serie AFORADA de máximos anuales. Verifique si su referencia usa A en km² o en mi².",
+    }
+
+
+def caudal_gumbel_ffa(media_caudales_m3_s: float, desviacion_caudales_m3_s: float,
+                       periodo_retorno_anios: float) -> dict:
+    """Análisis de frecuencia de crecidas por Gumbel (Tipo I) aplicado a
+    una serie de CAUDALES máximos anuales observados:
+        yT = -ln(-ln((T-1)/T));  KT = (yT - 0.5772)/(pi/sqrt(6));
+        QT = media + KT*desviación
+
+    OJO -- esto es distinto del análisis de frecuencia de la Pestaña 5:
+    aquel ajusta 9 distribuciones a la serie de PRECIPITACIÓN máxima en
+    24h, mientras que este trabaja directamente sobre CAUDALES aforados.
+    Si dispone de una estación de aforo en la cuenca, esta es la
+    estimación más confiable de todo este módulo, porque usa el caudal
+    real del río en vez de una curva ajustada en otra región.
+
+    Se usa la forma ASINTÓTICA (muestra infinita: 0.5772 y pi/sqrt(6)).
+    Para series cortas (n < 30-50) la bibliografía recomienda la variante
+    de muestra finita con yn/sn tabulados en función de n, que da
+    caudales algo distintos -- téngalo en cuenta si su serie es corta."""
+    if periodo_retorno_anios <= 1.0:
+        raise DirectDischargeError("El periodo de retorno T debe ser mayor que 1 año.")
+    if desviacion_caudales_m3_s < 0:
+        raise DirectDischargeError("La desviación estándar no puede ser negativa.")
+    y_t = -math.log(-math.log((periodo_retorno_anios - 1.0) / periodo_retorno_anios))
+    k_t = (y_t - 0.5772) / (math.pi / math.sqrt(6.0))
+    q = media_caudales_m3_s + k_t * desviacion_caudales_m3_s
+    return {
+        "metodo": "Gumbel FFA (sobre caudales aforados)", "Q_m3_s": round(q, 3),
+        "media_m3_s": media_caudales_m3_s, "desviacion_m3_s": desviacion_caudales_m3_s,
+        "Tr_anios": periodo_retorno_anios, "yT": round(y_t, 4), "KT": round(k_t, 4),
+        "nota": "Forma asintótica (muestra infinita); para n<30-50 use la variante de muestra finita (yn/sn tabulados).",
+    }
+
+
+def area_alcantarilla_talbot(area_ha: float, coeficiente_ct: float = 0.45) -> dict:
+    """Fórmula de Talbot: a = Ct * A_ha^0.75.
+
+    ATENCIÓN -- NO devuelve un caudal: devuelve el ÁREA DE LA SECCIÓN
+    TRANSVERSAL (m²) que requiere la obra de arte (alcantarilla/ponton)
+    para evacuar la crecida de esa cuenca. Por eso no aparece en el
+    gráfico comparativo de caudales de la pestaña: no es comparable con
+    los m³/s del resto de métodos. Ct clásico: ~1.0 en terreno montañoso
+    rocoso de máxima escorrentía, bajando a ~0.2 en terreno llano y
+    permeable -- verifique el valor y la convención de unidades contra la
+    referencia que use su institución antes de dimensionar con esto."""
+    if area_ha <= 0:
+        raise DirectDischargeError("El área de la cuenca (ha) debe ser mayor que 0.")
+    area_seccion_m2 = coeficiente_ct * (area_ha ** 0.75)
+    return {
+        "metodo": "Talbot (área de obra de arte)", "area_seccion_m2": round(area_seccion_m2, 3),
+        "A_ha": round(area_ha, 2), "Ct": coeficiente_ct,
+        "nota": "Resultado en m² de SECCIÓN (no es un caudal). Ct ~1.0 montañoso rocoso, ~0.2 llano permeable.",
+    }

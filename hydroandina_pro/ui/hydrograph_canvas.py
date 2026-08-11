@@ -71,23 +71,91 @@ class HydrographCanvas(FigureCanvas):
         self.fig.tight_layout()
         self.draw()
 
-    def plot_comparacion_metodos(self, nombres, valores, titulo="Comparación de métodos de caudal máximo"):
+    # Paleta por familia de métodos, para que en el gráfico comparativo se
+    # distinga de un vistazo de qué tipo es cada barra (ver plot_comparacion_metodos).
+    COLORES_FAMILIA = {
+        "Lluvia-escorrentía": "#1F3864",
+        "Directo": "#2E7D32",
+        "Envolvente": "#B3261E",
+        "Escuela regional": "#8B5CF6",
+        "Complementario": "#EF9F27",
+        "Aforo indirecto": "#0E7490",
+    }
+
+    def plot_comparacion_metodos(self, nombres, valores, titulo="Comparación de métodos de caudal máximo",
+                                  familias=None, umbral_horizontal=9):
         """Gráfico de barras comparando el Qp obtenido por distintos
-        métodos (SCS/Snyder/Clark, Témez, Mac Math, Creager, ...), con
-        las etiquetas de valor SOBRE cada barra pero con margen
-        suficiente para que no se superpongan con el título."""
-        self.ax.clear()
-        colores = ["#1F3864", "#2E7D32", "#B3261E", "#8B5CF6", "#EF9F27"]
-        barras = self.ax.bar(nombres, valores, color=[colores[i % len(colores)] for i in range(len(nombres))])
-        self.ax.bar_label(barras, fmt="%.1f", padding=4, fontsize=9)
-        # Margen superior extra (20%) para que las etiquetas de las
-        # barras más altas queden dentro del área de trazado y no choquen
-        # con el título.
-        y_max = max(valores) if valores else 1
-        self.ax.set_ylim(0, y_max * 1.2)
-        self.ax.set_ylabel("Caudal Qp (m³/s)")
+        métodos (SCS/Snyder/Clark, Témez, Creager, envolventes, ...).
+
+        Con pocos métodos usa barras VERTICALES (lectura clásica, con la
+        etiqueta de valor sobre cada barra). A partir de `umbral_horizontal`
+        métodos cambia automáticamente a barras HORIZONTALES ordenadas de
+        mayor a menor: con ~30 métodos las etiquetas del eje X en vertical
+        se solapan y se vuelven ilegibles, mientras que en horizontal cada
+        nombre tiene su propia línea y la comparación de magnitudes es
+        inmediata.
+
+        `familias` (opcional): lista paralela a `nombres` con la familia de
+        cada método (ver COLORES_FAMILIA), para colorear las barras por tipo
+        y agregar una leyenda -- así el orden por magnitud no hace perder la
+        información de a qué grupo pertenece cada método.
+        """
+        self.fig.clear()
+        self.ax = self.fig.add_subplot(111)
+        if not nombres:
+            self.draw()
+            return
+
+        if familias and len(familias) == len(nombres):
+            colores = [self.COLORES_FAMILIA.get(f, "#666666") for f in familias]
+        else:
+            paleta = ["#1F3864", "#2E7D32", "#B3261E", "#8B5CF6", "#EF9F27"]
+            colores = [paleta[i % len(paleta)] for i in range(len(nombres))]
+            familias = None
+
+        if len(nombres) < umbral_horizontal:
+            barras = self.ax.bar(nombres, valores, color=colores)
+            self.ax.bar_label(barras, fmt="%.1f", padding=4, fontsize=9)
+            # Margen superior extra (20%) para que las etiquetas de las
+            # barras más altas queden dentro del área de trazado y no
+            # choquen con el título.
+            self.ax.set_ylim(0, (max(valores) if valores else 1) * 1.2)
+            self.ax.set_ylabel("Caudal Qp (m³/s)")
+            self.ax.tick_params(axis="x", rotation=15)
+            self.ax.grid(True, axis="y", linestyle=":", linewidth=0.5)
+        else:
+            # Ordenado de mayor a menor y dibujado de abajo hacia arriba,
+            # para que el método de mayor caudal quede arriba del todo.
+            orden = sorted(range(len(valores)), key=lambda i: valores[i])
+            nombres_ord = [nombres[i] for i in orden]
+            valores_ord = [valores[i] for i in orden]
+            colores_ord = [colores[i] for i in orden]
+            posiciones = range(len(nombres_ord))
+            barras = self.ax.barh(list(posiciones), valores_ord, color=colores_ord)
+            self.ax.set_yticks(list(posiciones))
+            self.ax.set_yticklabels(nombres_ord, fontsize=8)
+            self.ax.bar_label(barras, fmt="%.1f", padding=3, fontsize=7.5)
+            self.ax.set_xlim(0, (max(valores) if valores else 1) * 1.18)
+            self.ax.set_xlabel("Caudal Qp (m³/s)")
+            self.ax.grid(True, axis="x", linestyle=":", linewidth=0.5)
+            # Con muchos métodos la figura por defecto queda apretada:
+            # se le da ~0.30 pulgadas de alto por método (mínimo el alto
+            # original) para que las etiquetas nunca se solapen.
+            alto_necesario = max(self.fig.get_figheight(), 1.6 + 0.30 * len(nombres_ord))
+            self.fig.set_figheight(alto_necesario)
+            self.setMinimumHeight(int(alto_necesario * self.fig.dpi))
+
+        if familias:
+            from matplotlib.patches import Patch
+            vistas = []
+            for f in familias:
+                if f not in vistas:
+                    vistas.append(f)
+            self.ax.legend(
+                handles=[Patch(facecolor=self.COLORES_FAMILIA.get(f, "#666666"), label=f) for f in vistas],
+                fontsize=7.5, loc="lower right", framealpha=0.9,
+            )
+
         self.ax.set_title(titulo, pad=14)
-        self.ax.tick_params(axis="x", rotation=15)
-        self.ax.grid(True, axis="y", linestyle=":", linewidth=0.5)
         self.fig.tight_layout()
         self.draw()
