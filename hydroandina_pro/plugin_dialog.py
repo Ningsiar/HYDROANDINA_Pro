@@ -324,6 +324,7 @@ class HydroAndinaProDialog(QDialog):
         self.mejor_ajuste_clave = None
         self.metodo_ajuste_usado = "momentos_l"
         self.transito_resultado = {}
+        self.bandas_confianza_resultado = {}
         self.p24_disenio = {}
         self.periodos_retorno_actuales = []
         self.idf_resultados = {}  # curvas/ecuaciones IDF derivadas de p24_disenio (pestaña 5)
@@ -2357,6 +2358,62 @@ class HydroAndinaProDialog(QDialog):
         self.canvas_comparacion_tr_cartesiano = FrequencyCanvas(self, width=6.5, height=4.8)
         v.addWidget(self.canvas_comparacion_tr_cartesiano)
 
+        # ------- Bandas de confianza (bootstrap) -------
+        gb_bandas = QGroupBox("Bandas de confianza de la precipitación de diseño (bootstrap)")
+        v_bandas = QVBoxLayout(gb_bandas)
+        lbl_bandas = QLabel(
+            "El análisis de arriba devuelve <b>un único valor</b> de P24 por periodo de retorno, y esa "
+            "cifra pasa tal cual al caudal de diseño y al dimensionamiento de la obra — como si fuera "
+            "exacta. No lo es: se estimó con una muestra de unas pocas decenas de años, y con otra "
+            "muestra igual de válida habría salido distinta. La incertidumbre además <b>crece con el "
+            "periodo de retorno</b>: extrapolar a Tr=500 años con 30 datos es mucho más incierto que "
+            "estimar Tr=5. El bootstrap la cuantifica remuestreando la serie observada con reposición "
+            "y reajustando la distribución cada vez.<br><br>"
+            "<b>Límite importante:</b> el bootstrap mide la incertidumbre por tener POCOS DATOS, no el "
+            "error por haber elegido una distribución equivocada. Si la distribución no es la adecuada, "
+            "la banda puede salir estrecha y centrada en el valor incorrecto — léala junto con las tres "
+            "pruebas de bondad de ajuste, y compare las bandas de distintas distribuciones entre sí."
+        )
+        lbl_bandas.setWordWrap(True)
+        v_bandas.addWidget(lbl_bandas)
+
+        f_bandas = QFormLayout()
+        f_bandas.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.combo_dist_bandas = QComboBox()
+        self.combo_dist_bandas.addItem("(la de mejor ajuste)", None)
+        f_bandas.addRow("Distribución:", self.combo_dist_bandas)
+        self.spin_bootstrap_n = QSpinBox()
+        self.spin_bootstrap_n.setRange(200, 20000)
+        self.spin_bootstrap_n.setSingleStep(500)
+        self.spin_bootstrap_n.setValue(2000)
+        f_bandas.addRow("Número de remuestreos bootstrap:", self.spin_bootstrap_n)
+        self.combo_nivel_confianza = QComboBox()
+        for _txt, _val in (("90%", 0.90), ("95%", 0.95), ("99%", 0.99)):
+            self.combo_nivel_confianza.addItem(_txt, _val)
+        f_bandas.addRow("Nivel de confianza:", self.combo_nivel_confianza)
+        v_bandas.addLayout(f_bandas)
+
+        self.btn_calcular_bandas = QPushButton("Calcular bandas de confianza")
+        self.btn_calcular_bandas.clicked.connect(self._on_calcular_bandas_confianza)
+        limitar_ancho_boton(self.btn_calcular_bandas)
+        v_bandas.addWidget(self.btn_calcular_bandas)
+
+        self.tabla_bandas_confianza = QTableWidget(0, 6)
+        self.tabla_bandas_confianza.setHorizontalHeaderLabels(
+            ["Tr (años)", "Límite inferior", "Estimación central", "Límite superior",
+             "Amplitud (mm)", "Amplitud (% del central)"])
+        for _c in range(6):
+            self.tabla_bandas_confianza.horizontalHeader().setSectionResizeMode(_c, QHeaderView.ResizeToContents)
+        limitar_ancho_tabla(self.tabla_bandas_confianza, ancho_maximo=760)
+        h_tabla_bandas = QHBoxLayout()
+        h_tabla_bandas.addWidget(self.tabla_bandas_confianza)
+        h_tabla_bandas.addStretch()
+        v_bandas.addLayout(h_tabla_bandas)
+
+        self.canvas_bandas_confianza = FrequencyCanvas(self, width=6.8, height=4.8)
+        v_bandas.addWidget(self.canvas_bandas_confianza)
+        v.addWidget(gb_bandas)
+
         # ---------------- 4. Curvas IDF ----------------
         gb_idf = QGroupBox("4. Curvas Intensidad-Duración-Frecuencia (IDF)")
         v_idf = QVBoxLayout(gb_idf)
@@ -2501,6 +2558,55 @@ class HydroAndinaProDialog(QDialog):
         v.addWidget(gb_idf)
 
         self._agregar_pestaña_con_scroll(tab, "5. Precipitación Máx 24h")
+
+    def _on_calcular_bandas_confianza(self):
+        if not self.resultados_frecuencia:
+            QMessageBox.warning(
+                self, "Falta el análisis de frecuencia",
+                "Ajuste primero las distribuciones (sección 2 de esta pestaña).")
+            return
+        clave = self.combo_dist_bandas.currentData() or self.mejor_ajuste_clave
+        if not clave:
+            QMessageBox.warning(self, "Sin distribución", "No hay una distribución válida seleccionada.")
+            return
+        try:
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            try:
+                bandas = frequency_analysis.bandas_confianza_bootstrap(
+                    self.serie_precip_anual.valores_mm, clave,
+                    periodos_retorno=self.periodos_retorno_actuales,
+                    n_remuestreos=self.spin_bootstrap_n.value(),
+                    nivel_confianza=self.combo_nivel_confianza.currentData(),
+                    metodo=self.metodo_ajuste_usado,
+                )
+            finally:
+                QApplication.restoreOverrideCursor()
+
+            self.bandas_confianza_resultado = bandas
+            self.tabla_bandas_confianza.setRowCount(0)
+            for tr in bandas["periodos_retorno"]:
+                lim = bandas["limites"][tr]
+                fila = self.tabla_bandas_confianza.rowCount()
+                self.tabla_bandas_confianza.insertRow(fila)
+                self.tabla_bandas_confianza.setItem(fila, 0, QTableWidgetItem(str(tr)))
+                if lim["inferior"] is None:
+                    for _c, _t in ((1, "—"), (2, f"{lim['central']:.2f}"), (3, "—"), (4, "—"), (5, "—")):
+                        self.tabla_bandas_confianza.setItem(fila, _c, QTableWidgetItem(_t))
+                    continue
+                for _c, _t in ((1, f"{lim['inferior']:.2f}"), (2, f"{lim['central']:.2f}"),
+                                (3, f"{lim['superior']:.2f}"), (4, f"{lim['amplitud']:.2f}"),
+                                (5, f"{lim['amplitud_relativa_pct']:.1f}%")):
+                    self.tabla_bandas_confianza.setItem(fila, _c, QTableWidgetItem(_t))
+            ajustar_alto_tabla(self.tabla_bandas_confianza, filas_visibles_max=12)
+
+            self.canvas_bandas_confianza.plot_bandas_confianza(
+                bandas, datos_observados=self.serie_precip_anual.valores_mm, escala_log=True)
+
+            if bandas.get("advertencia_fallidos"):
+                QMessageBox.warning(self, "Bootstrap poco fiable", bandas["advertencia_fallidos"])
+        except Exception as e:
+            QApplication.restoreOverrideCursor()
+            QMessageBox.critical(self, "Error calculando las bandas de confianza", str(e))
 
     def _on_calcular_idf(self):
         if not self.p24_disenio:
@@ -3151,6 +3257,16 @@ class HydroAndinaProDialog(QDialog):
             # recalculaba su alto, quedando con el alto por defecto de Qt
             # para 0 filas -- solo se veían 2-3 distribuciones a la vez.
             ajustar_alto_tabla(self.tabla_distribuciones, filas_visibles_max=10)
+
+            # Rellena el selector de distribución de las bandas de confianza
+            # con las que sí se pudieron ajustar en esta corrida.
+            self.combo_dist_bandas.blockSignals(True)
+            self.combo_dist_bandas.clear()
+            self.combo_dist_bandas.addItem("(la de mejor ajuste)", None)
+            for clave_ok, datos_ok in resultados.items():
+                if not datos_ok.get("error"):
+                    self.combo_dist_bandas.addItem(datos_ok["nombre"], clave_ok)
+            self.combo_dist_bandas.blockSignals(False)
 
             if mejor is None:
                 QMessageBox.warning(self, "Sin ajuste válido",

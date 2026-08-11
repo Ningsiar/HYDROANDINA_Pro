@@ -1123,6 +1123,121 @@ def mejor_ajuste(resultados_analisis: Dict[str, dict], solo_ks: bool = False) ->
     return min(validos, key=lambda k: (-_cuenta_pruebas_pasadas(validos[k]), validos[k]["D_ks"]))
 
 
+# ---------------------------------------------------------------------
+# Bandas de confianza por bootstrap
+# ---------------------------------------------------------------------
+# POR QUÉ HACEN FALTA: el análisis de frecuencia devuelve un único valor
+# de P24 para cada periodo de retorno (p.ej. "142.7 mm para Tr=100
+# años") y esa cifra se traslada tal cual al caudal de diseño y al
+# dimensionamiento de la obra, como si fuera exacta. No lo es: se estimó
+# a partir de una muestra de 20-40 años, y con otra muestra igual de
+# válida de la misma población habría salido distinta. La incertidumbre
+# crece además con el periodo de retorno -- extrapolar a Tr=500 años con
+# 30 datos es mucho más incierto que estimar Tr=5 años.
+#
+# El bootstrap cuantifica esa incertidumbre sin suponer nada sobre la
+# distribución del estimador: se remuestrea la serie observada CON
+# REPOSICIÓN muchas veces, se reajusta la distribución en cada
+# remuestreo, y se toman los percentiles de los cuantiles obtenidos.
+# Es un intervalo de confianza de tipo percentil (Efron, 1979).
+#
+# LÍMITE IMPORTANTE: el bootstrap mide la incertidumbre MUESTRAL (por
+# tener pocos datos), NO el error por haber elegido una distribución
+# equivocada. Si la distribución no es la adecuada, la banda puede ser
+# estrecha y estar centrada en el valor incorrecto. Por eso conviene
+# leerla junto con las tres pruebas de bondad de ajuste, y comparar las
+# bandas de varias distribuciones entre sí.
+
+def bandas_confianza_bootstrap(datos: List[float], clave_distribucion: str,
+                                periodos_retorno: List[int] = None,
+                                n_remuestreos: int = 1000, nivel_confianza: float = 0.90,
+                                metodo: str = "momentos", semilla: int = 12345) -> dict:
+    """
+    Intervalos de confianza por bootstrap de percentiles para P24(Tr).
+
+    semilla: fija el generador aleatorio para que dos corridas con los
+    mismos datos den exactamente el mismo intervalo. Sin esto, el
+    usuario vería la banda cambiar ligeramente en cada clic sin haber
+    cambiado ningún dato, lo que resta confianza al resultado.
+    """
+    import random as _random
+
+    if metodo not in METODOS_AJUSTE:
+        raise ValueError(f"metodo debe ser uno de {list(METODOS_AJUSTE)}")
+    _, distribuciones = METODOS_AJUSTE[metodo]
+    if clave_distribucion not in distribuciones:
+        raise ValueError(f"Distribución desconocida: {clave_distribucion}")
+    if not (0.5 < nivel_confianza < 1.0):
+        raise ValueError("El nivel de confianza debe estar entre 0.5 y 1.0 (p.ej. 0.90 o 0.95).")
+
+    periodos_retorno = list(periodos_retorno or PERIODOS_RETORNO_DEFAULT)
+    func_ajuste = distribuciones[clave_distribucion]
+    n = len(datos)
+    if n < 5:
+        raise ValueError("Se necesitan al menos 5 datos para un bootstrap con sentido.")
+
+    rng = _random.Random(semilla)
+    # Cuantiles del ajuste sobre la muestra COMPLETA: es la estimación
+    # central que se reporta (no la media de los remuestreos, que estaría
+    # sesgada por los ajustes fallidos que se descartan más abajo).
+    dist_original = func_ajuste(datos)
+    estimacion_central = {tr: dist_original.cuantil(1.0 - 1.0 / tr) for tr in periodos_retorno}
+
+    cuantiles_por_tr = {tr: [] for tr in periodos_retorno}
+    fallidos = 0
+    for _ in range(n_remuestreos):
+        muestra = [datos[rng.randrange(n)] for _ in range(n)]
+        try:
+            dist = func_ajuste(muestra)
+            for tr in periodos_retorno:
+                cuantiles_por_tr[tr].append(dist.cuantil(1.0 - 1.0 / tr))
+        except Exception:
+            # Un remuestreo puede resultar degenerado (p.ej. todos los
+            # valores iguales, o un sesgo fuera del rango admisible) y no
+            # dejar ajustar la distribución. Se descarta y se cuenta,
+            # informándolo: si fallan muchos, el intervalo no es fiable.
+            fallidos += 1
+            continue
+
+    alpha = 1.0 - nivel_confianza
+    limites = {}
+    for tr in periodos_retorno:
+        valores = sorted(cuantiles_por_tr[tr])
+        if len(valores) < 20:
+            limites[tr] = {"inferior": None, "superior": None, "central": estimacion_central[tr],
+                            "n_validos": len(valores)}
+            continue
+        idx_inf = max(0, int(math.floor((alpha / 2.0) * len(valores))))
+        idx_sup = min(len(valores) - 1, int(math.ceil((1.0 - alpha / 2.0) * len(valores))) - 1)
+        limites[tr] = {
+            "inferior": round(valores[idx_inf], 3),
+            "superior": round(valores[idx_sup], 3),
+            "central": round(estimacion_central[tr], 3),
+            "amplitud": round(valores[idx_sup] - valores[idx_inf], 3),
+            "amplitud_relativa_pct": round(
+                (valores[idx_sup] - valores[idx_inf]) / estimacion_central[tr] * 100.0, 2
+            ) if estimacion_central[tr] else None,
+            "n_validos": len(valores),
+        }
+
+    return {
+        "distribucion": clave_distribucion,
+        "nombre_distribucion": dist_original.nombre,
+        "metodo_ajuste": metodo,
+        "nivel_confianza": nivel_confianza,
+        "n_remuestreos": n_remuestreos,
+        "n_remuestreos_fallidos": fallidos,
+        "n_datos": n,
+        "periodos_retorno": periodos_retorno,
+        "limites": limites,
+        "advertencia_fallidos": (
+            f"{fallidos} de {n_remuestreos} remuestreos ({fallidos / n_remuestreos * 100:.1f}%) no "
+            "pudieron ajustarse y se descartaron; con esta proporción el intervalo pierde fiabilidad."
+            if fallidos > n_remuestreos * 0.05 else None
+        ),
+    }
+
+
 PERIODOS_RETORNO_DEFAULT = [2, 5, 10, 25, 50, 100, 250, 500, 1000]
 
 

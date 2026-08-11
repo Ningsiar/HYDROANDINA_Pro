@@ -61,6 +61,64 @@ class FrequencyCanvas(FigureCanvas):
         self.fig.tight_layout()
         self.draw()
 
+    def plot_bandas_confianza(self, bandas: dict, datos_observados=None, escala_log: bool = True):
+        """
+        Curva de frecuencia P24 vs. Tr con la BANDA DE CONFIANZA por
+        bootstrap sombreada alrededor.
+
+        bandas: dict devuelto por
+            frequency_analysis.bandas_confianza_bootstrap().
+        datos_observados: serie observada opcional; si se pasa, se
+            dibujan sus puntos con posición de graficación de Weibull
+            (i/(n+1)), para ver dónde caen los datos reales respecto de
+            la banda -- que es lo que permite juzgar si el ajuste es
+            creíble en el rango donde SÍ hay observaciones.
+        """
+        self.ax.clear()
+        trs = sorted(bandas["limites"].keys())
+        central = [bandas["limites"][tr]["central"] for tr in trs]
+        inferiores = [bandas["limites"][tr]["inferior"] for tr in trs]
+        superiores = [bandas["limites"][tr]["superior"] for tr in trs]
+
+        if all(v is not None for v in inferiores + superiores):
+            self.ax.fill_between(
+                trs, inferiores, superiores, alpha=0.22, color="#1F3864",
+                label=f"Banda de confianza {bandas['nivel_confianza']:.0%} "
+                      f"({bandas['n_remuestreos']} remuestreos bootstrap)")
+            self.ax.plot(trs, inferiores, linestyle=":", linewidth=1.0, color="#1F3864")
+            self.ax.plot(trs, superiores, linestyle=":", linewidth=1.0, color="#1F3864")
+
+        self.ax.plot(trs, central, "-o", linewidth=2.2, markersize=4.5, color="#B3261E",
+                     label=f"Estimación central — {bandas['nombre_distribucion']}")
+
+        if datos_observados:
+            x = sorted(datos_observados)
+            n = len(x)
+            # Posición de graficación de Weibull: F = i/(n+1), Tr = 1/(1-F).
+            tr_obs, p_obs = [], []
+            for i, valor in enumerate(x, start=1):
+                f = i / (n + 1.0)
+                if f < 1.0:
+                    tr_obs.append(1.0 / (1.0 - f))
+                    p_obs.append(valor)
+            self.ax.plot(tr_obs, p_obs, "s", markersize=4, color="#2E7D32",
+                         label=f"Datos observados (n={n}, posición de Weibull)")
+
+        if escala_log:
+            self.ax.set_xscale("log")
+            self.ax.set_xlabel("Periodo de retorno Tr (años, escala log)")
+        else:
+            self.ax.set_xscale("linear")
+            self.ax.set_xlabel("Periodo de retorno Tr (años)")
+        self.ax.set_ylabel("Pmax 24h de diseño (mm)")
+        self.ax.set_title(
+            f"Banda de confianza de la precipitación de diseño — {bandas['nombre_distribucion']}",
+            pad=12)
+        self.ax.legend(fontsize=7.5, loc="upper left", framealpha=0.9)
+        self.ax.grid(True, which="both", linestyle=":", linewidth=0.5)
+        self.fig.tight_layout()
+        self.draw()
+
     def plot_comparacion_tr(self, tabla_comparacion: dict, resultados_analisis: dict, mejor_clave,
                              escala_log: bool = True):
         """
