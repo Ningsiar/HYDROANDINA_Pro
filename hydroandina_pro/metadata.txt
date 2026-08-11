@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.2.51
+version=0.2.52
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,46 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.2.52: la Pestaña 3 pasa a llamarse "Métodos de pérdida SCS-CN / Horton / Green-Ampt / otros" y
+      concentra ahora SEIS modelos de perdidas con graficos, quedando disponibles en el desplegable de
+      la Pestaña 7 para restarlos del hietograma en el calculo del caudal.
+      METODOS NUEVOS (se suman a Green-Ampt y Horton de la v0.2.51): PHILIP (1957), solucion analitica
+      simplificada de Richards que separa la fase capilar (sorptividad S) de la gravitacional (A) -- su
+      inversion de F(t) es analitica por ser cuadratica en sqrt(t), verificada con error de 1e-16;
+      KOSTIAKOV (1932) y KOSTIAKOV-LEWIS, con el defecto conocido del original documentado y demostrado
+      (con b<1 la capacidad tiende a CERO al crecer t, fisicamente imposible: se midio 20.0 -> 8.9 ->
+      4.5 -> 2.0 mm/h a t=1, 5, 20 y 100 h, mientras la variante de Lewis se estabiliza en fc); y
+      HOLTAN (USDA-HL), el unico de los seis cuya capacidad depende del ALMACENAMIENTO disponible en la
+      zona radicular y no del tiempo ni de la infiltracion acumulada, por lo que es tambien el unico
+      que representa la RECUPERACION de capacidad entre eventos (verificado: 60.6 -> 27.1 -> 60.6 mm/h
+      antes, durante y despues de una pausa seca).
+      *** ERROR DE UNIDADES DETECTADO Y CORREGIDO EN HOLTAN ***: la ecuacion original esta formulada en
+      pulgadas (SA en pulgadas, "a" en el rango 0.1-1.0 de la bibliografia). Introduciendo SA en
+      milimetros el termino SA^1.4 explota: con SA=80 mm y a=25 la capacidad salia 9243 mm/h, un valor
+      imposible -- el mismo tipo de trampa que las constantes "por centimetro" de SCS/Snyder corregidas
+      en la v0.2.44 y que el factor 1000 de Alekseev advertido en la v0.2.47. Ahora el termino potencial
+      se evalua internamente en pulgadas y se reconvierte, de modo que el usuario ingresa SA en mm y "a"
+      conserva su rango bibliografico; ademas se agrego una guarda que rechaza a > 3.0 explicando por
+      que no hay que inflarlo para compensar unidades.
+      Los seis modelos verifican balance de masa exacto (infiltracion + lluvia efectiva = lluvia total,
+      error 0.0e+00). Nuevo ui/infiltration_canvas.py con dos graficos: el hietograma separado en barras
+      apiladas (infiltrado vs. efectiva) con la curva de capacidad y la intensidad superpuestas y el
+      instante de encharcamiento marcado; y la comparacion de todos los modelos (lluvia efectiva
+      acumulada y barras del total). Un boton compara los seis de una vez, incluyendo el numero de curva
+      si ya se calculo, y reporta la dispersion entre ellos como medida aproximada de la incertidumbre
+      del Qp por la eleccion del modelo.
+      La Pestaña 7 ya no duplica los controles: su desplegable de perdidas ofrece los seis modelos y
+      toma los parametros de la Pestaña 3, para que no existan dos juegos de campos que puedan divergir
+      sin que el usuario sepa cual se aplica.
+      CORRECCION DE INTERFAZ: el encabezado "Caudal observado (m3/s)" de la tabla de separacion de flujo
+      base (Pestaña 7) salia cortado con puntos suspensivos porque la tabla tenia un ancho maximo fijo
+      de 260 px. Ahora el ancho minimo se calcula midiendo el texto real del encabezado con la metrica
+      de la fuente, mas margen para el indicador de orden y el borde.
+      PENDIENTE DECLARADO: la ecuacion de Richards 1D solicitada NO se incluye en esta version. Es una
+      EDP no lineal que requiere un solucionador numerico (retencion de van Genuchten y formulacion
+      conservativa de Celia et al. 1990) y su validacion exige contrastar contra soluciones analiticas
+      conocidas; una implementacion sutilmente incorrecta produce resultados de aspecto plausible pero
+      erroneos, asi que se deja para un desarrollo dedicado en vez de apurarla.
     - v0.2.51: MODELOS DE INFILTRACION GREEN-AMPT Y HORTON (nuevo core/infiltration.py) como
       alternativa al numero de curva SCS para calcular las perdidas, seleccionables desde la Pestaña 7
       junto al calculo del hidrograma. No son metodos de caudal: son el eslabon que convierte el

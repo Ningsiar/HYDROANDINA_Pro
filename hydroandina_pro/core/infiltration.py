@@ -335,6 +335,277 @@ def infiltracion_horton(hietograma_mm: Sequence[float], dt_h: float,
 
 
 # ---------------------------------------------------------------------
+# PHILIP (1957)
+# ---------------------------------------------------------------------
+def infiltracion_philip(hietograma_mm: Sequence[float], dt_h: float,
+                         sorptividad_mm_h05: float, factor_gravedad_a_mm_h: float,
+                         infiltracion_acumulada_inicial_mm: float = 0.0) -> dict:
+    """
+    Solución analítica simplificada de la ecuación de Richards propuesta
+    por Philip (1957), que separa la infiltración en dos fases: la
+    dominada por la succión capilar (sorptividad) y la dominada por la
+    gravedad.
+
+        f(t) = (1/2)*S*t^(-1/2) + A          [capacidad, mm/h]
+        F(t) = S*t^(1/2) + A*t                [acumulada, mm]
+
+    S: sorptividad (mm/h^0.5), capacidad del suelo seco de absorber agua
+       por capilaridad.
+    A: factor de transmisibilidad por gravedad (mm/h); la bibliografía lo
+       estima entre 0.38 y 0.8 veces la conductividad saturada Ks.
+
+    Igual que en Horton, se avanza sobre la infiltración ACUMULADA y no
+    sobre el tiempo de reloj: se invierte F(t) para hallar el tiempo
+    equivalente al F ya infiltrado. Aquí la inversión SÍ es analítica,
+    porque F(t) = S*sqrt(t) + A*t es una cuadrática en sqrt(t):
+        sqrt(t) = (-S + sqrt(S^2 + 4*A*F)) / (2*A)
+    lo que evita cualquier iteración numérica.
+
+    OJO: f(t) diverge a infinito en t=0 (el término S/(2*sqrt(t))), así
+    que en el primer intervalo la capacidad se toma como la infiltración
+    acumulada del intervalo dividida por su duración -- que es el valor
+    medio correcto -- en vez de evaluar f en t=0.
+    """
+    serie = _validar_hietograma(hietograma_mm, dt_h)
+    if sorptividad_mm_h05 <= 0:
+        raise InfiltrationError("La sorptividad S debe ser mayor que 0.")
+    if factor_gravedad_a_mm_h <= 0:
+        raise InfiltrationError("El factor de gravedad A debe ser mayor que 0.")
+
+    s_sorp, a_grav = sorptividad_mm_h05, factor_gravedad_a_mm_h
+
+    def tiempo_equivalente(f_acum):
+        if f_acum <= 0:
+            return 0.0
+        raiz_t = (-s_sorp + math.sqrt(s_sorp * s_sorp + 4.0 * a_grav * f_acum)) / (2.0 * a_grav)
+        return max(raiz_t, 0.0) ** 2
+
+    f_acum = float(infiltracion_acumulada_inicial_mm)
+    infiltracion, escorrentia, capacidad = [], [], []
+    paso_encharcamiento = None
+
+    for indice, lluvia in enumerate(serie):
+        intensidad = lluvia / dt_h
+        t_eq = tiempo_equivalente(f_acum)
+        # Capacidad media a lo largo del intervalo, que es lo que se puede
+        # comparar con la intensidad media del mismo intervalo.
+        f_potencial = s_sorp * math.sqrt(t_eq + dt_h) + a_grav * (t_eq + dt_h)
+        cap_media = (f_potencial - f_acum) / dt_h
+        capacidad.append(round(cap_media, 4))
+
+        if lluvia <= 0:
+            infiltracion.append(0.0)
+            escorrentia.append(0.0)
+            continue
+
+        if intensidad <= cap_media:
+            infiltrado = lluvia
+        else:
+            infiltrado = min(f_potencial - f_acum, lluvia)
+            if paso_encharcamiento is None:
+                paso_encharcamiento = indice
+
+        infiltrado = max(infiltrado, 0.0)
+        f_acum += infiltrado
+        infiltracion.append(infiltrado)
+        escorrentia.append(lluvia - infiltrado)
+
+    return _resumen_infiltracion(
+        serie, infiltracion, escorrentia, capacidad, dt_h, "Philip (1957)",
+        {"S_sorptividad_mm_h05": sorptividad_mm_h05, "A_gravedad_mm_h": factor_gravedad_a_mm_h},
+        paso_encharcamiento)
+
+
+# ---------------------------------------------------------------------
+# KOSTIAKOV (1932) y KOSTIAKOV-LEWIS
+# ---------------------------------------------------------------------
+def infiltracion_kostiakov(hietograma_mm: Sequence[float], dt_h: float,
+                            coef_a: float, exponente_b: float,
+                            fc_mm_h: float = 0.0,
+                            infiltracion_acumulada_inicial_mm: float = 0.0) -> dict:
+    """
+    Kostiakov (1932) y su variante Kostiakov-Lewis.
+
+        Kostiakov:        F(t) = a*t^b        f(t) = a*b*t^(b-1)
+        Kostiakov-Lewis:  F(t) = a*t^b + fc*t  f(t) = a*b*t^(b-1) + fc
+
+    a y b son coeficientes empíricos de ensayos de infiltrómetro (a > 0,
+    0 < b < 1). fc = 0 da el Kostiakov estándar; fc > 0 da la variante de
+    Lewis, que evita el defecto conocido del original: con b<1 la
+    capacidad f(t) tiende a CERO cuando t crece, lo que es físicamente
+    imposible -- ningún suelo deja de infiltrar por completo. Por eso, si
+    la tormenta es larga, la variante de Lewis es la recomendable.
+
+    La inversión de F(t) para obtener el tiempo equivalente es analítica
+    cuando fc = 0 (t = (F/a)^(1/b)); con fc > 0 se resuelve por
+    Newton-Raphson, igual que en Horton.
+    """
+    serie = _validar_hietograma(hietograma_mm, dt_h)
+    if coef_a <= 0:
+        raise InfiltrationError("El coeficiente a de Kostiakov debe ser mayor que 0.")
+    if not (0.0 < exponente_b < 1.0):
+        raise InfiltrationError(
+            "El exponente b de Kostiakov debe estar entre 0 y 1 (fuera de ese rango la capacidad de "
+            "infiltración no decaería, que es justamente lo que el método modela).")
+    if fc_mm_h < 0:
+        raise InfiltrationError("La tasa final fc no puede ser negativa.")
+
+    def tiempo_equivalente(f_acum):
+        if f_acum <= 0:
+            return 0.0
+        if fc_mm_h <= 0:
+            return (f_acum / coef_a) ** (1.0 / exponente_b)
+        t = (f_acum / (coef_a + fc_mm_h)) ** (1.0 / exponente_b)
+        for _ in range(60):
+            valor = coef_a * (t ** exponente_b) + fc_mm_h * t - f_acum
+            derivada = coef_a * exponente_b * (t ** (exponente_b - 1.0)) + fc_mm_h if t > 0 else fc_mm_h
+            if abs(derivada) < 1e-14:
+                break
+            paso = valor / derivada
+            t -= paso
+            if t < 0:
+                t = 1e-12
+            if abs(paso) < 1e-10:
+                break
+        return max(t, 0.0)
+
+    f_acum = float(infiltracion_acumulada_inicial_mm)
+    infiltracion, escorrentia, capacidad = [], [], []
+    paso_encharcamiento = None
+
+    for indice, lluvia in enumerate(serie):
+        intensidad = lluvia / dt_h
+        t_eq = tiempo_equivalente(f_acum)
+        f_potencial = coef_a * ((t_eq + dt_h) ** exponente_b) + fc_mm_h * (t_eq + dt_h)
+        cap_media = (f_potencial - f_acum) / dt_h
+        capacidad.append(round(cap_media, 4))
+
+        if lluvia <= 0:
+            infiltracion.append(0.0)
+            escorrentia.append(0.0)
+            continue
+
+        if intensidad <= cap_media:
+            infiltrado = lluvia
+        else:
+            infiltrado = min(f_potencial - f_acum, lluvia)
+            if paso_encharcamiento is None:
+                paso_encharcamiento = indice
+
+        infiltrado = max(infiltrado, 0.0)
+        f_acum += infiltrado
+        infiltracion.append(infiltrado)
+        escorrentia.append(lluvia - infiltrado)
+
+    nombre = "Kostiakov-Lewis" if fc_mm_h > 0 else "Kostiakov (1932)"
+    return _resumen_infiltracion(
+        serie, infiltracion, escorrentia, capacidad, dt_h, nombre,
+        {"a": coef_a, "b": exponente_b, "fc_mm_h": fc_mm_h}, paso_encharcamiento)
+
+
+# ---------------------------------------------------------------------
+# HOLTAN (USDA-HL)
+# ---------------------------------------------------------------------
+def infiltracion_holtan(hietograma_mm: Sequence[float], dt_h: float,
+                         coef_a: float, indice_crecimiento_gi: float,
+                         almacenamiento_disponible_mm: float, fc_mm_h: float,
+                         exponente_d: float = 1.4,
+                         tasa_drenaje_profundo_mm_h: float = None) -> dict:
+    """
+    Holtan (USDA-HL): a diferencia de los métodos anteriores, la
+    capacidad de infiltración NO depende del tiempo ni de la
+    infiltración acumulada, sino del ALMACENAMIENTO DISPONIBLE que
+    todavía queda en la zona radicular:
+
+        f = a * GI * SA^d + fc
+
+    a: índice de cobertura vegetal/superficie.
+    GI: índice de crecimiento de la planta (0-1 según la etapa fenológica).
+    SA: almacenamiento disponible en la zona de raíces (mm de poros aún
+        no llenos). Es la VARIABLE DE ESTADO: disminuye conforme infiltra
+        agua y se recupera por drenaje profundo.
+    d: exponente empírico (típicamente 1.4).
+    fc: infiltración final constante.
+
+    Esta formulación tiene una consecuencia importante y deseable: cuando
+    el suelo se satura (SA → 0) la capacidad cae a fc, no a cero, y el
+    método representa de forma natural la RECUPERACIÓN de la capacidad
+    entre eventos, que Horton y Philip no capturan (en ellos la capacidad
+    solo puede decaer). La recuperación se modela drenando el perfil a la
+    tasa `tasa_drenaje_profundo_mm_h` (por defecto igual a fc).
+
+    *** ATENCIÓN A LAS UNIDADES (trampa detectada al validar) ***
+    La ecuación original de Holtan está formulada en el sistema inglés:
+    f en pulgadas/hora y SA en PULGADAS de almacenamiento disponible, con
+    el coeficiente "a" en el rango 0.1-1.0 que da la bibliografía.
+    Introducir SA directamente en milímetros hace explotar el término
+    SA^1.4: con SA=80 mm y a=25 la capacidad salía 9243 mm/h, un valor
+    físicamente imposible (mismo tipo de error de unidades que las
+    constantes "por centímetro" de SCS/Snyder corregidas en la v0.2.44).
+    Aquí el término potencial se evalúa internamente en PULGADAS y el
+    resultado se reconvierte a mm/h, de modo que el usuario ingresa SA en
+    mm (coherente con el resto del plugin) y "a" conserva el rango
+    bibliográfico de 0.1-1.0. fc se maneja directamente en mm/h.
+    """
+    serie = _validar_hietograma(hietograma_mm, dt_h)
+    if coef_a <= 0:
+        raise InfiltrationError("El coeficiente a de Holtan debe ser mayor que 0.")
+    if coef_a > 3.0:
+        raise InfiltrationError(
+            f"El coeficiente a de Holtan vale {coef_a}, muy por encima del rango bibliográfico "
+            "(0.1-1.0). Recuerde que en esta implementación el término potencial se evalúa en "
+            "pulgadas, como en la formulación original, así que 'a' conserva su rango clásico: no "
+            "hay que inflarlo para compensar unidades."
+        )
+    if not (0.0 < indice_crecimiento_gi <= 1.0):
+        raise InfiltrationError("El índice de crecimiento GI debe estar entre 0 y 1.")
+    if almacenamiento_disponible_mm <= 0:
+        raise InfiltrationError("El almacenamiento disponible en la zona radicular debe ser mayor que 0.")
+    if fc_mm_h <= 0:
+        raise InfiltrationError("La infiltración final fc debe ser mayor que 0.")
+    if exponente_d <= 0:
+        raise InfiltrationError("El exponente d debe ser mayor que 0.")
+
+    drenaje = fc_mm_h if tasa_drenaje_profundo_mm_h is None else tasa_drenaje_profundo_mm_h
+    sa_total = float(almacenamiento_disponible_mm)
+    sa = sa_total
+    infiltracion, escorrentia, capacidad = [], [], []
+    paso_encharcamiento = None
+
+    MM_POR_PULGADA = 25.4
+    for indice, lluvia in enumerate(serie):
+        intensidad = lluvia / dt_h
+        # El término potencial se evalúa en PULGADAS (formulación original
+        # de Holtan) y se reconvierte a mm/h; fc ya viene en mm/h.
+        sa_pulgadas = max(sa, 0.0) / MM_POR_PULGADA
+        cap = (coef_a * indice_crecimiento_gi * (sa_pulgadas ** exponente_d)) * MM_POR_PULGADA + fc_mm_h
+        capacidad.append(round(cap, 4))
+
+        infiltrado = min(lluvia, cap * dt_h) if lluvia > 0 else 0.0
+        # La infiltración tampoco puede exceder el espacio disponible más
+        # lo que drena en el intervalo: sin este tope el suelo aceptaría
+        # más agua de la que físicamente cabe.
+        infiltrado = min(infiltrado, max(sa, 0.0) + drenaje * dt_h)
+        infiltrado = max(infiltrado, 0.0)
+        if lluvia > 0 and infiltrado < lluvia - 1e-12 and paso_encharcamiento is None:
+            paso_encharcamiento = indice
+
+        # Actualización del almacenamiento: se llena con lo infiltrado y se
+        # recupera por drenaje profundo, sin superar nunca su capacidad.
+        sa = min(sa - infiltrado + drenaje * dt_h, sa_total)
+        sa = max(sa, 0.0)
+
+        infiltracion.append(infiltrado)
+        escorrentia.append(max(lluvia - infiltrado, 0.0))
+
+    return _resumen_infiltracion(
+        serie, infiltracion, escorrentia, capacidad, dt_h, "Holtan (USDA-HL)",
+        {"a": coef_a, "GI": indice_crecimiento_gi, "SA_inicial_mm": almacenamiento_disponible_mm,
+         "d": exponente_d, "fc_mm_h": fc_mm_h, "drenaje_profundo_mm_h": drenaje},
+        paso_encharcamiento)
+
+
+# ---------------------------------------------------------------------
 # RESUMEN Y COMPARACIÓN
 # ---------------------------------------------------------------------
 def _resumen_infiltracion(lluvia_total: List[float], infiltracion: List[float],
