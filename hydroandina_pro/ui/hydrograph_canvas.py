@@ -82,6 +82,64 @@ class HydrographCanvas(FigureCanvas):
         "Aforo indirecto": "#0E7490",
     }
 
+    def plot_transito(self, tiempos_h, caudal_entrada, caudal_salida, metodo,
+                       qp_entrada, qp_salida, atenuacion_pct, retardo_h,
+                       almacenamiento_m3=None):
+        """
+        Hidrograma de ENTRADA vs. SALIDA de un tránsito de avenidas, con
+        la atenuación del pico y el retardo anotados. Si se pasa el
+        almacenamiento (tránsito en vaso por Puls), se dibuja en un eje
+        secundario para ver cómo el embalse se llena y se vacía.
+        """
+        self.fig.clear()
+        self.ax = self.fig.add_subplot(111)
+
+        n = min(len(tiempos_h), len(caudal_entrada), len(caudal_salida))
+        t = list(tiempos_h[:n])
+        qe = list(caudal_entrada[:n])
+        qs = list(caudal_salida[:n])
+
+        self.ax.plot(t, qe, linewidth=2.0, color="#B3261E", label="Entrada al tramo")
+        self.ax.plot(t, qs, linewidth=2.0, color="#1F3864", label="Salida (transitado)")
+        # El área entre ambas curvas es, visualmente, la atenuación.
+        self.ax.fill_between(t, qs, qe, where=[a >= b for a, b in zip(qe, qs)],
+                              alpha=0.15, color="#B3261E", interpolate=True)
+        self.ax.fill_between(t, qs, alpha=0.10, color="#1F3864")
+
+        idx_e = qe.index(max(qe))
+        idx_s = qs.index(max(qs))
+        self.ax.plot([t[idx_e]], [qe[idx_e]], "o", color="#B3261E", markersize=5)
+        self.ax.plot([t[idx_s]], [qs[idx_s]], "o", color="#1F3864", markersize=5)
+        self.ax.annotate(
+            f"Atenuación: {atenuacion_pct:.1f}%\nRetardo: {retardo_h:.2f} h\n"
+            f"{qp_entrada:.1f} → {qp_salida:.1f} m³/s",
+            xy=(t[idx_s], qs[idx_s]), textcoords="offset points", xytext=(14, -6), fontsize=8.5,
+            bbox=dict(boxstyle="round,pad=0.35", fc="white", ec="#999999", alpha=0.88),
+        )
+
+        self.ax.set_xlabel("Tiempo (h)")
+        self.ax.set_ylabel("Caudal (m³/s)")
+        self.ax.set_ylim(0, max(max(qe), max(qs)) * 1.22)
+        self.ax.grid(True, linestyle=":", linewidth=0.5)
+        self.ax.set_title(f"Tránsito de avenida — {metodo}", pad=12)
+
+        if almacenamiento_m3:
+            almacenado = list(almacenamiento_m3[:n])
+            ax2 = self.ax.twinx()
+            ax2.plot(t[:len(almacenado)], [s / 1e6 for s in almacenado],
+                     linestyle="--", linewidth=1.4, color="#2E7D32", label="Almacenamiento")
+            ax2.set_ylabel("Almacenamiento (hm³)", color="#2E7D32")
+            ax2.tick_params(axis="y", labelcolor="#2E7D32")
+            ax2.set_ylim(0, max(almacenado) / 1e6 * 1.25 if max(almacenado) > 0 else 1)
+            lineas1, etiquetas1 = self.ax.get_legend_handles_labels()
+            lineas2, etiquetas2 = ax2.get_legend_handles_labels()
+            self.ax.legend(lineas1 + lineas2, etiquetas1 + etiquetas2, fontsize=8, loc="upper right")
+        else:
+            self.ax.legend(fontsize=8.5, loc="upper right")
+
+        self.fig.tight_layout()
+        self.draw()
+
     def plot_comparacion_metodos(self, nombres, valores, titulo="Comparación de métodos de caudal máximo",
                                   familias=None, umbral_horizontal=9):
         """Gráfico de barras comparando el Qp obtenido por distintos

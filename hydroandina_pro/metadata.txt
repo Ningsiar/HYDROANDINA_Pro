@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.2.48
+version=0.2.49
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,42 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.2.49: TRANSITO DE AVENIDAS (item 7) -- nuevo modulo core/flood_routing.py y nueva seccion en la
+      Pestaña 7. El hidrograma que calcula esa pestaña corresponde a la SALIDA DE LA CUENCA; si la obra
+      que se diseña esta aguas abajo (un puente kilometros mas abajo, una defensa riberena en otro tramo,
+      o aguas abajo de una laguna), usar ese caudal pico sin transitarlo SOBREESTIMA el caudal de diseno
+      porque ignora la atenuacion del almacenamiento del cauce o del vaso. Tres metodos:
+      MUSKINGUM clasico (K y X calibrados con hidrogramas observados), MUSKINGUM-CUNGE (deriva K y X de
+      la geometria e hidraulica del cauce -- ancho, pendiente, velocidad, longitud del tramo -- sin
+      necesidad de hidrogramas observados de entrada y salida, que rara vez existen en cuencas
+      altoandinas no aforadas; es por eso el metodo recomendado aqui) y PULS MODIFICADO para transito en
+      vaso a partir de la curva almacenamiento-descarga del embalse.
+      SUBDIVISION AUTOMATICA A NUMERO DE COURANT UNITARIO: aplicar K y X directamente sobre el tramo
+      completo es un error clasico que este modulo evita. En cauces de fuerte pendiente (los de este
+      plugin) X sale muy cerca de 0.5 y el esquema queda fuera de su rango de estabilidad: en las
+      pruebas llego a devolver un caudal de salida MAYOR que el de entrada (atenuacion de -0.94%), algo
+      fisicamente imposible porque un transito solo puede atenuar el pico, nunca amplificarlo. La
+      solucion implementada es dividir el tramo en subtramos y refinar el paso de tiempo de modo que el
+      numero de Courant valga exactamente 1: sustituyendo K = dt en las dos condiciones de estabilidad
+      del esquema (2KX <= dt <= 2K(1-X)), AMBAS se reducen a X <= 0.5, que se cumple siempre -- es decir,
+      con Courant unitario el esquema es incondicionalmente estable. La discretizacion se elige
+      aproximando K/dt por una fraccion N/f con denominador acotado.
+      VERIFICACION: (a) C0+C1+C2 = 1.000000000000 en todos los casos probados; (b) conservacion de
+      volumen por integracion trapezoidal -- un transito atenua el pico pero no crea ni destruye agua --
+      con error de 0.009-0.032% en Muskingum, 0.000-0.002% en Muskingum-Cunge y 0.097% en Puls;
+      (c) X=0.5 con dt en zona estable da traslacion pura EXACTA (atenuacion 0.000%, error de volumen
+      0.0000%), y X=0 (embalse lineal puro) da la maxima atenuacion, como predice la teoria;
+      (d) tras corregir un artefacto de submuestreo en la medicion del pico (el resumen se calculaba
+      sobre la serie diezmada y la fase del muestreo cambiaba con el numero de subtramos, haciendo
+      oscilar la atenuacion segun la paridad de N; ahora se mide sobre la serie fina), la atenuacion y
+      el retardo DUPLICAN exactamente al duplicar la longitud del tramo (0.14->0.28->0.56->1.08->2.03% y
+      0.333->0.667->1.333->2.667->5.333 h), como corresponde a un esquema lineal;
+      (e) el transito en vaso reproduce la firma teorica: el almacenamiento alcanza su maximo justo
+      donde se cruzan los hidrogramas de entrada y salida.
+      El modulo detecta y avisa ademas cuando la combinacion de K, X y dt cae fuera del rango de
+      estabilidad, cuando el X derivado de la hidraulica queda fuera de [0, 0.5] y hay que acotarlo,
+      cuando la crecida supera el rango de la curva del embalse (que suele significar desborde por
+      coronacion) y, como guarda final, cuando el caudal de salida superaria al de entrada.
     - v0.2.48: análisis de frecuencia (Pestaña 5) notablemente más riguroso — dos mejoras solicitadas
       (ítems 2 y 1 de la lista de mejoras) que además cambian el resultado en casos reales.
       (1) TRES PRUEBAS DE BONDAD DE AJUSTE en vez de una. Además de Kolmogorov-Smirnov se aplican ahora

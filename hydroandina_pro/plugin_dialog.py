@@ -35,7 +35,7 @@ from .core import (delineation, morphometry, curve_number, tc_methods, dem_downl
                     design_storm, precip_source, scs_storm_patterns, pour_point_snap,
                     main_channel, landcover_soils, dem_download_asf, hydraulic_structures,
                     cn_generator_bridge, report_generator, project_export,
-                    quality_control, pmp_hershfield, direct_discharge_methods,
+                    quality_control, pmp_hershfield, direct_discharge_methods, flood_routing,
                     data_completion, areal_precipitation, water_yield, scour, soil_loss,
                     sediment_transport, debris_flow, climate_change, mean_flow_models, etp_methods,
                     low_flows, phabsim, groundwater_flow, well_hydraulics, idf_curves)
@@ -323,6 +323,7 @@ class HydroAndinaProDialog(QDialog):
         self.resultados_frecuencia = {}
         self.mejor_ajuste_clave = None
         self.metodo_ajuste_usado = "momentos_l"
+        self.transito_resultado = {}
         self.p24_disenio = {}
         self.periodos_retorno_actuales = []
         self.idf_resultados = {}  # curvas/ecuaciones IDF derivadas de p24_disenio (pestaña 5)
@@ -3364,6 +3365,149 @@ class HydroAndinaProDialog(QDialog):
         self.canvas_hidrograma = HydrographCanvas(self, width=6.5, height=4.8)
         v.addWidget(self.canvas_hidrograma)
 
+        # ---------------- Tránsito de avenidas ----------------
+        gb_transito = QGroupBox("Tránsito de avenidas (propagación del hidrograma aguas abajo)")
+        v_tr = QVBoxLayout(gb_transito)
+        lbl_tr_info = QLabel(
+            "El hidrograma calculado arriba corresponde a la <b>salida de la cuenca</b>. Si la obra que "
+            "está diseñando se ubica aguas abajo de ese punto — un puente varios kilómetros más abajo, "
+            "una defensa ribereña en otro tramo, o aguas abajo de una laguna — usar ese caudal pico sin "
+            "transitarlo <b>sobreestima el caudal de diseño</b>, porque ignora la atenuación que produce "
+            "el almacenamiento del propio cauce o del vaso. <b>Muskingum-Cunge</b> es el método "
+            "recomendado aquí porque deriva sus parámetros de la geometría e hidráulica del cauce, sin "
+            "necesidad de calibrarlos con hidrogramas observados de entrada y salida (que rara vez "
+            "existen en cuencas altoandinas). <b>Puls</b> es para tránsito en vaso/laguna. Son tránsitos "
+            "hidrológicos: no resuelven Saint-Venant completo, así que no representan remanso ni flujo "
+            "rápidamente variado — para eso hace falta un modelo hidrodinámico (HEC-RAS unsteady, Iber)."
+        )
+        lbl_tr_info.setWordWrap(True)
+        v_tr.addWidget(lbl_tr_info)
+
+        h_tr_metodo = QHBoxLayout()
+        h_tr_metodo.addWidget(QLabel("Método:"))
+        self.combo_metodo_transito = QComboBox()
+        self.combo_metodo_transito.addItem("Muskingum-Cunge (recomendado)", "muskingum_cunge")
+        self.combo_metodo_transito.addItem("Muskingum (K y X conocidos)", "muskingum")
+        self.combo_metodo_transito.addItem("Puls modificado (tránsito en vaso)", "puls")
+        self.combo_metodo_transito.currentIndexChanged.connect(self._on_cambiar_metodo_transito)
+        h_tr_metodo.addWidget(self.combo_metodo_transito)
+        h_tr_metodo.addStretch()
+        v_tr.addLayout(h_tr_metodo)
+
+        self.stack_transito = QStackedWidget()
+
+        # --- Página Muskingum-Cunge ---
+        pag_mc = QWidget()
+        f_mc = QFormLayout(pag_mc)
+        f_mc.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.spin_tr_longitud = QDoubleSpinBox()
+        self.spin_tr_longitud.setRange(10.0, 500000.0)
+        self.spin_tr_longitud.setDecimals(1)
+        self.spin_tr_longitud.setValue(5000.0)
+        f_mc.addRow("Longitud del tramo a transitar Δx (m):", self.spin_tr_longitud)
+        self.spin_tr_ancho = QDoubleSpinBox()
+        self.spin_tr_ancho.setRange(0.5, 5000.0)
+        self.spin_tr_ancho.setValue(25.0)
+        f_mc.addRow("Ancho superficial del cauce B (m):", self.spin_tr_ancho)
+        self.spin_tr_pendiente = QDoubleSpinBox()
+        self.spin_tr_pendiente.setRange(0.0001, 0.5)
+        self.spin_tr_pendiente.setDecimals(4)
+        self.spin_tr_pendiente.setValue(0.0200)
+        f_mc.addRow("Pendiente del fondo S₀ (m/m):", self.spin_tr_pendiente)
+        self.spin_tr_velocidad = QDoubleSpinBox()
+        self.spin_tr_velocidad.setRange(0.1, 20.0)
+        self.spin_tr_velocidad.setDecimals(3)
+        self.spin_tr_velocidad.setValue(2.500)
+        f_mc.addRow("Velocidad media del flujo V (m/s):", self.spin_tr_velocidad)
+        self.stack_transito.addWidget(pag_mc)
+
+        # --- Página Muskingum clásico ---
+        pag_mk = QWidget()
+        f_mk = QFormLayout(pag_mk)
+        f_mk.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.spin_tr_k = QDoubleSpinBox()
+        self.spin_tr_k.setRange(0.01, 500.0)
+        self.spin_tr_k.setDecimals(3)
+        self.spin_tr_k.setValue(2.000)
+        f_mk.addRow("K — tiempo de viaje de la onda (h):", self.spin_tr_k)
+        self.spin_tr_x = QDoubleSpinBox()
+        self.spin_tr_x.setRange(0.0, 0.5)
+        self.spin_tr_x.setDecimals(3)
+        self.spin_tr_x.setSingleStep(0.05)
+        self.spin_tr_x.setValue(0.200)
+        f_mk.addRow("X — factor de ponderación (0 = máxima atenuación, 0.5 = traslación pura):",
+                     self.spin_tr_x)
+        lbl_mk_aviso = QLabel(
+            "Requiere K y X calibrados con hidrogramas OBSERVADOS de entrada y salida del tramo. Si no "
+            "los tiene, use Muskingum-Cunge, que los deriva de la geometría del cauce. El plugin avisa "
+            "si la combinación de K, X y el Δt del hidrograma cae fuera del rango de estabilidad "
+            "numérica (2·K·X ≤ Δt ≤ 2·K·(1−X)), donde el método puede dar oscilaciones sin sentido físico."
+        )
+        lbl_mk_aviso.setWordWrap(True)
+        f_mk.addRow(lbl_mk_aviso)
+        self.stack_transito.addWidget(pag_mk)
+
+        # --- Página Puls ---
+        pag_puls = QWidget()
+        v_puls = QVBoxLayout(pag_puls)
+        lbl_puls = QLabel(
+            "Curva del embalse: una fila por punto, con el almacenamiento (m³) y la descarga (m³/s) "
+            "que le corresponde. Debe cubrir hasta el nivel máximo esperado — si la crecida supera el "
+            "último punto tabulado, el plugin lo advierte (normalmente significa que el vaso "
+            "desbordaría por coronación)."
+        )
+        lbl_puls.setWordWrap(True)
+        v_puls.addWidget(lbl_puls)
+        self.tabla_curva_embalse = TablaPegable(6, 2)
+        self.tabla_curva_embalse.setHorizontalHeaderLabels(["Almacenamiento (m³)", "Descarga (m³/s)"])
+        for _fila, (_s, _o) in enumerate(
+                [(0, 0), (200000, 5), (500000, 20), (900000, 45), (1400000, 80), (2000000, 125)]):
+            self.tabla_curva_embalse.setItem(_fila, 0, QTableWidgetItem(str(_s)))
+            self.tabla_curva_embalse.setItem(_fila, 1, QTableWidgetItem(str(_o)))
+        limitar_ancho_tabla(self.tabla_curva_embalse, ancho_maximo=420)
+        ajustar_alto_tabla(self.tabla_curva_embalse, filas_visibles_max=10)
+        h_puls_tabla = QHBoxLayout()
+        h_puls_tabla.addWidget(self.tabla_curva_embalse)
+        h_puls_tabla.addStretch()
+        v_puls.addLayout(h_puls_tabla)
+        h_puls_btn = QHBoxLayout()
+        btn_puls_fila = QPushButton("Agregar fila")
+        btn_puls_fila.clicked.connect(
+            lambda: self.tabla_curva_embalse.insertRow(self.tabla_curva_embalse.rowCount()))
+        limitar_ancho_boton(btn_puls_fila)
+        h_puls_btn.addWidget(btn_puls_fila)
+        h_puls_btn.addStretch()
+        v_puls.addLayout(h_puls_btn)
+        f_puls = QFormLayout()
+        f_puls.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.spin_tr_s_inicial = QDoubleSpinBox()
+        self.spin_tr_s_inicial.setRange(0.0, 1e10)
+        self.spin_tr_s_inicial.setDecimals(1)
+        self.spin_tr_s_inicial.setValue(0.0)
+        f_puls.addRow("Almacenamiento inicial del vaso (m³):", self.spin_tr_s_inicial)
+        v_puls.addLayout(f_puls)
+        self.stack_transito.addWidget(pag_puls)
+
+        v_tr.addWidget(self.stack_transito)
+
+        h_tr_btn = QHBoxLayout()
+        btn_autocompletar_tr = QPushButton("Autocompletar con datos de la morfometría")
+        btn_autocompletar_tr.clicked.connect(self._on_autocompletar_transito)
+        limitar_ancho_boton(btn_autocompletar_tr)
+        h_tr_btn.addWidget(btn_autocompletar_tr)
+        btn_calc_tr = QPushButton("Transitar el hidrograma calculado arriba")
+        btn_calc_tr.clicked.connect(self._on_calcular_transito)
+        limitar_ancho_boton(btn_calc_tr)
+        h_tr_btn.addWidget(btn_calc_tr)
+        h_tr_btn.addStretch()
+        v_tr.addLayout(h_tr_btn)
+
+        self.tabla_resultado_transito = crear_tabla_parametros()
+        v_tr.addWidget(self.tabla_resultado_transito)
+        self.canvas_transito = HydrographCanvas(self, width=6.5, height=4.8)
+        v_tr.addWidget(self.canvas_transito)
+        v.addWidget(gb_transito)
+
         gb_directos = QGroupBox(
             "Verificación cruzada — fórmulas de caudal máximo DIRECTO (Racional, Témez, Mac Math, "
             "Creager), para comparar contra el caudal SCS/Snyder/Clark de arriba"
@@ -3988,6 +4132,142 @@ class HydroAndinaProDialog(QDialog):
                 self._actualizar_texto_resumen_hidraulica()
         except direct_discharge_methods.DirectDischargeError as e:
             QMessageBox.warning(self, "No se pudo calcular", str(e))
+
+    def _on_cambiar_metodo_transito(self):
+        self.stack_transito.setCurrentIndex(self.combo_metodo_transito.currentIndex())
+
+    def _on_autocompletar_transito(self):
+        mensajes = []
+        if self.morfometria_resultados.get("lc_km"):
+            # Por defecto se propone transitar la mitad del cauce principal:
+            # es un valor de arranque razonable cuando la obra está aguas
+            # abajo, pero el usuario debe ajustarlo a su caso concreto.
+            longitud_m = self.morfometria_resultados["lc_km"] * 1000.0 * 0.5
+            self.spin_tr_longitud.setValue(longitud_m)
+            mensajes.append(f"Longitud del tramo = {longitud_m:.0f} m (la mitad del cauce principal; ajústela).")
+        g3 = self.morfometria_resultados.get("g3")
+        if g3 and g3.get("Se"):
+            self.spin_tr_pendiente.setValue(g3["Se"])
+            mensajes.append(f"Pendiente del fondo = {g3['Se']:.4f} m/m (pendiente Se del cauce, pestaña 2).")
+        elif self.morfometria_resultados.get("g4"):
+            pendiente = self.morfometria_resultados["g4"]["S_cuenca_pct"] / 100.0
+            self.spin_tr_pendiente.setValue(pendiente)
+            mensajes.append(f"Pendiente = {pendiente:.4f} m/m (pendiente media de la cuenca).")
+        if not mensajes:
+            QMessageBox.warning(self, "Nada que autocompletar",
+                                 "Calcule primero la morfometría en la pestaña 2.")
+            return
+        QMessageBox.information(
+            self, "Autocompletado",
+            "Se autocompletó:\n- " + "\n- ".join(mensajes) +
+            "\n\nEl ancho superficial y la velocidad media debe ingresarlos usted (mídalos en campo o "
+            "tómelos del dimensionamiento hidráulico de la pestaña 8)."
+        )
+
+    def _on_calcular_transito(self):
+        if not self.hidrograma_resultado:
+            QMessageBox.warning(
+                self, "Falta el hidrograma",
+                "Calcule primero el hidrograma de crecida en esta misma pestaña: el tránsito propaga "
+                "ese hidrograma aguas abajo."
+            )
+            return
+        try:
+            entrada = self.hidrograma_resultado["caudal_m3s"]
+            dt_h = self.spin_dt_h.value()
+            metodo = self.combo_metodo_transito.currentData()
+
+            if metodo == "muskingum_cunge":
+                resultado = flood_routing.transitar_muskingum_cunge(
+                    entrada, dt_h,
+                    caudal_referencia_m3_s=self.hidrograma_resultado["caudal_pico_m3s"],
+                    ancho_superficial_m=self.spin_tr_ancho.value(),
+                    pendiente_fondo_m_m=self.spin_tr_pendiente.value(),
+                    longitud_tramo_m=self.spin_tr_longitud.value(),
+                    velocidad_media_m_s=self.spin_tr_velocidad.value(),
+                )
+            elif metodo == "muskingum":
+                resultado = flood_routing.transitar_muskingum(
+                    entrada, dt_h, k_horas=self.spin_tr_k.value(), x=self.spin_tr_x.value())
+            else:
+                almacenamientos, descargas = [], []
+                for fila in range(self.tabla_curva_embalse.rowCount()):
+                    it_s = self.tabla_curva_embalse.item(fila, 0)
+                    it_o = self.tabla_curva_embalse.item(fila, 1)
+                    if it_s and it_o and it_s.text().strip() and it_o.text().strip():
+                        try:
+                            almacenamientos.append(float(it_s.text().replace(",", ".")))
+                            descargas.append(float(it_o.text().replace(",", ".")))
+                        except ValueError:
+                            continue
+                if len(almacenamientos) < 2:
+                    QMessageBox.warning(
+                        self, "Curva del embalse incompleta",
+                        "Ingrese al menos 2 puntos válidos (almacenamiento y descarga) en la tabla.")
+                    return
+                resultado = flood_routing.transitar_puls(
+                    entrada, dt_h, almacenamientos, descargas,
+                    almacenamiento_inicial_m3=self.spin_tr_s_inicial.value())
+
+            self.transito_resultado = resultado
+            p = resultado["parametros"]
+            filas = [
+                ("Método de tránsito", resultado["metodo"], ""),
+                ("Caudal pico de ENTRADA al tramo", resultado["Qp_entrada_m3_s"], "m³/s"),
+                ("Caudal pico de SALIDA (transitado)", resultado["Qp_salida_m3_s"], "m³/s",
+                 "es el caudal de diseño en el punto de aguas abajo"),
+                ("Atenuación del pico", resultado["atenuacion_m3_s"], "m³/s",
+                 f"{resultado['atenuacion_pct']}% de reducción respecto a la entrada"),
+                ("Retardo del pico", resultado["retardo_pico_h"], "h",
+                 f"pico de entrada en t={resultado['tiempo_pico_entrada_h']} h, "
+                 f"de salida en t={resultado['tiempo_pico_salida_h']} h"),
+                ("Volumen de entrada", resultado["volumen_entrada_hm3"], "hm³"),
+                ("Volumen de salida", resultado["volumen_salida_hm3"], "hm³",
+                 f"error de conservación = {resultado['error_volumen_pct']}% "
+                 f"({'correcto: el tránsito atenúa el pico pero no crea ni destruye agua' if resultado['conserva_volumen'] else 'ATENCIÓN: error alto, revise los parámetros'})"),
+            ]
+            if metodo == "muskingum_cunge":
+                filas += [
+                    ("K del tramo completo", p["K_total_h"], "h", "tiempo de viaje de la onda"),
+                    ("Subtramos / refinamiento temporal",
+                     f"{p['n_subtramos']} × {p['refinamiento_temporal']}", "",
+                     f"discretización elegida para número de Courant = {p['numero_courant']} "
+                     "(condición con la que el esquema es incondicionalmente estable)"),
+                    ("X del subtramo", p["X_subtramo"], "", "derivado de la hidráulica del cauce"),
+                    ("Celeridad de la onda", p["celeridad_m_s"], "m/s"),
+                ]
+            elif metodo == "muskingum":
+                filas += [
+                    ("K", p["K_h"], "h"), ("X", p["X"], ""),
+                    ("Coeficientes C0 / C1 / C2",
+                     f"{p['C0']:.4f} / {p['C1']:.4f} / {p['C2']:.4f}", "",
+                     f"suma = {p['suma']:.6f} (debe ser exactamente 1)"),
+                ]
+            else:
+                filas += [
+                    ("Almacenamiento máximo alcanzado", resultado["almacenamiento_maximo_hm3"], "hm³"),
+                    ("Puntos de la curva del embalse", p["puntos_curva_embalse"], ""),
+                ]
+            poblar_tabla_parametros(self.tabla_resultado_transito, filas)
+
+            self.canvas_transito.plot_transito(
+                resultado["tiempos_h"], resultado["caudal_entrada_m3_s"],
+                resultado["caudal_salida_m3_s"], resultado["metodo"],
+                resultado["Qp_entrada_m3_s"], resultado["Qp_salida_m3_s"],
+                resultado["atenuacion_pct"], resultado["retardo_pico_h"],
+                almacenamiento_m3=resultado.get("almacenamiento_m3"),
+            )
+
+            if resultado["estabilidad"]["advertencias"]:
+                QMessageBox.warning(
+                    self, "Advertencias del tránsito",
+                    "El tránsito se calculó, pero con estas advertencias:\n\n- " +
+                    "\n\n- ".join(resultado["estabilidad"]["advertencias"])
+                )
+        except flood_routing.FloodRoutingError as e:
+            QMessageBox.warning(self, "No se pudo transitar", str(e))
+        except Exception as e:
+            QMessageBox.critical(self, "Error en el tránsito de avenidas", str(e))
 
     def _on_autocompletar_escuelas_regionales(self):
         mensajes = []
