@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.2.68
+version=0.2.69
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,30 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.2.69: CORRECCION del error "El punto de salida cae en una celda sin datos (nodata) del MDE",
+      que interrumpia por completo el calculo morfometrico de la Pestaña 2.
+      CAUSA: el punto de salida de una cuenca esta, POR DEFINICION, en su borde. Al recortar el MDE
+      con el poligono de la cuenca, GDAL descarta las celdas cuyo centro cae fuera del poligono, de
+      modo que la celda del punto de salida queda como nodata con muchisima frecuencia. No era un
+      error del usuario ni un MDE defectuoso: era el comportamiento normal del recorte, y el plugin
+      abortaba todo el calculo por una celda de diferencia.
+      SOLUCION, EN DOS CAPAS. (1) El muestreo busca ahora la celda con dato MAS CERCANA en un radio de
+      15 celdas, en vez de fallar. Es correcto fisicamente: a la resolucion tipica de un MDE (12-30 m)
+      la celda vecina difiere en centimetros de cota, muy por debajo del error vertical del propio
+      MDE. La distancia se mide en METROS y no contando celdas, porque con un pixel no cuadrado el
+      conteo elegiria la celda equivocada. Tambien tolera que el punto caiga hasta 15 celdas FUERA de
+      la extension -- otra vez el caso del punto de salida en el limite exacto -- y descarta el valor
+      de relleno -9999 aunque el nodata no venga declarado en la cabecera. Si el punto esta lejisimos
+      sigue fallando, pero con un mensaje que apunta a lo que casi siempre es: un desajuste de CRS.
+      (2) La morfometria ya NO se interrumpe por el muestreo: si aun asi fallara, degrada a la cota
+      minima del MDE ya recortado a la cuenca, que es un respaldo perfectamente valido, y lo informa.
+      ADEMAS, los avisos no fatales de la morfometria (punto de salida mal ajustado, celda vecina
+      usada) se acumulan y se muestran JUNTOS AL FINAL, con la tabla de resultados ya completa detras.
+      Antes encadenaban un dialogo modal cada uno, obligando a cerrar ventanas antes de poder ver
+      ningun resultado.
+      Verificado con rasteres sinteticos que reproducen cada caso: celda con dato, hueco de nodata de
+      5x5 centrado en el punto, punto 2 celdas fuera del raster, nodata sin declarar en la cabecera,
+      CRS equivocado, entorno completamente sin datos, y pixel de 50x10 m.
     - v0.2.68: se completan en la interfaz los modulos que la v0.2.66 habia dejado solo en el nucleo,
       y se cierra el hueco de numeracion de las pestañas.
       (1) PESTAÑA 8 "MODELAMIENTO HIDRAULICO 2D", que faltaba: la barra de pestañas iba 1-7 y saltaba

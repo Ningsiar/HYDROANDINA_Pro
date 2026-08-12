@@ -1554,6 +1554,10 @@ class HydroAndinaProDialog(QDialog):
             return
         try:
             self.tabla_morfo.setRowCount(0)
+            # Avisos NO fatales acumulados durante el cálculo. Se muestran
+            # juntos al final: encadenar un diálogo modal por cada aviso
+            # obliga a cerrar ventanas antes de ver ningún resultado.
+            self._avisos_morfometria = []
 
             # --- geometría de la cuenca ---
             feat = next(self.cuenca_layer.getFeatures())
@@ -1569,8 +1573,20 @@ class HydroAndinaProDialog(QDialog):
 
             z_array = raster_stats.leer_array_valido(self.dem_clip_path)
             z_max = float(z_array.max())
-            z_min_muestreado = raster_stats.valor_en_punto(self.dem_clip_path, *self.break_point_xy)
+            # El muestreo NUNCA debe interrumpir la morfometría: si algo
+            # sale mal en el punto de salida hay un respaldo perfectamente
+            # válido (el mínimo real del MDE ya recortado a la cuenca), así
+            # que se degrada a él en vez de abortar el cálculo completo.
             z_min_real_dem = float(z_array.min())
+            detalle_muestreo = None
+            try:
+                z_min_muestreado, detalle_muestreo = raster_stats.valor_en_punto(
+                    self.dem_clip_path, *self.break_point_xy, devolver_detalle=True)
+            except Exception as e:
+                z_min_muestreado = None
+                self._avisos_morfometria.append(
+                    f"No se pudo muestrear la cota en el punto de salida ({e}). Se usó la cota "
+                    f"mínima del MDE recortado, {round(z_min_real_dem, 2)} m s.n.m.")
             # El punto de salida (break point) debería, por definición,
             # ser el punto de menor cota de la cuenca delineada (o estar
             # muy cerca de serlo). Si el valor muestreado ahí resulta
@@ -1580,19 +1596,31 @@ class HydroAndinaProDialog(QDialog):
             # que después hace fallar Giandotti y distorsiona H, Rr, Rh,
             # etc. En ese caso se usa el mínimo real del MDE como
             # respaldo, avisando al usuario en vez de fallar en silencio.
-            if z_min_muestreado is None or (z_min_muestreado - z_min_real_dem) > max(0.02 * (z_max - z_min_real_dem), 5.0):
-                QMessageBox.warning(
-                    self, "Punto de salida posiblemente mal ajustado",
-                    "La cota muestreada en el punto de salida "
-                    f"({z_min_muestreado}) es notoriamente mayor que la cota mínima real del MDE "
-                    f"recortado a la cuenca ({round(z_min_real_dem, 2)} m s.n.m.). Esto sugiere que "
-                    "el punto de salida no quedó bien ajustado sobre el cauce (pestaña 1, ajuste al "
-                    "cauce/pour point). Se usará el mínimo real del MDE como Z_min de respaldo; "
-                    "verifique el punto de salida antes de un diseño definitivo."
-                )
+            if z_min_muestreado is None:
+                z_min = z_min_real_dem
+            elif (z_min_muestreado - z_min_real_dem) > max(0.02 * (z_max - z_min_real_dem), 5.0):
+                self._avisos_morfometria.append(
+                    f"La cota muestreada en el punto de salida ({round(z_min_muestreado, 2)} m) es "
+                    f"notoriamente mayor que la cota mínima del MDE recortado a la cuenca "
+                    f"({round(z_min_real_dem, 2)} m s.n.m.). Sugiere que el punto de salida no quedó "
+                    "bien ajustado sobre el cauce (Pestaña 1, ajuste al cauce). Se usó el mínimo real "
+                    "del MDE como Z_min; verifique el punto de salida antes de un diseño definitivo.")
                 z_min = z_min_real_dem
             else:
                 z_min = z_min_muestreado
+                # La celda exacta del punto de salida suele quedar fuera del
+                # recorte (el punto está en el borde de la cuenca). Se toma la
+                # válida más próxima y se informa: a 12-30 m de resolución la
+                # diferencia de cota es menor que el error del propio MDE,
+                # pero el usuario debe saber que no es la celda exacta.
+                if detalle_muestreo and not detalle_muestreo["celda_exacta"]:
+                    self._avisos_morfometria.append(
+                        "La celda exacta del punto de salida no tenía dato en el MDE recortado "
+                        "(es lo normal: el punto de salida está en el borde de la cuenca y el "
+                        "recorte descarta las celdas cuyo centro queda fuera del polígono). Se usó "
+                        f"la celda con dato más cercana, a {detalle_muestreo['distancia_m']:.1f} m "
+                        f"({detalle_muestreo['distancia_celdas']:.0f} celdas), con cota "
+                        f"{round(z_min_muestreado, 2)} m s.n.m.")
 
             # ================= GRUPO 1: parámetros básicos =================
             g1 = morphometry.grupo1_basicos(area_m2, perimetro_m, lb_m, z_max, z_min, z_array)
@@ -1713,6 +1741,15 @@ class HydroAndinaProDialog(QDialog):
 
             if g6["alerta_flujo_detritos"]:
                 QMessageBox.warning(self, "Alerta de flujo de detritos", g6["mensaje_alerta"])
+
+            # Los avisos no fatales van AL FINAL y juntos: la tabla ya está
+            # completa detrás del diálogo, así que el usuario los lee con los
+            # resultados a la vista en vez de antes de ver ninguno.
+            if self._avisos_morfometria:
+                QMessageBox.information(
+                    self, "Morfometría calculada — observaciones",
+                    "La morfometría se calculó completa. Tenga en cuenta:\n\n- "
+                    + "\n\n- ".join(self._avisos_morfometria))
 
         except Exception as e:
             QMessageBox.critical(self, "Error calculando morfometría", str(e))
