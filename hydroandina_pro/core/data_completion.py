@@ -25,6 +25,13 @@ MÉTODOS:
     SIMPLIFICADA del método clásico (que en su forma completa incluye
     un proceso iterativo de ponderación por calidad de cada estación);
     aquí se pondera cada estación por igual en el vector regional.
+  - Selección de predictoras por correlación ("cutoff"): antes de la
+    Regresión Múltiple, seleccionar_estaciones_por_correlacion() filtra
+    las estaciones vecinas a solo aquellas con correlación >= umbral
+    (0.70 por defecto, el mismo criterio usado en la homogeneización de
+    2415 estaciones chinas de Wang Qiuxiang et al., 2012) —
+    completar_regresion_multiple_seleccionada() aplica este filtro
+    automáticamente antes de ajustar la regresión.
 
 TRANSPARENCIA: la completación de datos siempre introduce incertidumbre
 adicional; los periodos completados deben marcarse como tales en
@@ -322,3 +329,103 @@ def completar_vector_regional(series_estaciones: Dict[str, List[float]]) -> dict
         "medias_por_estacion": {nombres[i]: round(float(medias[i]), 3) for i in range(len(nombres))},
         "desv_std_por_estacion": {nombres[i]: round(float(desvs[i]), 3) for i in range(len(nombres))},
     }
+
+
+# ---------------------------------------------------------------------
+# Selección de estaciones predictoras por correlación (umbral / "cutoff")
+# ---------------------------------------------------------------------
+def correlacion_pearson_pares(x: List[float], y: List[float]) -> Tuple[float, int]:
+    """Correlación de Pearson entre dos series, usando solo los periodos
+    donde AMBAS tienen dato válido (pares completos). Devuelve (r, n_pares);
+    r=nan si hay menos de 3 pares válidos."""
+    xa = np.asarray(x, dtype=float)
+    ya = np.asarray(y, dtype=float)
+    if len(xa) != len(ya):
+        raise DataCompletionError("Las dos series deben tener la misma longitud.")
+    validos = ~np.isnan(xa) & ~np.isnan(ya)
+    n_pares = int(validos.sum())
+    if n_pares < 3:
+        return float("nan"), n_pares
+    return float(np.corrcoef(xa[validos], ya[validos])[0, 1]), n_pares
+
+
+def seleccionar_estaciones_por_correlacion(series_estaciones: Dict[str, List[float]], estacion_objetivo: str,
+                                            umbral_correlacion: float = 0.70) -> dict:
+    """
+    Selecciona, de entre todas las estaciones vecinas disponibles, solo
+    aquellas cuya correlación (Pearson, pares completos) con la estación
+    objetivo alcanza o supera un umbral -- el mismo criterio del método
+    de "cutoff" por correlación (paquete R cutoffR, habitualmente con
+    Spearman) y el aplicado en la homogeneización de 2415 estaciones de
+    precipitación diaria en China por Wang Qiuxiang et al. (2012), donde
+    solo se corrigieron/relacionaron estaciones cuya correlación con su
+    referencia superaba 0.70 -- el mismo valor de umbral usado aquí por
+    defecto.
+
+    Útil como paso previo a completar_regresion_multiple(): en vez de
+    usar TODAS las estaciones vecinas como predictoras (lo que puede
+    introducir ruido de estaciones poco relacionadas físicamente, p.ej.
+    de otra vertiente o con régimen distinto), se usan solo las que
+    demuestran una relación estadística suficientemente fuerte. Ver
+    completar_regresion_multiple_seleccionada() para el flujo completo.
+
+    FUENTE: Wang, Q.; Li, Q.; Zhou, H.; Wei, N.; Xing, X.; Wu, S. (2012).
+    "Homogeneity Study and Comparison Analysis on Precipitation Series
+    over China" [中国降水序列均一性研究及对比分析]. Meteorological
+    Monthly, 38(11), 1390-1398.
+    """
+    if estacion_objetivo not in series_estaciones:
+        raise DataCompletionError(f"'{estacion_objetivo}' no está en las series proporcionadas.")
+    objetivo = series_estaciones[estacion_objetivo]
+
+    resultados = []
+    for nombre, serie in series_estaciones.items():
+        if nombre == estacion_objetivo:
+            continue
+        r, n_pares = correlacion_pearson_pares(objetivo, serie)
+        resultados.append({
+            "estacion": nombre, "correlacion": round(r, 4) if not math.isnan(r) else None,
+            "n_periodos_comunes": n_pares,
+            "cumple_umbral": (not math.isnan(r)) and r >= umbral_correlacion,
+        })
+    resultados.sort(key=lambda d: -(d["correlacion"] if d["correlacion"] is not None else -1))
+    seleccionadas = [d["estacion"] for d in resultados if d["cumple_umbral"]]
+
+    return {
+        "estacion_objetivo": estacion_objetivo, "umbral_correlacion": umbral_correlacion,
+        "estaciones_evaluadas": resultados, "estaciones_seleccionadas": seleccionadas,
+        "advertencia": (
+            None if seleccionadas else
+            f"Ninguna estación vecina alcanza r≥{umbral_correlacion} con '{estacion_objetivo}'; considere "
+            "bajar el umbral, agregar estaciones vecinas, o usar un método que no dependa de "
+            "predictoras correlacionadas (IDW, Vector Regional, Fourier)."
+        ),
+    }
+
+
+def completar_regresion_multiple_seleccionada(series_estaciones: Dict[str, List[float]], estacion_objetivo: str,
+                                               umbral_correlacion: float = 0.70) -> dict:
+    """
+    Combina seleccionar_estaciones_por_correlacion() + completar_regresion_multiple():
+    ajusta la regresión múltiple usando SOLO las estaciones vecinas cuya
+    correlación con la estación objetivo alcanza el umbral, en vez de
+    todas las disponibles (que es lo que hace completar_regresion_multiple()
+    por sí sola). Ver seleccionar_estaciones_por_correlacion() para la
+    justificación y fuente del umbral por defecto.
+    """
+    seleccion = seleccionar_estaciones_por_correlacion(series_estaciones, estacion_objetivo, umbral_correlacion)
+    if not seleccion["estaciones_seleccionadas"]:
+        raise DataCompletionError(seleccion["advertencia"])
+
+    series_filtradas = {estacion_objetivo: series_estaciones[estacion_objetivo]}
+    for nombre in seleccion["estaciones_seleccionadas"]:
+        series_filtradas[nombre] = series_estaciones[nombre]
+
+    resultado = completar_regresion_multiple(series_filtradas, estacion_objetivo)
+    resultado["estaciones_predictoras_usadas"] = seleccion["estaciones_seleccionadas"]
+    resultado["umbral_correlacion_aplicado"] = umbral_correlacion
+    resultado["correlaciones"] = {
+        d["estacion"]: d["correlacion"] for d in seleccion["estaciones_evaluadas"]
+        if d["estacion"] in seleccion["estaciones_seleccionadas"]
+    }
+    return resultado

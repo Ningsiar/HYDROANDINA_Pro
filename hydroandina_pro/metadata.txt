@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.2.65
+version=0.2.66
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,33 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.2.66: control de calidad, completacion y regionalizacion ampliados en el nucleo (core/); NO
+      conectados aun a la interfaz, quedan para la proxima iteracion. Verificados con datos sinteticos
+      en este entorno (sin QGIS disponible aqui).
+      quality_control.py: test_anderson_darling (normalidad, D'Agostino & Stephens 1986 -- no se
+      implemento Shapiro-Wilk porque sus coeficientes exactos AS R94/Royston no se pudieron verificar
+      con certeza); test_mann_kendall_estacional (Hirsch, Slack & Smith 1982, evita falsos positivos
+      de tendencia por ciclo estacional en series mensuales); corregir_por_quiebre (homogeneiza una
+      serie tras un quiebre ya detectado por Pettitt/Buishand/Worsley, mismo criterio de correccion
+      usado por Wang Qiuxiang et al. 2012 al homogeneizar 2415 estaciones de precipitacion en China);
+      funcion_autocorrelacion_parcial (PACF completa, recursion de Durbin-Levinson).
+      data_completion.py: seleccionar_estaciones_por_correlacion + completar_regresion_multiple_seleccionada
+      (filtran las predictoras de la Regresion Multiple a solo las que superan un umbral de correlacion,
+      0.70 por defecto -- mismo umbral de Wang Qiuxiang et al. 2012 -- en vez de usar siempre todas las
+      estaciones vecinas).
+      precip_source.py: la extraccion NetCDF (antes solo PISCOp) se generalizo a cualquier grilla
+      lon/lat/time compatible, en particular CHIRPS v2.0 e IMERG/GPM V07B.
+      regionalization.py (NUEVO): regionalizacion de precipitacion/temperatura vs. altitud/latitud/
+      longitud -- correlacion con significancia, regresion con IC 95%, prediccion en puntos nuevos, y
+      correccion local de residuos por IDW (aproximacion practica a co-kriging sin variograma, segun
+      comparacion de metodos de interpolacion de precipitacion para la Republica de Bashkortostan,
+      Federacion Rusa, WSEAS Trans. Environment and Development 2014).
+      gridded_validation.py (NUEVO): valida un producto grillado (CHIRPS/IMERG/ERA5-Land/PISCOp)
+      contra una estacion: metricas continuas (NSE, KGE, PBIAS, RMSE, R, clasificacion de Moriasi et
+      al. 2007) y categoricas de deteccion de lluvia (POD, FAR, FBI, HSS), siguiendo el enfoque de un
+      estudio 2025 de validacion CHIRPS/IMERG en la cuenca del rio Ambato, Ecuador (contexto andino).
+      Proximo paso sugerido: exponer estas funciones en la interfaz y conectar la descarga directa de
+      CHIRPS/IMERG (hoy requiere NetCDF ya descargado, igual que PISCOp).
     - v0.2.65: el desplegable de desagregacion temporal de la Pestaña 6 (Caudales Maximos) pasa de 4 a
       8 metodos para generar el hietograma de diseño.
       *** FALTABA EL SCS TIPO IA ***, reportado por el usuario: el nucleo solo tenia los tipos I, II y

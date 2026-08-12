@@ -24,7 +24,7 @@ depender de ninguna librería/plataforma de terceros):
     promedio de varias estaciones vecinas).
 """
 import math
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -529,5 +529,260 @@ def curva_doble_masa(serie_estacion: List[float], serie_referencia: Optional[Lis
             "Se usó la aproximación sin una serie de referencia real (recta del promedio acumulado); "
             "para un diagnóstico de doble masa riguroso, provea el acumulado de una serie de "
             "referencia (p. ej. el promedio de estaciones vecinas confiables del mismo periodo)."
+        ),
+    }
+
+
+# =======================================================================
+# GRUPO: NORMALIDAD
+# =======================================================================
+def test_anderson_darling(serie: List[float]) -> dict:
+    """
+    Prueba de Anderson-Darling (1952) para normalidad, variante de caso 3
+    (media y varianza desconocidas, estimadas de la muestra), con la
+    corrección de muestra finita y la aproximación de p-valor de
+    D'Agostino & Stephens (1986) -- el mismo test usado en la literatura
+    hidrológica para evaluar si una serie de precipitación/caudal se
+    ajusta a la distribución normal (p.ej. antes de decidir si aplicar
+    una transformación previo a completar datos o a un análisis de
+    doble masa paramétrico).
+
+    A diferencia de Shapiro-Wilk (cuyos coeficientes exactos del
+    algoritmo AS R94 de Royston no se pudieron verificar con certeza en
+    este entorno), Anderson-Darling tiene una fórmula cerrada bien
+    establecida que sí se implementa completa aquí; si necesita
+    Shapiro-Wilk específicamente, use scipy.stats.shapiro si su
+    intérprete de Python de QGIS tiene scipy instalado.
+
+    FUENTES:
+      - Anderson, T.W.; Darling, D.A. (1952). "Asymptotic theory of
+        certain 'goodness of fit' criteria based on stochastic
+        processes". Annals of Mathematical Statistics, 23(2), 193-212.
+      - D'Agostino, R.B.; Stephens, M.A., eds. (1986). "Goodness-of-Fit
+        Techniques". Marcel Dekker (corrección de muestra finita y
+        aproximación de p-valor usadas aquí).
+    """
+    x = np.asarray(serie, dtype=float)
+    x = x[~np.isnan(x)]
+    n = len(x)
+    if n < 8:
+        raise QualityControlError("Se requieren al menos 8 datos para la prueba de Anderson-Darling.")
+
+    media, desv = float(x.mean()), float(x.std(ddof=1))
+    if desv == 0:
+        raise QualityControlError("La serie no tiene variabilidad (desviación estándar nula).")
+
+    x_ordenado = np.sort(x)
+    z = (x_ordenado - media) / desv
+    phi = np.array([_cdf_normal_estandar(v) for v in z])
+    phi = np.clip(phi, 1e-12, 1 - 1e-12)  # evita log(0) en colas extremas
+
+    i = np.arange(1, n + 1)
+    S = np.sum((2 * i - 1) * (np.log(phi) + np.log(1 - phi[::-1])))
+    A2 = -n - S / n
+    A2_ajustado = A2 * (1 + 0.75 / n + 2.25 / n ** 2)
+
+    if A2_ajustado >= 0.6:
+        p_valor = math.exp(1.2937 - 5.709 * A2_ajustado + 0.0186 * A2_ajustado ** 2)
+    elif A2_ajustado >= 0.34:
+        p_valor = math.exp(0.9177 - 4.279 * A2_ajustado - 1.38 * A2_ajustado ** 2)
+    elif A2_ajustado >= 0.2:
+        p_valor = 1 - math.exp(-8.318 + 42.796 * A2_ajustado - 59.938 * A2_ajustado ** 2)
+    else:
+        p_valor = 1 - math.exp(-13.436 + 101.14 * A2_ajustado - 223.73 * A2_ajustado ** 2)
+    p_valor = min(max(p_valor, 0.0), 1.0)
+
+    return {
+        "A2": round(float(A2), 4), "A2_ajustado": round(float(A2_ajustado), 4),
+        "p_valor_aprox": round(p_valor, 4), "acepta_normalidad_alpha_0_05": p_valor >= 0.05,
+        "interpretacion": (
+            f"No se rechaza la normalidad (p≈{p_valor:.4f} ≥ 0.05)." if p_valor >= 0.05 else
+            f"Se rechaza la normalidad (p≈{p_valor:.4f} < 0.05); considere una transformación "
+            "(log, Box-Cox) antes de análisis que asuman datos normales (p.ej. regresión lineal "
+            "múltiple para completación de datos, curva de doble masa paramétrica)."
+        ),
+    }
+
+
+# =======================================================================
+# GRUPO: TENDENCIA ESTACIONAL Y HOMOGENEIZACIÓN
+# =======================================================================
+def test_mann_kendall_estacional(serie: List[float], periodo: int = 12) -> dict:
+    """
+    Prueba de Mann-Kendall ESTACIONAL (Hirsch, Slack & Smith, 1982): en
+    vez de aplicar Mann-Kendall a la serie completa (lo que puede dar
+    falsos positivos/negativos de tendencia por el propio ciclo
+    estacional en series mensuales), se calcula S y su varianza de forma
+    INDEPENDIENTE para cada estación del ciclo (p.ej. cada uno de los 12
+    meses del año, a través de los años) y luego se suman.
+
+    SIMPLIFICACIÓN: se asume independencia entre estaciones del ciclo
+    (S y varianza se suman directamente). Hirsch & Slack (1984)
+    extienden el método con una corrección de covarianza entre
+    estaciones correlacionadas (p.ej. si un mes lluvioso tiende a ir
+    seguido de otro mes lluvioso); esa corrección NO se implementa aquí.
+
+    FUENTE: Hirsch, R.M.; Slack, J.R.; Smith, R.A. (1982). "Techniques
+    of trend analysis for monthly water quality data". Water Resources
+    Research, 18(1), 107-121.
+    """
+    x = np.asarray(serie, dtype=float)
+    n = len(x)
+    if periodo < 2:
+        raise QualityControlError("El periodo estacional debe ser >= 2 (p.ej. 12 para datos mensuales).")
+    if n < periodo * 3:
+        raise QualityControlError(
+            f"Se recomiendan al menos 3 ciclos completos ({periodo * 3} datos) para Mann-Kendall estacional."
+        )
+
+    S_total, var_total = 0.0, 0.0
+    detalle_por_estacion = []
+    for s in range(periodo):
+        sub = x[s::periodo]
+        sub = sub[~np.isnan(sub)]
+        m = len(sub)
+        if m < 4:
+            detalle_por_estacion.append({"estacion": s + 1, "n": m, "S": None, "nota": "insuficientes datos, excluida"})
+            continue
+        S_s = 0
+        for i in range(m - 1):
+            S_s += np.sum(np.sign(sub[i + 1:] - sub[i]))
+        valores, cuentas = np.unique(sub, return_counts=True)
+        termino_empates = np.sum(cuentas * (cuentas - 1) * (2 * cuentas + 5))
+        var_s = (m * (m - 1) * (2 * m + 5) - termino_empates) / 18.0
+        S_total += S_s
+        var_total += var_s
+        detalle_por_estacion.append({"estacion": s + 1, "n": m, "S": int(S_s)})
+
+    if S_total > 0:
+        z = (S_total - 1) / math.sqrt(var_total)
+    elif S_total < 0:
+        z = (S_total + 1) / math.sqrt(var_total)
+    else:
+        z = 0.0
+    p_valor = 2.0 * (1.0 - _cdf_normal_estandar(abs(z)))
+    tendencia = ("creciente" if (z > 0 and p_valor < 0.05) else
+                 ("decreciente" if (z < 0 and p_valor < 0.05) else "sin tendencia significativa"))
+
+    return {
+        "S_total": int(S_total), "var_S_total": round(var_total, 2), "Z": round(z, 3),
+        "p_valor": round(p_valor, 4), "tendencia": tendencia, "es_significativa_alpha_0_05": p_valor < 0.05,
+        "detalle_por_estacion": detalle_por_estacion,
+    }
+
+
+def corregir_por_quiebre(serie: List[float], indice_quiebre: int, metodo: str = "aditivo") -> dict:
+    """
+    Corrige (homogeneiza) una serie a partir de un punto de quiebre ya
+    detectado (p.ej. por test_pettitt, test_desviacion_acumulada o
+    test_worsley_likelihood_ratio): ajusta el segmento POSTERIOR al
+    quiebre para que su media coincida con la del segmento ANTERIOR.
+
+    Sigue la práctica estándar de homogeneización hidrológica (WMO,
+    "Guide to Hydrological Practices") y, específicamente para
+    precipitación, el criterio de corrección aplicado por Wang Qiuxiang
+    et al. (2012) sobre 2415 estaciones de precipitación diaria en
+    China: tras detectar el quiebre (en su caso con SNHT), corrigieron
+    estación por estación llevando un segmento a la media del otro.
+
+    indice_quiebre: posición 1-indexada del último dato del segmento
+    ANTERIOR (mismo formato que 'indice_cambio' de test_pettitt()).
+
+    metodo: 'aditivo' (suma la diferencia de medias -- apropiado para
+    variables que pueden ser negativas o cero, p.ej. caudal base o
+    anomalías de temperatura) o 'multiplicativo' (escala por el cociente
+    de medias -- apropiado para precipitación, que no debe volverse
+    negativa).
+
+    TRANSPARENCIA: corrige solo la MEDIA (salto de nivel), no cambios de
+    varianza ni tendencias dentro de cada segmento. El segmento
+    ANTERIOR se toma como referencia por convención (más antiguo); si lo
+    que cambió fue la instalación/ubicación original de la estación,
+    puede ser más apropiado corregir en sentido contrario -- revise el
+    contexto físico antes de aceptar la corrección automática.
+    """
+    x = np.asarray(serie, dtype=float)
+    n = len(x)
+    if not (1 <= indice_quiebre < n):
+        raise QualityControlError(f"indice_quiebre debe estar entre 1 y {n - 1}.")
+    if metodo not in ("aditivo", "multiplicativo"):
+        raise QualityControlError("metodo debe ser 'aditivo' o 'multiplicativo'.")
+
+    antes, despues = x[:indice_quiebre], x[indice_quiebre:]
+    media_antes = float(np.nanmean(antes))
+    media_despues = float(np.nanmean(despues))
+
+    serie_corregida = x.copy()
+    if metodo == "aditivo":
+        ajuste = media_antes - media_despues
+        serie_corregida[indice_quiebre:] = despues + ajuste
+    else:
+        if media_despues == 0:
+            raise QualityControlError("La media del segmento posterior es 0; use metodo='aditivo'.")
+        ajuste = media_antes / media_despues
+        serie_corregida[indice_quiebre:] = despues * ajuste
+
+    return {
+        "metodo": metodo, "media_antes": round(media_antes, 3), "media_despues_original": round(media_despues, 3),
+        "media_despues_corregida": round(float(np.nanmean(serie_corregida[indice_quiebre:])), 3),
+        "ajuste_aplicado": round(float(ajuste), 4),
+        "serie_corregida": [round(float(v), 3) if not np.isnan(v) else None for v in serie_corregida],
+        "advertencia": (
+            "La corrección homogeneiza la MEDIA de ambos segmentos; documente siempre que estos "
+            "valores son 'corregidos', no observados directamente, en cualquier reporte técnico."
+        ),
+    }
+
+
+def funcion_autocorrelacion_parcial(serie: List[float], max_lag: int = 12) -> dict:
+    """
+    Función de autocorrelación parcial (PACF) mediante la recursión de
+    Durbin-Levinson, hasta max_lag. Complementa a test_autocorrelacion()
+    (que evalúa un solo lag a la vez) con el conjunto completo de
+    coeficientes parciales -- útil para diagnosticar la estructura de
+    dependencia serial de una serie (p.ej. antes de asumir independencia
+    en un análisis de frecuencia, o para fijar el orden de un modelo
+    autorregresivo de relleno).
+
+    FUENTE: Durbin, J. (1960). "The fitting of time-series models".
+    Revue de l'Institut International de Statistique, 28(3), 233-244.
+    """
+    x = np.asarray(serie, dtype=float)
+    x = x[~np.isnan(x)]
+    n = len(x)
+    if max_lag < 1 or max_lag >= n:
+        raise QualityControlError("max_lag debe ser >= 1 y menor que el número de datos válidos.")
+
+    media = x.mean()
+    xc = x - media
+    c0 = float(np.sum(xc ** 2) / n)
+    if c0 == 0:
+        raise QualityControlError("La serie no tiene variabilidad (varianza nula).")
+    acf = [float(np.sum(xc[:n - k] * xc[k:]) / n) / c0 for k in range(0, max_lag + 1)]
+
+    phi = np.zeros((max_lag + 1, max_lag + 1))
+    pacf = [1.0]
+    phi[1, 1] = acf[1]
+    pacf.append(float(phi[1, 1]))
+    for k in range(2, max_lag + 1):
+        num = acf[k] - sum(phi[k - 1, j] * acf[k - j] for j in range(1, k))
+        den = 1 - sum(phi[k - 1, j] * acf[j] for j in range(1, k))
+        phi[k, k] = num / den if den != 0 else 0.0
+        for j in range(1, k):
+            phi[k, j] = phi[k - 1, j] - phi[k, k] * phi[k - 1, k - j]
+        pacf.append(float(phi[k, k]))
+
+    limite = 1.96 / math.sqrt(n)  # banda de confianza aprox. 95% bajo H0 de ruido blanco
+    lags_significativos = [k for k in range(1, max_lag + 1) if abs(pacf[k]) > limite]
+
+    return {
+        "pacf_por_lag": {k: round(v, 4) for k, v in enumerate(pacf)},
+        "limite_significancia_aprox_95": round(limite, 4), "lags_significativos": lags_significativos,
+        "interpretacion": (
+            "Sin dependencia serial significativa detectada en los lags evaluados (banda ±95%)."
+            if not lags_significativos else
+            f"Dependencia serial significativa en el(los) lag(s) {lags_significativos}; considérelo al "
+            "interpretar pruebas que asumen independencia (Mann-Kendall, Pettitt, etc. pierden "
+            "confiabilidad con autocorrelación fuerte)."
         ),
     }

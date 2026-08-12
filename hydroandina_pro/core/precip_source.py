@@ -32,13 +32,27 @@ Requiere xarray (o netCDF4 como respaldo) instalado en el intérprete de
 Python de QGIS para la vía 1; se importa de forma perezosa con un
 mensaje de error explicativo si no está disponible (igual que openpyxl
 en exporters.py). Las vías 2 y 3 no requieren dependencias adicionales.
+
+DESDE ESTA VERSIÓN: extraer_serie_diaria_desde_netcdf() generaliza la
+extracción de píxel-más-cercano a CUALQUIER grilla lon/lat/time, no solo
+PISCOp -- en particular CHIRPS v2.0 (Funk et al., 2015, "The climate
+hazards infrared precipitation with stations - a new environmental
+record for monitoring extremes") e IMERG/GPM V07B (misión conjunta
+NASA-JAXA). Esto habilita comparar/validar el dato grillado contra una
+estación (ver core/gridded_validation.py) usando la misma ruta de
+extracción que ya se usaba para la Pestaña 5.
 """
 import csv
 from dataclasses import dataclass
 from typing import List, Optional
 
 
-NOMBRES_VARIABLE_PROBABLES = ["precip", "pr", "z", "Band1", "prec", "precipitation"]
+NOMBRES_VARIABLE_PROBABLES = ["precip", "pr", "z", "Band1", "prec", "precipitation", "precipitationCal"]
+# 'precip' cubre además CHIRPS v2.0 (Funk et al., 2015, "The climate hazards infrared
+# precipitation with stations..."); 'precipitation'/'precipitationCal' cubren IMERG/GPM
+# (Huffman et al., "GPM IMERG Final Precipitation L3 1 day", V07B) -- ver
+# extraer_serie_diaria_desde_netcdf() más abajo, que generaliza la extracción para
+# cualquiera de estas fuentes grilladas, no solo PISCOp.
 
 
 @dataclass
@@ -46,6 +60,14 @@ class SerieAnual:
     anios: List[int]
     valores_mm: List[float]
     fuente: str
+
+
+@dataclass
+class SerieDiaria:
+    fechas: List[str]  # ISO 'YYYY-MM-DD'
+    valores_mm: List[float]
+    fuente: str
+    variable_detectada: str
 
 
 def construir_serie_anual(anios: List[int], valores_mm: List[float], fuente: str,
@@ -134,16 +156,28 @@ def construir_serie_desde_tabla(filas_texto: List[List[str]]) -> SerieAnual:
     return construir_serie_anual(anios, valores, "Tabla ingresada manualmente en la interfaz")
 
 
-def extraer_serie_anual_desde_netcdf(ruta_nc: str, lon: float, lat: float,
-                                      nombre_variable: Optional[str] = None) -> SerieAnual:
+def extraer_serie_diaria_desde_netcdf(ruta_nc: str, lon: float, lat: float,
+                                       nombre_variable: Optional[str] = None,
+                                       nombre_fuente: Optional[str] = None) -> SerieDiaria:
     """
-    Extrae la serie de máximos anuales de precipitación diaria en el
-    píxel más cercano a (lon, lat) de un archivo NetCDF de PISCOp.
+    Extrae la serie DIARIA completa de precipitación en el píxel más
+    cercano a (lon, lat) de un archivo NetCDF con dimensiones
+    lon/lat/time -- formato compartido por PISCOp, CHIRPS v2.0 (Funk et
+    al., 2015) e IMERG/GPM V07B (Huffman et al., NASA/JAXA), entre otras
+    grillas de precipitación. Generaliza la lógica de extracción que
+    antes solo existía para PISCOp en extraer_serie_anual_desde_netcdf()
+    (que ahora se apoya en esta función), y es la que usa
+    core/gridded_validation.py para comparar el dato grillado contra una
+    estación en el mismo periodo.
 
     NO SE PUDO PROBAR en este entorno (sin acceso a un archivo NetCDF
     real ni a red); la lógica de apertura/selección de píxel más cercano
-    y resampleo anual sigue el patrón estándar de xarray, pero pruébelo
-    primero con un archivo pequeño antes de un uso en producción.
+    sigue el patrón estándar de xarray, pero pruébela primero con un
+    archivo pequeño antes de un uso en producción. En particular, CHIRPS
+    y algunas variantes de IMERG distribuyen un archivo por año/mes (no
+    uno solo con toda la serie); si su flujo requiere concatenar varios
+    archivos, hágalo con xr.open_mfdataset() antes o llame a esta
+    función una vez por archivo y una los resultados.
     """
     try:
         import xarray as xr
@@ -177,15 +211,37 @@ def extraer_serie_anual_desde_netcdf(ruta_nc: str, lon: float, lat: float,
 
     punto = ds[variable].sel({dim_lon: lon, dim_lat: lat}, method="nearest")
 
-    # Máximo anual: se agrupa por año calendario. Si el usuario requiere
-    # año hidrológico (p. ej. ago-jul, típico en régimen andino con
-    # estiaje/avenida bien diferenciados), debe desplazarse el índice de
-    # tiempo antes de llamar a esta función (no se asume aquí un año
-    # hidrológico específico para no imponer un supuesto no solicitado).
-    max_anual = punto.groupby(f"{dim_tiempo}.year").max()
-
-    anios = [int(a) for a in max_anual["year"].values]
-    valores = [float(v) for v in max_anual.values]
+    fechas = [str(t)[:10] for t in punto[dim_tiempo].values]
+    valores = [float(v) for v in punto.values]
     ds.close()
 
-    return SerieAnual(anios, valores, f"PISCOp NetCDF: {ruta_nc} (var='{variable}', pixel más cercano a lon={lon}, lat={lat})")
+    fuente = nombre_fuente or f"NetCDF: {ruta_nc}"
+    return SerieDiaria(
+        fechas, valores, f"{fuente} (var='{variable}', pixel más cercano a lon={lon}, lat={lat})", variable
+    )
+
+
+def extraer_serie_anual_desde_netcdf(ruta_nc: str, lon: float, lat: float,
+                                      nombre_variable: Optional[str] = None) -> SerieAnual:
+    """
+    Extrae la serie de máximos anuales de precipitación diaria en el
+    píxel más cercano a (lon, lat) de un archivo NetCDF de PISCOp (o
+    cualquier grilla compatible; ver extraer_serie_diaria_desde_netcdf(),
+    que hace la extracción propiamente dicha y que esta función usa
+    internamente antes de resumir por máximo anual).
+    """
+    import numpy as _np
+
+    diaria = extraer_serie_diaria_desde_netcdf(ruta_nc, lon, lat, nombre_variable, "PISCOp NetCDF")
+
+    # Máximo anual: se agrupa por año calendario. Si el usuario requiere
+    # año hidrológico (p. ej. ago-jul, típico en régimen andino con
+    # estiaje/avenida bien diferenciados), debe desplazarse la fecha
+    # antes de llamar a esta función (no se asume aquí un año
+    # hidrológico específico para no imponer un supuesto no solicitado).
+    anios_por_dia = _np.array([int(f[:4]) for f in diaria.fechas])
+    valores = _np.array(diaria.valores_mm, dtype=float)
+    anios_unicos = sorted(set(anios_por_dia.tolist()))
+    max_por_anio = [float(_np.nanmax(valores[anios_por_dia == a])) for a in anios_unicos]
+
+    return SerieAnual(anios_unicos, max_por_anio, diaria.fuente)

@@ -1,5 +1,79 @@
 # HydroAndina Pro - Plugin QGIS
 
+## v0.2.66: control de calidad, completación y regionalización ampliados; validación de grillas (CHIRPS/IMERG) vs. estación (núcleo, aún sin pestaña propia en la interfaz)
+
+A partir de nueva bibliografía y de scripts de análisis estadístico
+hidrológico (R/Python) revisados en esta sesión, se amplían los módulos
+`core/quality_control.py`, `core/data_completion.py` y
+`core/precip_source.py`, y se agregan dos módulos nuevos:
+`core/regionalization.py` y `core/gridded_validation.py`. Todo lo
+agregado es lógica pura (numpy), **verificada con datos sintéticos en
+este entorno** (no hay QGIS disponible aquí, igual que el resto del
+núcleo matemático del plugin) — **aún no está conectado a ninguna
+pestaña de la interfaz** (`plugin_dialog.py`); queda como trabajo
+pendiente de la próxima iteración (ver "Próximo paso sugerido" abajo).
+
+- **`core/quality_control.py`**:
+  - `test_anderson_darling()`: prueba de normalidad de Anderson-Darling
+    (caso 3, corrección de D'Agostino & Stephens 1986). **No** se
+    implementó Shapiro-Wilk: sus coeficientes exactos del algoritmo
+    AS R94 (Royston) no se pudieron verificar con certeza en este
+    entorno y una implementación con coeficientes incorrectos sería
+    peor que no tenerla; use Anderson-Darling aquí, o
+    `scipy.stats.shapiro` si su intérprete de Python de QGIS tiene
+    scipy instalado.
+  - `test_mann_kendall_estacional()`: Mann-Kendall estacional (Hirsch,
+    Slack & Smith, 1982) para series mensuales — evita falsos
+    positivos/negativos de tendencia causados por el propio ciclo
+    estacional (lo que sí puede pasar al aplicar Mann-Kendall simple,
+    ya existente, directamente sobre una serie mensual sin desestacionalizar).
+  - `corregir_por_quiebre()`: homogeneiza una serie a partir de un punto
+    de quiebre ya detectado (Pettitt/Buishand/Worsley, ya existentes),
+    ajustando el segmento posterior a la media del anterior — el mismo
+    criterio de corrección usado por Wang Qiuxiang et al. (2012) al
+    homogeneizar 2415 estaciones de precipitación diaria en China.
+  - `funcion_autocorrelacion_parcial()`: PACF completa (recursión de
+    Durbin-Levinson), en vez de un solo lag a la vez como el
+    `test_autocorrelacion()` ya existente.
+- **`core/data_completion.py`**: `seleccionar_estaciones_por_correlacion()`
+  + `completar_regresion_multiple_seleccionada()`: filtran las
+  estaciones predictoras de la Regresión Múltiple (ya existente) a solo
+  las que superan un umbral de correlación (0.70 por defecto — el mismo
+  umbral de Wang Qiuxiang et al., 2012), en vez de usar siempre todas
+  las estaciones vecinas disponibles como predictoras.
+- **`core/precip_source.py`**: la extracción NetCDF, antes exclusiva de
+  PISCOp, se generalizó (`extraer_serie_diaria_desde_netcdf()`) a
+  cualquier grilla lon/lat/time compatible — en particular **CHIRPS
+  v2.0** e **IMERG/GPM V07B**, con su nombre de variable ya agregado a
+  la autodetección. `extraer_serie_anual_desde_netcdf()` (la que usa la
+  Pestaña 5) sigue funcionando exactamente igual, ahora apoyada en esta
+  función genérica.
+- **`core/regionalization.py`** (nuevo): regionalización de
+  precipitación/temperatura en función de altitud/latitud/longitud —
+  correlación con significancia, regresión (simple o múltiple) con IC
+  95%, predicción en puntos nuevos (p.ej. centroide de una subcuenca), y
+  una corrección local de los residuos por IDW — una aproximación
+  práctica a co-kriging sin necesidad de ajustar un variograma, según la
+  comparación de métodos de interpolación de precipitación para la
+  República de Bashkortostan, Federación Rusa (WSEAS Trans. Environment
+  and Development, 2014).
+- **`core/gridded_validation.py`** (nuevo): valida un producto grillado
+  (CHIRPS, IMERG, ERA5-Land, PISCOp) contra una estación, con métricas
+  continuas (NSE, KGE con su descomposición r/alpha/beta, PBIAS, RMSE,
+  R, y clasificación de desempeño de Moriasi et al. 2007) y métricas
+  categóricas de detección de lluvia (POD, FAR, FBI, HSS) — estas
+  últimas siguiendo el mismo enfoque de un estudio reciente (2025) de
+  validación de CHIRPS/IMERG en la cuenca del río Ambato, Ecuador, un
+  contexto andino comparable al de este proyecto.
+
+**Próximo paso sugerido** (no incluido en esta iteración): exponer estas
+funciones en la interfaz (una pestaña/subpestaña de "Control de Calidad
+y Completación" y otra de "Regionalización"), y conectar
+`gridded_validation` a un flujo que descargue o lea directamente CHIRPS
+o IMERG (hoy requiere que el usuario ya tenga el NetCDF descargado,
+igual que PISCOp). Ver también la sección "Historial de versiones" en
+`metadata.txt` para el registro completo dentro del plugin.
+
 ## v0.2.6: entrada manual de P24 en tabla editable, con copiar/pegar estilo Excel
 
 La Pestaña 5 (Precipitación Máx 24h) ahora tiene una tercera vía de
