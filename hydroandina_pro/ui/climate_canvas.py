@@ -18,6 +18,12 @@ except ImportError:
     from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
+# Estilo comun de leyendas y ejes (ui/chart_style.py). Es idempotente,
+# asi que cada lienzo puede invocarlo sin coordinarse con los demas.
+from .chart_style import aplicar_estilo_graficos
+
+aplicar_estilo_graficos()
+
 COLORES_ESCENARIOS = {"Base (histórico)": "#444444", "SSP1-2.6": "#2E7D32", "SSP2-4.5": "#EF9F27",
                        "SSP3-7.0": "#D9622B", "SSP5-8.5": "#B3261E"}
 MESES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]

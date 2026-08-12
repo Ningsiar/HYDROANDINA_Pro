@@ -805,6 +805,12 @@ class HydroAndinaProDialog(QDialog):
             )
             capa_red = obtener_capa(resultado_red["red_drenaje_vector"], context, es_raster=False, nombre="red_drenaje_stream_network")
             QgsProject.instance().addMapLayer(capa_red)
+            # El Paso A tambien produce una red medible: se vuelca a la
+            # Pestaña 2 sin esperar a delimitar la cuenca, para que quien
+            # solo genere la red ya tenga Lt y Nu reales en vez de los
+            # minimos del rango.
+            self.red_drenaje_layer = capa_red
+            self._autocompletar_red_drenaje_pestana2()
             self.resultado_flujo_paso_a = resultado_flujo  # guardar para reutilizar en el Paso B
             # Se guarda tambien el CRS en que se calculo: el Paso B solo puede
             # reutilizarlo si coincide con el suyo (ver la nota en _on_run_delineation).
@@ -952,6 +958,54 @@ class HydroAndinaProDialog(QDialog):
         self._activar_map_tool(False)  # esto ya restaura la ventana (ver rama 'else' arriba)
         self.lbl_estado_tab1.setText("Estado: break point definido. MDE se reproyectará a "
                                       f"{self.utm_crs.authid()} al ejecutar la delimitación.")
+
+    def _autocompletar_red_drenaje_pestana2(self):
+        """
+        Mide la red de drenaje delineada y rellena Lt (longitud total) y Nu
+        (número de cauces) de la Pestaña 2.
+
+        Lt se obtiene sumando la longitud de TODAS las entidades de la capa
+        de red, y Nu contando esas entidades. Ambos se miden en el CRS de
+        la capa, que a estas alturas de la cadena ya es la zona UTM local
+        (metros), de modo que la longitud es métrica y no angular -- medir
+        en grados daría un número sin sentido físico.
+
+        Si la medición falla por cualquier motivo, se deja el valor que
+        hubiera y no se interrumpe la delimitación: es una comodidad, no un
+        paso crítico de la cadena.
+        """
+        capa = getattr(self, "red_drenaje_layer", None)
+        if capa is None or not capa.isValid():
+            return None
+        try:
+            longitud_total_m = 0.0
+            n_cauces = 0
+            for entidad in capa.getFeatures():
+                geometria = entidad.geometry()
+                if geometria is None or geometria.isEmpty():
+                    continue
+                longitud_total_m += geometria.length()
+                n_cauces += 1
+            if n_cauces == 0:
+                return None
+
+            lt_km = longitud_total_m / 1000.0
+            self.spin_lt_km.setValue(lt_km)
+            self.spin_n_cauces.setValue(n_cauces)
+            # Lc (cauce principal) ya lo calcula la cadena de delimitación;
+            # se traslada aquí para no dejar el único campo restante en su
+            # mínimo mientras los otros dos quedan medidos.
+            lc_km = (self.morfometria_resultados or {}).get("lc_km")
+            if lc_km:
+                self.spin_lc_km.setValue(lc_km)
+
+            self.lbl_estado_tab1.setText(
+                f"Red de drenaje medida: Lt = {lt_km:.3f} km en {n_cauces} cauces "
+                "(volcado a la Pestaña 2)."
+            )
+            return {"lt_km": lt_km, "n_cauces": n_cauces}
+        except Exception:
+            return None
 
     def _zona_utm_desde_capa(self, capa):
         """
@@ -1236,6 +1290,16 @@ class HydroAndinaProDialog(QDialog):
 
             QgsProject.instance().addMapLayer(self.cuenca_layer)
             QgsProject.instance().addMapLayer(self.red_drenaje_layer)
+
+            # Autocompletar Lt y Nu de la Pestaña 2 midiendo la red recién
+            # delineada. Antes había que teclearlos, y al no hacerlo se
+            # quedaban en el MÍNIMO de su rango (Lt = 0.001 km, Nu = 1) --
+            # que Qt muestra cuando un spinbox no recibe valor. Con un metro
+            # de red de drenaje, TODO el Grupo 5 de la morfometría salía sin
+            # sentido: densidad de drenaje, textura, longitud de flujo
+            # superficial, coeficiente de almacenamiento y número de
+            # infiltración se calculan a partir de Lt.
+            self._autocompletar_red_drenaje_pestana2()
 
             # Recortar el MDE a la cuenca para las estadísticas de los grupos 1 y 4
             dem_clip = delineation.clip_dem_a_cuenca(self.dem_layer, self.cuenca_layer,
@@ -4543,6 +4607,17 @@ class HydroAndinaProDialog(QDialog):
         h_dt.addWidget(QLabel("Duración del intervalo Dt (h):"))
         h_dt.addWidget(self.spin_dt_h)
         v_h.addLayout(h_dt)
+
+        self.cuadro_hietograma = CuadroResumenImpacto(ancho_maximo=700)
+        self.cuadro_hietograma.actualizar(
+            titulo="SIN HIETOGRAMA", valor_principal="—",
+            subtitulo="Genérelo arriba o ingréselo a mano para ver su forma y su lámina")
+        centrar_en_layout(self.cuadro_hietograma, v_h)
+        self.canvas_hietograma = HydrographCanvas(self, width=6.5, height=3.8)
+        v_h.addWidget(self.canvas_hietograma)
+        # Al editar el hietograma a mano tambien se refresca el grafico, no
+        # solo al generarlo con el boton.
+        self.edit_hietograma.textChanged.connect(self._actualizar_grafico_hietograma)
         v.addWidget(gb_hieto)
 
         # ---------- Modelo de pérdidas por infiltración ----------
@@ -5350,6 +5425,42 @@ class HydroAndinaProDialog(QDialog):
             )
         self.texto_resumen_caudales.setHtml(html)
 
+    def _actualizar_grafico_hietograma(self, descripcion: str = ""):
+        """
+        Redibuja el gráfico del hietograma y su cuadro de impacto a partir
+        del texto del campo, se haya generado con el botón o escrito a mano.
+
+        Se conecta a textChanged para que el gráfico acompañe SIEMPRE a los
+        valores: un hietograma editado a mano que ya no corresponde al
+        gráfico mostrado sería peor que no tener gráfico.
+        """
+        try:
+            hietograma = self._leer_hietograma_actual()
+        except Exception:
+            hietograma = []
+        if not hietograma:
+            self.cuadro_hietograma.actualizar(
+                titulo="SIN HIETOGRAMA", valor_principal="—",
+                subtitulo="Genérelo arriba o ingréselo a mano para ver su forma y su lámina")
+            return
+        dt_h = self.spin_dt_h.value()
+        total = sum(hietograma)
+        pico = max(hietograma)
+        idx = hietograma.index(pico)
+        intensidad_pico = pico / dt_h if dt_h else 0.0
+
+        self.cuadro_hietograma.actualizar(
+            titulo="HIETOGRAMA DE DISEÑO",
+            valor_principal=f"Lámina total = {total:.1f} mm  en  {len(hietograma) * dt_h:.1f} h",
+            subtitulo=descripcion or "es la tormenta que se transforma en el caudal de diseño",
+            metricas=[("Intervalos", f"{len(hietograma)} × {dt_h} h"),
+                       ("Pico", f"{pico:.2f} mm"),
+                       ("Intensidad pico", f"{intensidad_pico:.1f} mm/h"),
+                       ("Instante del pico", f"t = {idx * dt_h:.2f} h")],
+            leyenda="la FORMA importa tanto como la lámina: fija el caudal punta",
+            tipo="info")
+        self.canvas_hietograma.plot_hietograma(hietograma, dt_h, descripcion)
+
     def _on_cambiar_metodo_desagregacion(self):
         # Los cuatro metodos basados en curva IDF usan el exponente y la
         # duracion; los patrones SCS no (siempre son de 24 h completas).
@@ -5404,6 +5515,7 @@ class HydroAndinaProDialog(QDialog):
                 descripcion_metodo = f"patrón SCS Tipo {tipo_scs} (aproximado, tormenta de 24h completa)"
 
             self.edit_hietograma.setPlainText(",".join(f"{v:.2f}" for v in hietograma))
+            self._actualizar_grafico_hietograma(descripcion_metodo)
             QMessageBox.information(
                 self, "Hietograma generado",
                 f"Hietograma de {len(hietograma)} intervalos generado por {descripcion_metodo} para Tr={tr} años "

@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.2.66
+version=0.2.67
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,30 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.2.67: tres puntos de la cola de trabajo -- autorrelleno de la red de drenaje, grafico del
+      hietograma y estilo comun de leyendas en los 18 lienzos.
+      (1) AUTORRELLENO DE Lt Y Nu EN LA PESTAÑA 2, que corrige un problema de correctitud reportado por
+      el usuario: los campos "Long. total de la red Lt" y "N de cauces Nu" mostraban 0.001 y 1, que NO
+      eran valores por defecto elegidos sino el MINIMO DEL RANGO de cada spinbox -- lo que Qt muestra
+      cuando nadie les asigna valor. Con un metro de red de drenaje, TODO el Grupo 5 salia sin sentido:
+      densidad de drenaje, textura, longitud de flujo superficial, coeficiente de almacenamiento y
+      numero de infiltracion se calculan a partir de Lt. Ahora la red delineada se MIDE (suma de
+      longitudes y conteo de entidades, en el CRS UTM de la capa para que la longitud sea metrica y no
+      angular) y se vuelca a la Pestaña 2, tanto al delimitar la cuenca como al generar solo la red en
+      el Paso A. Si la medicion falla no interrumpe la cadena: es una comodidad, no un paso critico.
+      (2) GRAFICO DE ALTO IMPACTO DEL HIETOGRAMA junto a sus valores en la Pestaña 6: barras con el eje
+      invertido (convencion hidrologica), intervalo del pico resaltado y anotado, lamina acumulada en
+      eje secundario, y cuadro de impacto con lamina total, intervalos, pico e intensidad pico. Se
+      conecta a textChanged y no solo al boton de generar, porque un hietograma editado a mano que ya
+      no correspondiera al grafico mostrado seria peor que no tener grafico. Importa porque la FORMA de
+      la tormenta, no solo su lamina, es lo que fija el caudal punta: un SCS Tipo II y un Tipo IA de
+      igual lamina dan picos que difieren en un factor de 4.
+      (3) ESTILO COMUN DE LEYENDAS conectado a los 18 modulos de lienzo (ui/chart_style.py, creado en la
+      v0.2.65). Se aplica por rcParams de matplotlib y no editando una por una las decenas de llamadas a
+      legend() -- asi toda leyenda existente Y FUTURA lo hereda sin que nadie tenga que acordarse.
+      Letra de 9.5 pt frente a los 7-8 anteriores, marco definido, fondo casi opaco y esquinas
+      redondeadas a juego con los cuadros resumen. Verificado que los rcParams quedan aplicados y que un
+      hietograma real se renderiza con el nuevo estilo.
     - v0.2.66: control de calidad, completacion y regionalizacion ampliados en el nucleo (core/); NO
       conectados aun a la interfaz, quedan para la proxima iteracion. Verificados con datos sinteticos
       en este entorno (sin QGIS disponible aqui).

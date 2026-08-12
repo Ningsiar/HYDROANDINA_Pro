@@ -14,6 +14,12 @@ except ImportError:
     from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
+# Estilo comun de leyendas y ejes (ui/chart_style.py). Es idempotente,
+# asi que cada lienzo puede invocarlo sin coordinarse con los demas.
+from .chart_style import aplicar_estilo_graficos
+
+aplicar_estilo_graficos()
+
 
 class HydrographCanvas(FigureCanvas):
 
@@ -81,6 +87,59 @@ class HydrographCanvas(FigureCanvas):
         "Complementario": "#EF9F27",
         "Aforo indirecto": "#0E7490",
     }
+
+    def plot_hietograma(self, hietograma_mm, dt_h, descripcion=""):
+        """
+        Hietograma de diseño en barras, con la lamina acumulada en un eje
+        secundario y el intervalo del pico resaltado.
+
+        Se muestra JUNTO a los valores numericos porque una lista de
+        incrementos no deja ver la forma de la tormenta -- y la forma es
+        justamente lo que distingue un patron SCS Tipo II de un Tipo IA
+        con la misma lamina total, y lo que determina el caudal punta.
+        """
+        self.fig.clear()
+        self.ax = self.fig.add_subplot(111)
+        n = len(hietograma_mm)
+        if n == 0:
+            self.draw()
+            return
+        tiempos = [i * dt_h for i in range(n)]
+        idx_pico = max(range(n), key=lambda i: hietograma_mm[i])
+        colores = ["#B3261E" if i == idx_pico else "#1F3864" for i in range(n)]
+
+        self.ax.bar(tiempos, hietograma_mm, width=dt_h * 0.9, align="edge",
+                    color=colores, label="Incremento de lluvia")
+        self.ax.set_xlabel("Tiempo (h)")
+        self.ax.set_ylabel("Lluvia por intervalo (mm)")
+        self.ax.invert_yaxis()   # convencion hidrologica: la lluvia cae desde arriba
+        self.ax.grid(True, axis="y", linestyle=":", linewidth=0.5)
+
+        acumulada, suma = [], 0.0
+        for v in hietograma_mm:
+            suma += v
+            acumulada.append(suma)
+        ax2 = self.ax.twinx()
+        ax2.plot([t + dt_h for t in tiempos], acumulada, "-o", markersize=3,
+                 linewidth=1.8, color="#2E7D32", label="Lámina acumulada")
+        ax2.set_ylabel("Lámina acumulada (mm)", color="#2E7D32")
+        ax2.tick_params(axis="y", labelcolor="#2E7D32")
+
+        self.ax.annotate(
+            f"pico {hietograma_mm[idx_pico]:.2f} mm\nen t = {tiempos[idx_pico]:.2f} h",
+            xy=(tiempos[idx_pico] + dt_h / 2, hietograma_mm[idx_pico]),
+            textcoords="offset points", xytext=(10, 14), fontsize=8.5, color="#B3261E",
+            bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="#B3261E", alpha=0.9))
+
+        l1, e1 = self.ax.get_legend_handles_labels()
+        l2, e2 = ax2.get_legend_handles_labels()
+        self.ax.legend(l1 + l2, e1 + e2, loc="lower right")
+        titulo = f"Hietograma de diseño — total {suma:.1f} mm en {n} intervalos de {dt_h} h"
+        if descripcion:
+            titulo += f"\n{descripcion}"
+        self.ax.set_title(titulo, pad=12)
+        self.fig.tight_layout()
+        self.draw()
 
     def plot_separacion_flujo_base(self, caudal_total, flujo_base, escorrentia_directa,
                                      metodo, bfi, etiqueta_x="Paso de tiempo"):

@@ -18,6 +18,12 @@ except ImportError:
     from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
+# Estilo comun de leyendas y ejes (ui/chart_style.py). Es idempotente,
+# asi que cada lienzo puede invocarlo sin coordinarse con los demas.
+from .chart_style import aplicar_estilo_graficos
+
+aplicar_estilo_graficos()
+
 BANDAS_CV = [(0.0, 0.20, "Fluvial convencional", "#2E7D32"),
              (0.20, 0.45, "Hiperconcentrado", "#EF9F27"),
              (0.45, 0.55, "Flujo de Lodos", "#D9622B"),

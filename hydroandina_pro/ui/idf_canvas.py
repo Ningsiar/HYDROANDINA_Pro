@@ -20,6 +20,12 @@ except ImportError:
 import matplotlib
 from matplotlib.figure import Figure
 
+# Estilo comun de leyendas y ejes (ui/chart_style.py). Es idempotente,
+# asi que cada lienzo puede invocarlo sin coordinarse con los demas.
+from .chart_style import aplicar_estilo_graficos
+
+aplicar_estilo_graficos()
+
 
 class IdfCanvas(FigureCanvas):
 
