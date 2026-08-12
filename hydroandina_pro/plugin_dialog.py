@@ -399,7 +399,6 @@ class HydroAndinaProDialog(QDialog):
         self._build_tab3()
         self._build_tab4()
         self._build_tab_precipitacion()
-        self._build_tab_precipitacion_mensual()
         self._build_tab5()
         self._build_tab_hidraulica_drenaje()
         self._build_tab_modulos_avanzados()
@@ -408,6 +407,10 @@ class HydroAndinaProDialog(QDialog):
         self._build_tab_sedimentos()
         self._build_tab_flujos_hiperconcentrados()
         self._build_tab_cambio_climatico()
+        # Precipitacion Media Mensual se ubica junto al bloque de caudales
+        # medios/minimos/ecologico, que es donde se consume, en vez de
+        # partir la secuencia del diseño de avenidas (Pestañas 5-8).
+        self._build_tab_precipitacion_mensual()
         self._build_tab_caudales_medios()
         self._build_tab_caudales_minimos()
         self._build_tab_phabsim()
@@ -4067,7 +4070,7 @@ class HydroAndinaProDialog(QDialog):
                                   anchos_fijos={0: 190, 1: 150, 2: 140})
         v.addWidget(self.tabla_resumen_qc)
 
-        self._agregar_pestaña_con_scroll(tab, "6. Precipitación Media Mensual")
+        self._agregar_pestaña_con_scroll(tab, "15. Precipitación Media Mensual")
 
     def _on_usar_tabla_precip_mensual(self):
         try:
@@ -5228,7 +5231,7 @@ class HydroAndinaProDialog(QDialog):
         v.addWidget(self.texto_resumen_caudales)
         self._actualizar_texto_resumen_caudales()
 
-        self._agregar_pestaña_con_scroll(tab, "7. Caudales Máximos SCS/Clark/Témez/Creager/MacMath")
+        self._agregar_pestaña_con_scroll(tab, "6. Caudales Máximos SCS/Clark/Témez/Creager/MacMath")
 
     def _actualizar_texto_resumen_caudales(self):
         """Cuadro resumen de la Pestaña 7: caudal pico por el método de
@@ -6151,7 +6154,7 @@ class HydroAndinaProDialog(QDialog):
         v.addWidget(self.texto_resumen_hidraulica)
         self._actualizar_texto_resumen_hidraulica()
 
-        self._agregar_pestaña_con_scroll(tab, "8. Hidráulica y Drenaje")
+        self._agregar_pestaña_con_scroll(tab, "7. Diseño Estructuras Hidráulicas")
 
     def _fila_fuente_datos(self, layout: QFormLayout, prefijo: str):
         """Botones para tomar Q de la pestaña 6 y S/n de la morfometría,
@@ -9253,7 +9256,7 @@ class HydroAndinaProDialog(QDialog):
         v.addWidget(self.texto_resumen_qm)
 
         self._on_cambiar_modelo_qm(self.combo_modelo_qm.currentText())
-        self._agregar_pestaña_con_scroll(tab, "15. Caudales Medios (Qm)")
+        self._agregar_pestaña_con_scroll(tab, "16. Caudales Medios (Qm)")
 
     def _on_cambiar_modelo_qm(self, nombre_modelo: str):
         info = mean_flow_models.MODELOS_DISPONIBLES.get(nombre_modelo)
@@ -9546,7 +9549,7 @@ class HydroAndinaProDialog(QDialog):
         self.texto_resumen_minimos = ResumenFinal()
         v.addWidget(self.texto_resumen_minimos)
 
-        self._agregar_pestaña_con_scroll(tab, "16. Caudales Mínimos")
+        self._agregar_pestaña_con_scroll(tab, "17. Caudales Mínimos")
 
     def _leer_columna_unica(self, tabla):
         valores = []
@@ -9793,7 +9796,7 @@ class HydroAndinaProDialog(QDialog):
         self.texto_resumen_phabsim = ResumenFinal()
         v.addWidget(self.texto_resumen_phabsim)
 
-        self._agregar_pestaña_con_scroll(tab, "17. Caudal Ecológico - PHABSIM")
+        self._agregar_pestaña_con_scroll(tab, "18. Caudal Ecológico - PHABSIM")
 
     def _leer_curva_hsi(self, tabla):
         curva = []
@@ -10111,7 +10114,7 @@ class HydroAndinaProDialog(QDialog):
         self.texto_resumen_flujo_subterraneo = ResumenFinal()
         v.addWidget(self.texto_resumen_flujo_subterraneo)
 
-        self._agregar_pestaña_con_scroll(tab, "18. Flujo Subterráneo")
+        self._agregar_pestaña_con_scroll(tab, "19. Flujo Subterráneo")
 
     def _on_calcular_darcy(self):
         k = self.spin_k_darcy.value()
@@ -10381,7 +10384,7 @@ class HydroAndinaProDialog(QDialog):
         self.texto_resumen_pozo = ResumenFinal()
         v.addWidget(self.texto_resumen_pozo)
 
-        self._agregar_pestaña_con_scroll(tab, "19. Hidráulica de Pozos")
+        self._agregar_pestaña_con_scroll(tab, "20. Hidráulica de Pozos")
 
     def _on_calcular_regimen_permanente(self):
         try:
@@ -10603,7 +10606,7 @@ class HydroAndinaProDialog(QDialog):
         v.addWidget(gb_individual)
 
         v.addStretch()
-        self._agregar_pestaña_con_scroll(tab, "20. Exportar / Reportes")
+        self._agregar_pestaña_con_scroll(tab, "21. Exportar / Reportes")
 
     # ------------------------------------------------------------------
     # TAB 6: Créditos

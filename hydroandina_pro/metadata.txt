@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.2.61
+version=0.2.62
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,19 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.2.62: REORDENAMIENTO Y RENUMERACION DE PESTAÑAS, preparando la incorporacion del modulo de
+      modelamiento hidraulico 2D.
+      Caudales Maximos pasa de la 7 a la 6; Hidraulica y Drenaje pasa de la 8 a la 7 y se renombra a
+      "Diseño Estructuras Hidraulicas"; la posicion 8 queda RESERVADA para la nueva pestaña
+      "Modelamiento Hidraulico 2D". Precipitacion Media Mensual deja la posicion 6 y se traslada a la
+      15, justo antes de Caudales Medios (Qm): es la pestaña que consume esos datos, de modo que queda
+      agrupada con el bloque de caudales medios/minimos/ecologico en vez de partir la secuencia del
+      diseño de avenidas, que ahora corre seguida de la 5 a la 8 (precipitacion -> caudales ->
+      estructuras -> modelamiento 2D). El resto de pestañas se renumero de corrido hasta la 21
+      (Exportar / Reportes), verificando por analisis del codigo que la secuencia queda sin huecos ni
+      numeros repetidos, con la unica ausencia del 8 ya reservado.
+      No es solo un cambio de etiquetas: se movio tambien el orden de construccion de las pestañas, que
+      es el que determina como se muestran.
     - v0.2.61: RELLENO DE CELDAS SIN DATO (voids) del MDE en la Pestaña 1, antes de todo el
       procesamiento hidrologico.
       POR QUE HACIA FALTA, Y POR QUE NO LO CUBRIA EL RELLENO QUE YA EXISTIA: la cadena aplicaba
