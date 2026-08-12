@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.2.67
+version=0.2.68
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,48 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.2.68: se completan en la interfaz los modulos que la v0.2.66 habia dejado solo en el nucleo,
+      y se cierra el hueco de numeracion de las pestañas.
+      (1) PESTAÑA 8 "MODELAMIENTO HIDRAULICO 2D", que faltaba: la barra de pestañas iba 1-7 y saltaba
+      a la 9. Es un PUENTE hacia el plugin independiente HYDRA2DGPU (Aaron Sprague, licencia MIT), que
+      resuelve las ecuaciones de aguas someras 2D por volumenes finitos sobre GPU; no se copia su
+      codigo. La pestaña existe aunque el motor no este instalado, y ahi esta su valor: diagnostica por
+      separado las TRES condiciones que deben cumplirse -- plugin instalado, activado en QGIS, y motor
+      CUDA disponible -- porque cada una se corrige de forma distinta y un unico "no disponible" no
+      dice que hacer. La tercera es la que mas confunde: el plugin puede estar instalado y activo y aun
+      asi no simular nada, porque su solucionador es una extension compilada C++/CUDA que se descarga
+      la primera vez que se abre su ventana. Ademas reune los insumos que las pestañas anteriores ya
+      calcularon (MDE, area, pendiente, CN, hidrograma) y dice cuales faltan ANTES de entrar a la otra
+      ventana, donde no se puede volver atras sin perder la malla; y exporta el hidrograma de diseño a
+      CSV para usarlo como condicion de borde de entrada.
+      (2) REGIONALIZACION FRENTE A UNA COVARIABLE en la Pestaña 15: ajusta la relacion entre la
+      precipitacion de varias estaciones y una covariable fisica -- tipicamente la altitud, que en los
+      Andes explica buena parte de la variacion espacial -- para estimarla en puntos SIN estacion.
+      Correlacion con su significancia, regresion con intervalo de confianza al 95% por coeficiente,
+      residuo de cada estacion, y correccion local de residuos por IDW (aproximacion practica al
+      co-kriging sin ajustar variograma). El grafico marca con sombreado la ZONA DE EXTRAPOLACION,
+      fuera del rango de altitud cubierto por las estaciones: una estimacion extrapolada no tiene el
+      mismo respaldo que una interpolada y eso tiene que verse, no deducirse.
+      (3) VALIDACION DE PRODUCTOS GRILLADOS (CHIRPS/IMERG/ERA5-Land/PISCOp) contra una estacion real:
+      metricas continuas (NSE, KGE con sus tres componentes, PBIAS, RMSE, MAE, R) con la clasificacion
+      de Moriasi et al. (2007), y metricas categoricas de deteccion de lluvia (POD, FAR, FBI, HSS) con
+      su tabla de contingencia. Las dos familias se muestran juntas a proposito: un producto puede
+      acertar el VOLUMEN mensual y fallar en QUE DIAS llovio, o al reves, y para diseño hidrologico
+      ninguna de las dos cosas sola basta.
+      (4) CUATRO PRUEBAS NUEVAS EN CONTROL DE CALIDAD (grupo ⑤ de la Pestaña 15): Anderson-Darling de
+      normalidad; Mann-Kendall ESTACIONAL, que detecta tendencia sin que el ciclo anual la enmascare
+      (compara cada mes contra el mismo mes de otros años); funcion de autocorrelacion parcial (PACF)
+      con su correlograma y banda de significancia al 95%, que importa porque Mann-Kendall y Pettitt
+      asumen independencia y pierden confiabilidad si hay dependencia serial; y correccion por quiebre
+      (aditiva o multiplicativa), que homogeneiza la media de los dos segmentos y deja la serie
+      corregida como serie activa para volver a comprobar la homogeneidad.
+      (5) CORRECCION EN LA BANDA DE CONFIANZA de la regresion de regionalizacion: la primera version
+      la calculaba sumando en cuadratura los errores estandar de la pendiente y del intercepto, como si
+      fueran independientes. No lo son -- subir la pendiente baja el intercepto -- y esa suma inflaba
+      la banda cerca de 17 veces, haciendo ver un ajuste con R2=0.95 como si no sirviera para nada. Se
+      reemplazo por la formula exacta de la respuesta media, s*sqrt(1/n + (x-x_media)^2/Sxx), verificada
+      contra el calculo teorico: estrecha en el centro de los datos y abierta hacia los extremos, que
+      es justo lo que debe comunicar sobre la extrapolacion.
     - v0.2.67: tres puntos de la cola de trabajo -- autorrelleno de la red de drenaje, grafico del
       hietograma y estilo comun de leyendas en los 18 lienzos.
       (1) AUTORRELLENO DE Lt Y Nu EN LA PESTAÑA 2, que corrige un problema de correctitud reportado por

@@ -38,7 +38,8 @@ from .core import (delineation, morphometry, curve_number, tc_methods, dem_downl
                     quality_control, pmp_hershfield, direct_discharge_methods, flood_routing, baseflow, infiltration,
                     data_completion, areal_precipitation, water_yield, scour, soil_loss,
                     sediment_transport, debris_flow, climate_change, mean_flow_models, etp_methods,
-                    low_flows, phabsim, groundwater_flow, well_hydraulics, idf_curves)
+                    low_flows, phabsim, groundwater_flow, well_hydraulics, idf_curves,
+                    regionalization, gridded_validation, hydra2d_bridge)
 from .core.qgis_layer_utils import obtener_capa
 from .ui.hypsometric_canvas import HypsometricCanvas
 from .ui.hydrograph_canvas import HydrographCanvas
@@ -60,6 +61,7 @@ from .ui.low_flow_canvas import LowFlowCanvas
 from .ui.phabsim_canvas import PhabsimCanvas
 from .ui.groundwater_canvas import GroundwaterCanvas
 from .ui.well_canvas import WellCanvas
+from .ui.regionalization_canvas import RegionalizacionCanvas, ValidacionGrilladaCanvas
 from .ui.table_utils import (ajustar_alto_tabla, aplicar_columna_elastica, limitar_ancho_tabla,
                               limitar_ancho_boton, crear_tabla_parametros, poblar_tabla_parametros)
 
@@ -401,6 +403,7 @@ class HydroAndinaProDialog(QDialog):
         self._build_tab_precipitacion()
         self._build_tab5()
         self._build_tab_hidraulica_drenaje()
+        self._build_tab_hidraulica_2d()
         self._build_tab_modulos_avanzados()
         self._build_tab_socavacion()
         self._build_tab_perdida_suelos()
@@ -3918,6 +3921,116 @@ class HydroAndinaProDialog(QDialog):
                 return categoria
         return "Otro"
 
+    def _on_qc_mann_kendall_estacional(self):
+        datos = self._obtener_serie_activa()
+        if datos is None:
+            return
+        periodo = self.spin_qc_periodo_estacional.value()
+        try:
+            r = quality_control.test_mann_kendall_estacional(datos, periodo)
+            filas = [
+                ("S total (suma de las S de cada estación)", r["S_total"], ""),
+                ("Varianza de S total", r["var_S_total"], ""),
+                ("Estadístico Z", r["Z"], ""),
+                ("p-valor", r["p_valor"], "",
+                 "significativa (α=0.05)" if r["es_significativa_alpha_0_05"]
+                 else "no significativa (α=0.05)"),
+                ("Tendencia", r["tendencia"], "", f"periodo estacional = {periodo}"),
+            ]
+            # detalle_por_estacion viene como estructura anidada: se
+            # aplana a una fila por sub-estación en vez de volcar el
+            # diccionario crudo en una celda, que sería ilegible.
+            detalle = r.get("detalle_por_estacion")
+            if isinstance(detalle, dict):
+                elementos = detalle.items()
+            else:
+                elementos = enumerate(detalle or [], start=1)
+            for clave, valor in elementos:
+                if isinstance(valor, dict):
+                    resumen = ", ".join(f"{k}={v}" for k, v in valor.items())
+                else:
+                    resumen = str(valor)
+                filas.append((f"Sub-serie {clave}", resumen, ""))
+            poblar_tabla_parametros(self.tabla_resultado_qc, filas, filas_visibles_max=24)
+
+            self.canvas_qc.plot_serie_con_marca(
+                datos, f"Mann-Kendall estacional (periodo {periodo}) — Z = {r['Z']}, "
+                       f"p = {r['p_valor']}")
+        except quality_control.QualityControlError as e:
+            QMessageBox.warning(self, "Mann-Kendall estacional", str(e))
+
+    def _on_qc_pacf(self):
+        datos = self._obtener_serie_activa()
+        if datos is None:
+            return
+        max_lag = self.spin_qc_max_lag.value()
+        try:
+            r = quality_control.funcion_autocorrelacion_parcial(datos, max_lag)
+            pacf = r["pacf_por_lag"]
+            limite = r["limite_significancia_aprox_95"]
+            significativos = r["lags_significativos"]
+            filas = [("Límite de significancia 95%", limite, "",
+                      "aproximación ±1.96/√n; fuera de esta banda hay dependencia serial"),
+                     ("Lags significativos", significativos or "ninguno", "",
+                      r["interpretacion"])]
+            for lag in sorted(int(k) for k in pacf):
+                valor = pacf[lag] if lag in pacf else pacf[str(lag)]
+                if lag == 0:
+                    continue
+                filas.append((f"PACF lag {lag}", valor, "",
+                              "SIGNIFICATIVO" if abs(valor) > limite else ""))
+            poblar_tabla_parametros(self.tabla_resultado_qc, filas, filas_visibles_max=24)
+            self.canvas_qc.plot_pacf(pacf, limite, significativos)
+        except quality_control.QualityControlError as e:
+            QMessageBox.warning(self, "Autocorrelación parcial", str(e))
+
+    def _on_qc_corregir_quiebre(self):
+        datos = self._obtener_serie_activa()
+        if datos is None:
+            return
+        # El usuario indica la posición en base 1 (como la reportan
+        # Pettitt/CUSUM en la tabla); el módulo trabaja con índice base 0.
+        indice = self.spin_qc_indice_quiebre.value() - 1
+        if not 0 < indice < len(datos):
+            QMessageBox.warning(
+                self, "Posición de quiebre no válida",
+                f"La posición debe estar entre 2 y {len(datos)} para dejar datos a ambos lados "
+                f"del quiebre (la serie activa tiene {len(datos)} valores).")
+            return
+        metodo = self.combo_qc_metodo_correccion.currentData()
+        try:
+            r = quality_control.corregir_por_quiebre(datos, indice, metodo)
+            serie_corregida = [v for v in r["serie_corregida"] if v is not None]
+            poblar_tabla_parametros(self.tabla_resultado_qc, [
+                ("Método de corrección", r["metodo"], ""),
+                ("Media del segmento anterior al quiebre", r["media_antes"], ""),
+                ("Media del segmento posterior (original)", r["media_despues_original"], ""),
+                ("Media del segmento posterior (corregida)", r["media_despues_corregida"], "",
+                 "debe coincidir con la media del segmento anterior"),
+                ("Ajuste aplicado", r["ajuste_aplicado"], "",
+                 "diferencia restada" if metodo == "aditivo" else "factor multiplicado"),
+                ("Valores corregidos", len(serie_corregida), ""),
+                ("Advertencia", r["advertencia"], ""),
+            ], filas_visibles_max=10)
+
+            # La serie corregida pasa a ser la activa: encadenar el resto
+            # de pruebas sobre ella es justo el flujo de trabajo (corregir
+            # el quiebre y volver a comprobar homogeneidad).
+            self.serie_qc_activa = serie_corregida
+            self.canvas_qc.plot_serie_con_marca(
+                serie_corregida,
+                f"Serie corregida por quiebre ({r['metodo']}) en la posición {indice + 1}",
+                indice_marca=indice,
+                etiqueta_marca=f"Quiebre corregido (pos. {indice + 1})")
+            QMessageBox.information(
+                self, "Serie corregida",
+                "La serie corregida quedó como serie activa de esta pestaña: puede volver a "
+                "aplicar las pruebas de homogeneidad de ① para comprobar que el quiebre "
+                "desapareció.\n\nDocumente en el informe que estos valores son CORREGIDOS, no "
+                "observados directamente.")
+        except (quality_control.QualityControlError, ValueError) as e:
+            QMessageBox.warning(self, "Corrección por quiebre", str(e))
+
     def _on_qc_generico(self, funcion_test, nombre: str):
         datos = self._obtener_serie_activa()
         if datos is None:
@@ -4120,6 +4233,64 @@ class HydroAndinaProDialog(QDialog):
         h4.addWidget(btn_autocorr)
         v_cal.addLayout(h4)
 
+        v_cal.addWidget(QLabel("<b>⑤ Normalidad, estacionalidad, dependencia serial y corrección</b>"))
+        _lbl_qc5 = QLabel(
+            "Anderson-Darling comprueba si la serie es normal, requisito de varias pruebas "
+            "paramétricas. Mann-Kendall estacional detecta tendencia SIN que la estacionalidad la "
+            "enmascare (compara cada mes contra el mismo mes de otros años). La PACF revela "
+            "dependencia serial: si existe, Mann-Kendall y Pettitt pierden confiabilidad porque "
+            "asumen independencia. La corrección por quiebre homogeneiza la media de los dos "
+            "segmentos separados por un salto detectado en ①."
+        )
+        _lbl_qc5.setWordWrap(True)
+        v_cal.addWidget(_lbl_qc5)
+
+        h5 = QHBoxLayout()
+        btn_ad = QPushButton("Anderson-Darling (normalidad)")
+        btn_ad.clicked.connect(lambda: self._on_qc_generico(
+            quality_control.test_anderson_darling, "Anderson-Darling (normalidad)"))
+        h5.addWidget(btn_ad)
+        h5.addWidget(QLabel("Periodo estacional:"))
+        self.spin_qc_periodo_estacional = QSpinBox()
+        self.spin_qc_periodo_estacional.setRange(2, 24)
+        self.spin_qc_periodo_estacional.setValue(12)
+        self.spin_qc_periodo_estacional.setToolTip(
+            "12 para series mensuales, 4 para trimestrales.")
+        h5.addWidget(self.spin_qc_periodo_estacional)
+        btn_mk_est = QPushButton("Mann-Kendall estacional")
+        btn_mk_est.clicked.connect(self._on_qc_mann_kendall_estacional)
+        h5.addWidget(btn_mk_est)
+        h5.addStretch()
+        v_cal.addLayout(h5)
+
+        h6 = QHBoxLayout()
+        h6.addWidget(QLabel("Lag máximo PACF:"))
+        self.spin_qc_max_lag = QSpinBox()
+        self.spin_qc_max_lag.setRange(1, 60)
+        self.spin_qc_max_lag.setValue(12)
+        h6.addWidget(self.spin_qc_max_lag)
+        btn_pacf = QPushButton("Autocorrelación parcial (PACF)")
+        btn_pacf.clicked.connect(self._on_qc_pacf)
+        h6.addWidget(btn_pacf)
+        h6.addWidget(QLabel("Posición del quiebre:"))
+        self.spin_qc_indice_quiebre = QSpinBox()
+        self.spin_qc_indice_quiebre.setRange(1, 100000)
+        self.spin_qc_indice_quiebre.setValue(1)
+        self.spin_qc_indice_quiebre.setToolTip(
+            "Posición (1 = primer dato) desde la que empieza el segundo segmento. Use la que "
+            "reporta Pettitt/CUSUM/Buishand en ①.")
+        h6.addWidget(self.spin_qc_indice_quiebre)
+        self.combo_qc_metodo_correccion = QComboBox()
+        self.combo_qc_metodo_correccion.addItem("Aditivo (resta la diferencia de medias)", "aditivo")
+        self.combo_qc_metodo_correccion.addItem("Multiplicativo (escala por la razón de medias)",
+                                                 "multiplicativo")
+        h6.addWidget(self.combo_qc_metodo_correccion)
+        btn_corregir = QPushButton("Corregir por quiebre")
+        btn_corregir.clicked.connect(self._on_qc_corregir_quiebre)
+        h6.addWidget(btn_corregir)
+        h6.addStretch()
+        v_cal.addLayout(h6)
+
         self.tabla_resultado_qc = crear_tabla_parametros()
         v_cal.addWidget(self.tabla_resultado_qc)
 
@@ -4154,6 +4325,122 @@ class HydroAndinaProDialog(QDialog):
         aplicar_columna_elastica(self.tabla_resumen_qc, indice_columna_larga=3,
                                   anchos_fijos={0: 190, 1: 150, 2: 140})
         v.addWidget(self.tabla_resumen_qc)
+
+        # =============================================================
+        # REGIONALIZACIÓN vs. COVARIABLE (altitud / latitud / longitud)
+        # =============================================================
+        gb_reg = QGroupBox("Regionalización de la precipitación frente a una covariable")
+        v_reg = QVBoxLayout(gb_reg)
+        lbl_reg = QLabel(
+            "Ajusta la relación entre la precipitación de varias estaciones y una <b>covariable</b> "
+            "física — típicamente la <b>altitud</b>, que en los Andes explica buena parte de la "
+            "variación espacial — para poder estimarla en puntos SIN estación. Devuelve la correlación "
+            "con su significancia, la regresión con intervalo de confianza al 95%, y la predicción en "
+            "los puntos que indique.<br><br>"
+            "Incluye además una <b>corrección local de residuos por IDW</b>: tras aplicar la regresión, "
+            "reparte el error que queda en cada estación hacia los puntos vecinos. Es una aproximación "
+            "práctica al co-kriging sin tener que ajustar un variograma, y suele mejorar bastante la "
+            "estimación cuando hay estaciones cerca del punto buscado."
+        )
+        lbl_reg.setWordWrap(True)
+        v_reg.addWidget(lbl_reg)
+
+        v_reg.addWidget(QLabel(
+            "<b>Estaciones</b> — pegue desde Excel: nombre, valor de la variable (p.ej. precipitación "
+            "media anual en mm), covariable (p.ej. altitud en m), X e Y en el CRS del proyecto:"))
+        self.tabla_regionalizacion = TablaPegable(8, 5)
+        self.tabla_regionalizacion.setHorizontalHeaderLabels(
+            ["Estación", "Variable (mm)", "Covariable (m)", "X", "Y"])
+        aplicar_columna_elastica(self.tabla_regionalizacion, indice_columna_larga=0)
+        ajustar_alto_tabla(self.tabla_regionalizacion, filas_visibles_max=10)
+        v_reg.addWidget(self.tabla_regionalizacion)
+
+        v_reg.addWidget(QLabel(
+            "<b>Puntos a estimar</b> (opcional) — nombre, covariable, X, Y:"))
+        self.tabla_puntos_regionalizacion = TablaPegable(4, 4)
+        self.tabla_puntos_regionalizacion.setHorizontalHeaderLabels(
+            ["Punto", "Covariable (m)", "X", "Y"])
+        aplicar_columna_elastica(self.tabla_puntos_regionalizacion, indice_columna_larga=0)
+        ajustar_alto_tabla(self.tabla_puntos_regionalizacion, filas_visibles_max=8)
+        v_reg.addWidget(self.tabla_puntos_regionalizacion)
+
+        h_reg_btn = QHBoxLayout()
+        self.check_correccion_residual = QCheckBox(
+            "Aplicar corrección local de residuos por IDW (recomendado si hay estaciones cercanas)")
+        self.check_correccion_residual.setChecked(True)
+        v_reg.addWidget(self.check_correccion_residual)
+        btn_reg = QPushButton("Regionalizar")
+        btn_reg.clicked.connect(self._on_regionalizar)
+        limitar_ancho_boton(btn_reg)
+        h_reg_btn.addWidget(btn_reg)
+        h_reg_btn.addStretch()
+        v_reg.addLayout(h_reg_btn)
+
+        self.cuadro_regionalizacion = CuadroResumenImpacto(ancho_maximo=720)
+        self.cuadro_regionalizacion.actualizar(
+            titulo="SIN REGIONALIZAR", valor_principal="—",
+            subtitulo="Ingrese las estaciones y pulse «Regionalizar»")
+        centrar_en_layout(self.cuadro_regionalizacion, v_reg)
+        self.tabla_resultado_regionalizacion = crear_tabla_parametros()
+        v_reg.addWidget(self.tabla_resultado_regionalizacion)
+        self.canvas_regionalizacion = RegionalizacionCanvas()
+        v_reg.addWidget(self.canvas_regionalizacion)
+        v.addWidget(gb_reg)
+
+        # =============================================================
+        # VALIDACIÓN DE PRODUCTO GRILLADO CONTRA ESTACIÓN
+        # =============================================================
+        gb_val = QGroupBox("Validación de un producto grillado (CHIRPS / IMERG / ERA5-Land / PISCOp)")
+        v_val = QVBoxLayout(gb_val)
+        lbl_val = QLabel(
+            "Compara la serie de un producto grillado con la de una estación real para decidir si "
+            "puede usarse donde no hay medición. Calcula <b>métricas continuas</b> (NSE, KGE, PBIAS, "
+            "RMSE, R) con la clasificación de Moriasi et al. (2007), y <b>métricas categóricas de "
+            "detección de lluvia</b> (POD, FAR, FBI, HSS).<br><br>"
+            "La distinción importa: un producto puede acertar el <i>volumen</i> mensual y aun así "
+            "fallar en <i>qué días</i> llovió — o al revés. Las continuas miden lo primero y las "
+            "categóricas lo segundo, y para diseño hidrológico ambas cosas cuentan."
+        )
+        lbl_val.setWordWrap(True)
+        v_val.addWidget(lbl_val)
+
+        v_val.addWidget(QLabel(
+            "Series emparejadas — una fila por paso de tiempo: valor del producto grillado y valor "
+            "observado en la estación (mm):"))
+        self.tabla_validacion_grillada = TablaPegable(12, 2)
+        self.tabla_validacion_grillada.setHorizontalHeaderLabels(
+            ["Producto grillado (mm)", "Estación observada (mm)"])
+        limitar_ancho_tabla(self.tabla_validacion_grillada, ancho_maximo=460)
+        ajustar_alto_tabla(self.tabla_validacion_grillada, filas_visibles_max=10)
+        h_val_tabla = QHBoxLayout()
+        h_val_tabla.addWidget(self.tabla_validacion_grillada)
+        h_val_tabla.addStretch()
+        v_val.addLayout(h_val_tabla)
+
+        f_val = QFormLayout()
+        f_val.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.spin_umbral_deteccion = QDoubleSpinBox()
+        self.spin_umbral_deteccion.setRange(0.0, 50.0)
+        self.spin_umbral_deteccion.setDecimals(2)
+        self.spin_umbral_deteccion.setValue(1.0)
+        f_val.addRow("Umbral para considerar «día con lluvia» (mm):", self.spin_umbral_deteccion)
+        v_val.addLayout(f_val)
+
+        btn_val = QPushButton("Validar el producto grillado")
+        btn_val.clicked.connect(self._on_validar_grillada)
+        limitar_ancho_boton(btn_val)
+        v_val.addWidget(btn_val)
+
+        self.cuadro_validacion_grillada = CuadroResumenImpacto(ancho_maximo=720)
+        self.cuadro_validacion_grillada.actualizar(
+            titulo="SIN VALIDAR", valor_principal="—",
+            subtitulo="Pegue las series emparejadas y pulse «Validar»")
+        centrar_en_layout(self.cuadro_validacion_grillada, v_val)
+        self.tabla_resultado_validacion = crear_tabla_parametros()
+        v_val.addWidget(self.tabla_resultado_validacion)
+        self.canvas_validacion_grillada = ValidacionGrilladaCanvas()
+        v_val.addWidget(self.canvas_validacion_grillada)
+        v.addWidget(gb_val)
 
         self._agregar_pestaña_con_scroll(tab, "15. Precipitación Media Mensual")
 
@@ -6919,6 +7206,205 @@ class HydroAndinaProDialog(QDialog):
     # TAB 8: Módulos Avanzados (completación de datos, precipitación
     # areal, oferta hídrica)
     # ------------------------------------------------------------------
+    def _build_tab_hidraulica_2d(self):
+        """
+        Pestaña 8 — Modelamiento Hidráulico 2D.
+
+        No reimplementa el solucionador: actúa como PUENTE hacia el
+        plugin HYDRA2DGPU (ver core/hydra2d_bridge.py), que resuelve las
+        ecuaciones de aguas someras por volúmenes finitos sobre GPU.
+
+        La pestaña existe aunque el motor no esté instalado, y ese es su
+        principal valor: diagnostica cuál de las tres condiciones falla
+        (instalado / activo / motor disponible) y reúne los insumos que
+        las pestañas anteriores ya calcularon, de modo que el usuario
+        sepa qué le falta ANTES de entrar a la otra ventana.
+        """
+        tab = QWidget()
+        v = QVBoxLayout(tab)
+
+        lbl_intro = QLabel(
+            "<b>Modelamiento hidráulico bidimensional</b> por ecuaciones de aguas someras "
+            "(2D shallow water equations) con solucionador de volúmenes finitos acelerado por GPU.<br><br>"
+            "A diferencia del cálculo 1D de la Pestaña 7, el modelo 2D resuelve el flujo sobre una "
+            "malla que cubre toda la llanura: es lo que se necesita para <b>mapas de inundación</b>, "
+            "para flujo que se desborda del cauce y se reparte lateralmente, y para el análisis de "
+            "riesgo por calado y velocidad.<br><br>"
+            "El motor de cálculo es el plugin independiente <b>HYDRA2DGPU</b> (Aaron Sprague, "
+            "licencia MIT). HydroAndina Pro no copia su código: lo usa como dependencia externa y le "
+            "entrega los insumos ya calculados en las pestañas anteriores."
+        )
+        lbl_intro.setWordWrap(True)
+        v.addWidget(lbl_intro)
+
+        # ---------------- Estado del motor ----------------
+        gb_estado = QGroupBox("1. Estado del motor de cálculo 2D")
+        v_estado = QVBoxLayout(gb_estado)
+        self.cuadro_estado_hydra2d = CuadroResumenImpacto(ancho_maximo=720)
+        self.cuadro_estado_hydra2d.actualizar(
+            titulo="ESTADO SIN COMPROBAR", valor_principal="—",
+            subtitulo="Pulse «Comprobar estado» para diagnosticar el motor 2D")
+        centrar_en_layout(self.cuadro_estado_hydra2d, v_estado)
+
+        self.tabla_estado_hydra2d = crear_tabla_parametros()
+        v_estado.addWidget(self.tabla_estado_hydra2d)
+
+        self.texto_estado_hydra2d = ResumenFinal(alto_minimo=90)
+        self.texto_estado_hydra2d.setHtml(
+            "<i>Sin comprobar. El diagnóstico distingue tres condiciones que se corrigen de forma "
+            "distinta: que el plugin esté <b>instalado</b>, que esté <b>activado</b> en QGIS, y que "
+            "su <b>motor CUDA</b> (una extensión compilada que se descarga aparte) esté "
+            "disponible.</i>")
+        v_estado.addWidget(self.texto_estado_hydra2d)
+
+        h_estado = QHBoxLayout()
+        btn_comprobar = QPushButton("Comprobar estado del motor 2D")
+        btn_comprobar.clicked.connect(self._on_comprobar_hydra2d)
+        limitar_ancho_boton(btn_comprobar)
+        h_estado.addWidget(btn_comprobar)
+        self.btn_abrir_hydra2d = QPushButton("Abrir ventana de HYDRA2DGPU")
+        self.btn_abrir_hydra2d.clicked.connect(self._on_abrir_hydra2d)
+        limitar_ancho_boton(self.btn_abrir_hydra2d)
+        h_estado.addWidget(self.btn_abrir_hydra2d)
+        h_estado.addStretch()
+        v_estado.addLayout(h_estado)
+        v.addWidget(gb_estado)
+
+        # ---------------- Insumos ----------------
+        gb_insumos = QGroupBox("2. Insumos disponibles para el modelo 2D")
+        v_insumos = QVBoxLayout(gb_insumos)
+        lbl_insumos = QLabel(
+            "Revisa qué insumos ya calculó usted en las pestañas anteriores y cuáles faltan. "
+            "Conviene resolver los faltantes aquí y no dentro de la ventana de HYDRA2DGPU, donde "
+            "no hay forma de volver atrás sin perder la configuración de la malla."
+        )
+        lbl_insumos.setWordWrap(True)
+        v_insumos.addWidget(lbl_insumos)
+
+        self.cuadro_insumos_hydra2d = CuadroResumenImpacto(ancho_maximo=720)
+        self.cuadro_insumos_hydra2d.actualizar(
+            titulo="INSUMOS SIN REVISAR", valor_principal="—",
+            subtitulo="Pulse «Revisar insumos»")
+        centrar_en_layout(self.cuadro_insumos_hydra2d, v_insumos)
+        self.tabla_insumos_hydra2d = crear_tabla_parametros()
+        v_insumos.addWidget(self.tabla_insumos_hydra2d)
+
+        h_insumos = QHBoxLayout()
+        btn_insumos = QPushButton("Revisar insumos")
+        btn_insumos.clicked.connect(self._on_revisar_insumos_hydra2d)
+        limitar_ancho_boton(btn_insumos)
+        h_insumos.addWidget(btn_insumos)
+        btn_exportar_hid = QPushButton("Exportar hidrograma a CSV para el borde de entrada")
+        btn_exportar_hid.clicked.connect(self._on_exportar_hidrograma_hydra2d)
+        limitar_ancho_boton(btn_exportar_hid)
+        h_insumos.addWidget(btn_exportar_hid)
+        h_insumos.addStretch()
+        v_insumos.addLayout(h_insumos)
+        v.addWidget(gb_insumos)
+
+        v.addStretch()
+        self._agregar_pestaña_con_scroll(tab, "8. Modelamiento Hidráulico 2D")
+
+    def _on_comprobar_hydra2d(self):
+        estado = hydra2d_bridge.estado_hydra2d()
+        self.estado_hydra2d_ultimo = estado
+        listo = estado["instalado"] and estado["activo"] and estado["motor_disponible"]
+
+        poblar_tabla_parametros(self.tabla_estado_hydra2d, [
+            ("Plugin instalado", "sí" if estado["instalado"] else "NO", "",
+             estado["ruta"] or "no se encontró la carpeta del plugin"),
+            ("Versión detectada", estado["version"] or "—", ""),
+            ("Activado en QGIS", "sí" if estado["activo"] else "NO", "",
+             "se activa en Complementos → Administrar e instalar complementos"),
+            ("Motor de cálculo (CUDA) disponible", "sí" if estado["motor_disponible"] else "NO", "",
+             estado["detalle_motor"] or "el paquete swe2d se importa correctamente"),
+        ], filas_visibles_max=6)
+
+        # Cada condición que falla tiene su propia solución, así que el
+        # cuadro nombra la primera que falta en vez de un "no disponible"
+        # genérico que no dice qué hacer.
+        if listo:
+            titulo_estado, tipo = "MOTOR 2D LISTO", "exito"
+        elif not estado["instalado"]:
+            titulo_estado, tipo = "FALTA INSTALAR EL PLUGIN", "alerta"
+        elif not estado["activo"]:
+            titulo_estado, tipo = "FALTA ACTIVAR EL PLUGIN", "atencion"
+        else:
+            titulo_estado, tipo = "FALTA EL MOTOR CUDA", "atencion"
+
+        self.cuadro_estado_hydra2d.actualizar(
+            titulo="ESTADO DEL MOTOR DE CÁLCULO 2D",
+            valor_principal=titulo_estado,
+            subtitulo=f"HYDRA2DGPU v{estado['version']}" if estado["version"] else "HYDRA2DGPU",
+            metricas=[("Instalado", "sí" if estado["instalado"] else "no"),
+                       ("Activado", "sí" if estado["activo"] else "no"),
+                       ("Motor CUDA", "sí" if estado["motor_disponible"] else "no")],
+            leyenda=("Las tres condiciones se cumplen: puede abrir la ventana de HYDRA2DGPU y "
+                      "ejecutar la simulación 2D." if listo else
+                      "Revise el detalle debajo: cada condición se corrige de una forma distinta."),
+            tipo=tipo)
+
+        self.texto_estado_hydra2d.setHtml(
+            hydra2d_bridge.mensaje_estado(estado).replace("\n\n", "<br><br>").replace("\n", "<br>"))
+
+    def _on_abrir_hydra2d(self):
+        try:
+            hydra2d_bridge.abrir_ventana_hydra2d()
+        except hydra2d_bridge.Hydra2DNoDisponible as e:
+            QMessageBox.warning(self, "HYDRA2DGPU no disponible", str(e))
+        except Exception as e:
+            QMessageBox.critical(self, "Error al abrir HYDRA2DGPU", str(e))
+
+    def _on_revisar_insumos_hydra2d(self):
+        r = hydra2d_bridge.resumen_insumos_disponibles(
+            self.morfometria_resultados, self.cn_resultados,
+            self.hidrograma_resultado, self.dem_clip_path)
+        self.insumos_hydra2d_ultimo = r
+
+        filas = []
+        for clave, dato in r["insumos"].items():
+            filas.append((
+                clave.replace("_", " ").capitalize(),
+                dato["valor"] if dato["disponible"] else "FALTA",
+                "",
+                f"{dato['origen']} — {dato['uso']}"))
+        poblar_tabla_parametros(self.tabla_insumos_hydra2d, filas, filas_visibles_max=8)
+
+        self.cuadro_insumos_hydra2d.actualizar(
+            titulo="INSUMOS PARA EL MODELO 2D",
+            valor_principal=f"{r['n_disponibles']} de {r['n_total']} disponibles",
+            subtitulo=("Todos los insumos están calculados" if r["completo"] else
+                        "Faltan: " + ", ".join(k.replace("_", " ") for k in r["faltantes"])),
+            metricas=[("Disponibles", str(r["n_disponibles"])),
+                       ("Faltantes", str(len(r["faltantes"]))),
+                       ("Total", str(r["n_total"]))],
+            leyenda=("Puede pasar a HYDRA2DGPU con los insumos completos." if r["completo"] else
+                      "Complete los insumos que faltan en sus pestañas de origen antes de abrir "
+                      "la ventana del modelo 2D."),
+            tipo="exito" if r["completo"] else "atencion")
+
+    def _on_exportar_hidrograma_hydra2d(self):
+        if not self.hidrograma_resultado:
+            QMessageBox.warning(
+                self, "Sin hidrograma",
+                "Calcule primero el hidrograma de diseño en la Pestaña 6 (Caudales Máximos).")
+            return
+        ruta, _ = QFileDialog.getSaveFileName(
+            self, "Guardar hidrograma para HYDRA2DGPU", "hidrograma_2d.csv",
+            "Archivos CSV (*.csv)")
+        if not ruta:
+            return
+        try:
+            hydra2d_bridge.exportar_hidrograma_csv(self.hidrograma_resultado, ruta)
+            QMessageBox.information(
+                self, "Hidrograma exportado",
+                f"Hidrograma guardado en:\n{ruta}\n\nCárguelo en HYDRA2DGPU como condición de borde "
+                "de entrada tipo hidrograma (columnas: tiempo_h, caudal_m3s).")
+        except hydra2d_bridge.Hydra2DNoDisponible as e:
+            QMessageBox.warning(self, "No se pudo exportar", str(e))
+        except Exception as e:
+            QMessageBox.critical(self, "Error al exportar el hidrograma", str(e))
+
     def _build_tab_modulos_avanzados(self):
         tab = QWidget()
         v = QVBoxLayout(tab)
@@ -9300,6 +9786,231 @@ class HydroAndinaProDialog(QDialog):
     # (CREALP/HydroCosmos, v2.25): Lutz Scholz (simplificado), GR2M, GR4J,
     # HBV, SAC-SMA, Snow-SD, Runoff (SWMM), GSM y SOCONT.
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Regionalización y validación de productos grillados (Pestaña 15)
+    # ------------------------------------------------------------------
+    def _leer_tabla_numerica(self, tabla, columnas_texto=(0,)):
+        """
+        Lee una TablaPegable devolviendo una lista de filas. Las columnas
+        indicadas en `columnas_texto` se conservan como cadena (nombres) y
+        el resto se convierte a float; las filas incompletas se omiten en
+        vez de propagar un None que reventaría el cálculo más adelante.
+        """
+        filas = []
+        for i in range(tabla.rowCount()):
+            fila, completa = [], True
+            for j in range(tabla.columnCount()):
+                item = tabla.item(i, j)
+                texto = item.text().strip() if item else ""
+                if not texto:
+                    completa = False
+                    break
+                if j in columnas_texto:
+                    fila.append(texto)
+                else:
+                    try:
+                        fila.append(float(texto.replace(",", ".")))
+                    except ValueError:
+                        completa = False
+                        break
+            if completa and fila:
+                filas.append(fila)
+        return filas
+
+    def _on_regionalizar(self):
+        filas = self._leer_tabla_numerica(self.tabla_regionalizacion)
+        # regresion_regionalizacion() exige n >= k+3 estaciones; con una
+        # covariable eso son 4. Se avisa aquí con un mensaje entendible
+        # en vez de dejar que salte la excepción del módulo de cálculo.
+        if len(filas) < 4:
+            QMessageBox.warning(
+                self, "Faltan estaciones",
+                "Se necesitan al menos 4 estaciones completas (estación, variable, covariable, X, Y) "
+                "para ajustar la regresión con una incertidumbre mínimamente estimable.")
+            return
+        try:
+            nombres = [f[0] for f in filas]
+            valores = [f[1] for f in filas]
+            covariable = [f[2] for f in filas]
+            coordenadas = {f[0]: (f[3], f[4]) for f in filas}
+            if len(coordenadas) != len(nombres):
+                QMessageBox.warning(self, "Estaciones repetidas",
+                                    "Hay nombres de estación duplicados; cada estación debe tener un "
+                                    "nombre único.")
+                return
+
+            corr = regionalization.correlacion_con_covariable(valores, covariable)
+            modelo = regionalization.regresion_regionalizacion(
+                valores, {"covariable": covariable}, nombres)
+
+            puntos = self._leer_tabla_numerica(self.tabla_puntos_regionalizacion)
+            con_idw = bool(puntos) and self.check_correccion_residual.isChecked()
+            valores_puntos, detalle_puntos = [], []
+            if puntos:
+                cov_puntos = {"covariable": [p[1] for p in puntos]}
+                if con_idw:
+                    salida = regionalization.regionalizar_con_correccion_residual(
+                        valores, {"covariable": covariable}, coordenadas, nombres,
+                        cov_puntos, [(p[2], p[3]) for p in puntos])
+                    detalle_puntos = salida["resultados_por_punto"]
+                    valores_puntos = [d["valor_regionalizado"] for d in detalle_puntos]
+                else:
+                    valores_puntos = regionalization.predecir_en_puntos(modelo, cov_puntos)
+
+            self.regionalizacion_resultado = {"correlacion": corr, "modelo": modelo,
+                                               "puntos": valores_puntos,
+                                               "detalle_puntos": detalle_puntos}
+
+            r = corr["r"]
+            p_val = corr["p_valor"]
+            significativa = corr["significativa_alpha_0_05"]
+            r2 = modelo["r2"]
+
+            filas_res = [
+                ("Estaciones usadas", modelo["n_estaciones"], ""),
+                ("Correlación de Pearson r", r, "", f"t = {corr['t']}"),
+                ("p-valor de la correlación", p_val, "",
+                 "significativa (α=0.05)" if significativa else "NO significativa (α=0.05)"),
+                ("R² de la regresión", r2, "", modelo["nota_r2"]),
+            ]
+            for coef in modelo["coeficientes"]:
+                filas_res.append((
+                    f"Coeficiente — {coef['termino']}", coef["coeficiente"], "",
+                    f"IC 95%: [{coef['ic_95_inferior']}, {coef['ic_95_superior']}]  "
+                    f"(error std {coef['error_std']})"))
+            for nombre in nombres:
+                res = modelo["residuos"][nombre]
+                filas_res.append((
+                    f"Residuo — {nombre}", res["residuo"], "mm",
+                    f"observado {res['observado']} vs. predicho {res['predicho']}"
+                    + (f"  ·  estandarizado {res['residuo_estandarizado']}"
+                       if res["residuo_estandarizado"] is not None else "")))
+            for i, valor_pt in enumerate(valores_puntos):
+                nombre_pt = puntos[i][0]
+                if con_idw:
+                    d = detalle_puntos[i]
+                    comentario = (f"tendencia {d['tendencia_regresion']} "
+                                  f"+ corrección IDW {d['correccion_residual_idw']}")
+                else:
+                    comentario = "solo tendencia de la regresión (sin corrección de residuos)"
+                filas_res.append((f"Estimación — {nombre_pt}", valor_pt, "mm", comentario))
+            poblar_tabla_parametros(self.tabla_resultado_regionalizacion, filas_res,
+                                     filas_visibles_max=24)
+
+            self.cuadro_regionalizacion.actualizar(
+                titulo="REGIONALIZACIÓN FRENTE A LA COVARIABLE",
+                valor_principal=f"r = {r:.4f}      R² = {r2:.4f}",
+                subtitulo=f"{modelo['n_estaciones']} estaciones"
+                           + (f" · {len(valores_puntos)} punto(s) estimado(s)"
+                              if valores_puntos else " · sin puntos a estimar"),
+                metricas=[("Estaciones", str(modelo["n_estaciones"])),
+                           ("p-valor", f"{p_val:.4f}"),
+                           ("Corrección IDW", "sí" if con_idw else "no"),
+                           ("Puntos estimados", str(len(valores_puntos)))],
+                leyenda=("Relación significativa (p < 0.05): la covariable explica parte de la "
+                          "variación espacial y el modelo puede usarse para estimar en puntos sin "
+                          "estación, dentro del rango de covariable observado."
+                          if significativa else
+                          "Relación NO significativa (p ≥ 0.05): la covariable no explica la "
+                          "variación entre estaciones. Considere dividir en subregiones más "
+                          "homogéneas (p.ej. por vertiente) antes de extrapolar."),
+                tipo="exito" if significativa else "atencion")
+
+            self.canvas_regionalizacion.plot_regionalizacion(
+                covariable, valores, nombres, modelo,
+                puntos_covariable=[p[1] for p in puntos] if puntos else None,
+                puntos_valores=valores_puntos or None,
+                puntos_nombres=[p[0] for p in puntos] if puntos else None,
+                etiqueta_covariable="Covariable (p.ej. altitud, m s.n.m.)",
+                etiqueta_variable="Variable regionalizada (mm)")
+        except Exception as e:
+            QMessageBox.critical(self, "Error en la regionalización", str(e))
+
+    def _on_validar_grillada(self):
+        filas = self._leer_tabla_numerica(self.tabla_validacion_grillada, columnas_texto=())
+        if len(filas) < 5:
+            QMessageBox.warning(
+                self, "Faltan datos",
+                "Se necesitan al menos 5 pares (producto grillado, estación) para calcular métricas "
+                "con sentido.")
+            return
+        try:
+            sim = [f[0] for f in filas]
+            obs = [f[1] for f in filas]
+            salida = gridded_validation.validar_serie_gridded_vs_estacion(
+                sim, obs, umbral_deteccion_mm=self.spin_umbral_deteccion.value())
+            self.validacion_grillada_resultado = salida
+
+            cont = salida["metricas_continuas"]
+            cat = salida["metricas_categoricas"]
+            nse, pbias = cont["NSE"], cont["PBIAS_pct"]
+            clasif = cont["desempeno_moriasi_2007"]
+
+            filas_res = [("Pares válidos comparados", cont["n_pares"], "",
+                           "exclusión pareada: se descartan los pasos sin dato en alguna de las series")]
+            etiquetas = [
+                ("NSE", "", "Nash-Sutcliffe: 1 = perfecto; 0 = igual que usar la media observada"),
+                ("KGE", "", "Kling-Gupta: combina correlación, variabilidad y sesgo"),
+                ("KGE_r_correlacion", "", "componente r del KGE"),
+                ("KGE_alpha_variabilidad", "", "componente α: >1 el grillado es más variable"),
+                ("KGE_beta_sesgo", "", "componente β: >1 el grillado sobreestima el volumen"),
+                ("PBIAS_pct", "%", "sesgo porcentual: positivo = el grillado sobreestima"),
+                ("RMSE", "mm", "error cuadrático medio, en unidades de la variable"),
+                ("MAE", "mm", "error absoluto medio"),
+                ("R_pearson", "", "correlación lineal grillado-estación"),
+                ("R2", "", "coeficiente de determinación"),
+            ]
+            for clave, unidad, desc in etiquetas:
+                if cont.get(clave) is not None:
+                    filas_res.append((clave.replace("_", " "), cont[clave], unidad, desc))
+            filas_res.append(("Clasificación de desempeño", clasif, "",
+                               "bandas de Moriasi et al. (2007) sobre NSE y PBIAS"))
+
+            tabla_cont = cat["tabla_contingencia"]
+            filas_res.append(("Umbral de día con lluvia", cat["umbral_mm"], "mm",
+                               "1.0 mm/día es el umbral estándar en validación de productos satelitales"))
+            for clave, etiqueta in (("aciertos_hits", "Aciertos (hits)"),
+                                     ("falsas_alarmas", "Falsas alarmas"),
+                                     ("fallos_misses", "Fallos (misses)"),
+                                     ("correctos_sin_lluvia", "Correctos sin lluvia")):
+                filas_res.append((etiqueta, tabla_cont[clave], "pasos", ""))
+            for clave, desc in (("POD", "probabilidad de detección: fracción de días con lluvia acertados"),
+                                 ("FAR", "falsas alarmas: lluvia detectada que no ocurrió (0 = ideal)"),
+                                 ("FBI", "sesgo de frecuencia: >1 sobre-detecta días de lluvia"),
+                                 ("HSS", "destreza frente al acierto esperado por azar")):
+                if cat.get(clave) is not None:
+                    filas_res.append((clave, cat[clave], "", desc))
+            poblar_tabla_parametros(self.tabla_resultado_validacion, filas_res,
+                                     filas_visibles_max=26)
+
+            # El color comunica la decisión práctica: NSE es el criterio
+            # más extendido para aceptar o rechazar una serie grillada.
+            tipo = "alerta"
+            if nse is not None:
+                tipo = "exito" if nse > 0.5 else ("atencion" if nse > 0.0 else "alerta")
+            self.cuadro_validacion_grillada.actualizar(
+                titulo="VALIDACIÓN DEL PRODUCTO GRILLADO",
+                valor_principal=f"NSE = {nse:.4f}" if nse is not None else "NSE no calculable",
+                subtitulo=f"Desempeño: {clasif}",
+                metricas=[("KGE", f"{cont['KGE']:.4f}" if cont.get("KGE") is not None else "—"),
+                           ("PBIAS", f"{pbias:.2f} %" if pbias is not None else "—"),
+                           ("RMSE", f"{cont['RMSE']:.2f} mm"),
+                           ("POD", f"{cat['POD']:.3f}" if cat.get("POD") is not None else "—"),
+                           ("FAR", f"{cat['FAR']:.3f}" if cat.get("FAR") is not None else "—")],
+                leyenda=("NSE > 0.5: el producto reproduce aceptablemente la serie observada y puede "
+                          "usarse donde no hay estación, revisando además POD/FAR."
+                          if tipo == "exito" else
+                          ("NSE entre 0 y 0.5: mejor que usar la media observada, pero con reservas "
+                           "para diseño; contrástelo con el PBIAS antes de emplearlo."
+                           if tipo == "atencion" else
+                           "NSE ≤ 0: el producto NO es mejor que usar la media observada. No lo use "
+                           "sin corrección de sesgo previa.")),
+                tipo=tipo)
+
+            self.canvas_validacion_grillada.plot_validacion(sim, obs, cont, cat)
+        except Exception as e:
+            QMessageBox.critical(self, "Error en la validación", str(e))
+
     def _build_tab_caudales_medios(self):
         tab = QWidget()
         v = QVBoxLayout(tab)

@@ -9,7 +9,7 @@ from matplotlib.figure import Figure
 
 # Estilo comun de leyendas y ejes (ui/chart_style.py). Es idempotente,
 # asi que cada lienzo puede invocarlo sin coordinarse con los demas.
-from .chart_style import aplicar_estilo_graficos
+from .chart_style import aplicar_estilo_graficos, leyenda_impacto
 
 aplicar_estilo_graficos()
 
@@ -77,5 +77,52 @@ class QcCanvas(FigureCanvas):
         self.ax.set_ylabel("Valor")
         self.ax.set_title(titulo, pad=12)
         self.ax.grid(True, axis="y", linestyle=":", linewidth=0.5)
+        self.fig.tight_layout()
+        self.draw()
+
+    def plot_pacf(self, pacf_por_lag: dict, limite_significancia: float,
+                  lags_significativos=None, titulo="Función de autocorrelación parcial (PACF)"):
+        """
+        Correlograma parcial en formato de barras verticales (stem), con
+        la banda de significancia al 95%.
+
+        Se muestra así, y no como una curva, porque cada lag es una
+        estimación independiente: lo que hay que leer es qué barras
+        SALEN de la banda, no la forma del conjunto. Los lags
+        significativos se destacan en rojo -- son los que invalidan la
+        hipótesis de independencia que asumen Mann-Kendall, Pettitt y
+        las demás pruebas de esta pestaña.
+        """
+        self.ax.clear()
+        lags_significativos = set(lags_significativos or [])
+        # El lag 0 vale siempre 1 por definición y no aporta información;
+        # incluirlo aplastaría la escala del resto.
+        lags = [int(k) for k in pacf_por_lag.keys() if int(k) > 0]
+        lags.sort()
+        valores = [pacf_por_lag[k] if k in pacf_por_lag else pacf_por_lag[str(k)] for k in lags]
+
+        self.ax.axhspan(-limite_significancia, limite_significancia, color="#2c6fa8", alpha=0.13,
+                        zorder=1, label=f"Banda de no significancia 95% (±{limite_significancia:.3f})")
+        self.ax.axhline(0, color="#555555", linewidth=1.0, zorder=2)
+
+        etiquetado_sig = etiquetado_no_sig = False
+        for lag, valor in zip(lags, valores):
+            significativo = lag in lags_significativos or abs(valor) > limite_significancia
+            color = "#B3261E" if significativo else "#1F3864"
+            etiqueta = None
+            if significativo and not etiquetado_sig:
+                etiqueta, etiquetado_sig = "Lag con dependencia serial significativa", True
+            elif not significativo and not etiquetado_no_sig:
+                etiqueta, etiquetado_no_sig = "Lag sin dependencia significativa", True
+            self.ax.vlines(lag, 0, valor, color=color, linewidth=2.6, zorder=3, label=etiqueta)
+            self.ax.plot(lag, valor, "o", markersize=6.5, color=color, markeredgecolor="white",
+                         markeredgewidth=1.0, zorder=4)
+
+        self.ax.set_xlabel("Lag (pasos de tiempo)")
+        self.ax.set_ylabel("Autocorrelación parcial")
+        self.ax.set_title(titulo, pad=12)
+        self.ax.set_xticks(lags)
+        self.ax.grid(True, axis="y", linestyle=":", linewidth=0.5)
+        leyenda_impacto(self.ax, titulo="Lectura del correlograma", loc="best")
         self.fig.tight_layout()
         self.draw()
