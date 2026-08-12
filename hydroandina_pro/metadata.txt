@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.2.62
+version=0.2.63
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,38 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.2.63: PUENTE HACIA HYDRA2DGPU (core/hydra2d_bridge.py), primera pieza del modulo de
+      modelamiento hidraulico 2D que ocupara la Pestaña 8.
+      ENFOQUE: puente, no copia de codigo, siguiendo el mismo patron que core/cn_generator_bridge.py ya
+      usa con curve_number_generator. HYDRA2DGPU (Aaron Sprague, licencia MIT) se mantiene como
+      dependencia externa instalada por el usuario: asi no se duplica un solucionador de decenas de
+      miles de lineas que habria que mantener sincronizado, las mejoras de su autor llegan solas, y no
+      se asumen obligaciones de redistribucion. HydroAndina Pro aporta la integracion.
+      HALLAZGO QUE DEFINE EL DISEÑO: a diferencia de curve_number_generator, HYDRA2DGPU NO registra
+      algoritmos en el marco de Processing -- no hay un processing.run() que invocar. Es un plugin de
+      DIALOGO: su clase HydraQgisPlugin expone run(), que abre su propia ventana de trabajo
+      (swe2d.workbench). El puente por tanto no ejecuta la simulacion de forma desatendida; detecta,
+      prepara insumos, lanza esa ventana y leera despues los resultados de disco.
+      DIAGNOSTICO EN TRES CONDICIONES SEPARADAS, no un unico booleano, porque cada una se corrige de
+      forma distinta: instalado (existe la carpeta), activo (QGIS lo cargo) y motor disponible (el
+      paquete swe2d es importable). La tercera es la que mas confunde en la practica: el plugin puede
+      estar instalado y activo y aun asi no simular nada, porque su solucionador es una extension
+      compilada C++/CUDA que se instala como paquete aparte la primera vez que se abre su ventana. Cada
+      estado devuelve un mensaje con la accion concreta que toca.
+      Se agrega tambien un inventario de insumos que revisa que ya calculo HydroAndina Pro para el
+      modelo 2D (MDE de la Pestaña 1, area y pendiente de la 2, numero de curva de la 3 e hidrograma de
+      la 6) y avisa de lo que falta ANTES de abrir la ventana externa, en vez de que el usuario lo
+      descubra alli dentro; y la exportacion del hidrograma de diseño a CSV de dos columnas, que es el
+      formato admitido para una condicion de borde tipo hidrograma.
+      Verificado que el modulo degrada con gracia sin QGIS presente (devuelve el diagnostico en vez de
+      lanzar excepcion) y que el inventario detecta correctamente los cinco insumos completos y los
+      cinco faltantes.
+      SE INSTALO ADEMAS HYDRA2DGPU correctamente: lo que habia en la carpeta de plugins era el
+      repositorio de codigo fuente completo, sin __init__.py en su raiz, de modo que QGIS no podia
+      cargarlo; el plugin real estaba en qgis_plugin/HYDRA2DGPU y se copio a su ubicacion correcta.
+      PENDIENTE: la Pestaña 8 con su interfaz, cuadros de alto impacto y graficos, y la lectura de
+      resultados. Requiere que el motor CUDA quede operativo para poder probarlo contra el
+      comportamiento real y no a ciegas.
     - v0.2.62: REORDENAMIENTO Y RENUMERACION DE PESTAÑAS, preparando la incorporacion del modulo de
       modelamiento hidraulico 2D.
       Caudales Maximos pasa de la 7 a la 6; Hidraulica y Drenaje pasa de la 8 a la 7 y se renombra a
