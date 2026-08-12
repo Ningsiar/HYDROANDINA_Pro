@@ -7345,7 +7345,8 @@ class HydroAndinaProDialog(QDialog):
     def _on_comprobar_hydra2d(self):
         estado = hydra2d_bridge.estado_hydra2d()
         self.estado_hydra2d_ultimo = estado
-        listo = estado["instalado"] and estado["activo"] and estado["motor_disponible"]
+        listo = (estado["instalado"] and estado["activo"] and estado["motor_disponible"]
+                 and estado.get("banco_trabajo_disponible", False))
 
         poblar_tabla_parametros(self.tabla_estado_hydra2d, [
             ("Plugin instalado", "sí" if estado["instalado"] else "NO", "",
@@ -7353,9 +7354,14 @@ class HydroAndinaProDialog(QDialog):
             ("Versión detectada", estado["version"] or "—", ""),
             ("Activado en QGIS", "sí" if estado["activo"] else "NO", "",
              "se activa en Complementos → Administrar e instalar complementos"),
-            ("Motor de cálculo (CUDA) disponible", "sí" if estado["motor_disponible"] else "NO", "",
-             estado["detalle_motor"] or "el paquete swe2d se importa correctamente"),
-        ], filas_visibles_max=6)
+            ("Motor de cálculo CUDA (hydra_swe2d)",
+             "sí" if estado["motor_disponible"] else "NO", "",
+             estado["detalle_motor"] or "extensión compilada C++/CUDA: es la que resuelve las "
+                                         "ecuaciones de aguas someras"),
+            ("Banco de trabajo (swe2d)",
+             "sí" if estado.get("banco_trabajo_disponible") else "NO", "",
+             estado.get("detalle_banco_trabajo") or "paquete Python de la interfaz del modelo 2D"),
+        ], filas_visibles_max=7)
 
         # Cada condición que falla tiene su propia solución, así que el
         # cuadro nombra la primera que falta en vez de un "no disponible"
@@ -7366,8 +7372,10 @@ class HydroAndinaProDialog(QDialog):
             titulo_estado, tipo = "FALTA INSTALAR EL PLUGIN", "alerta"
         elif not estado["activo"]:
             titulo_estado, tipo = "FALTA ACTIVAR EL PLUGIN", "atencion"
-        else:
+        elif not estado["motor_disponible"]:
             titulo_estado, tipo = "FALTA EL MOTOR CUDA", "atencion"
+        else:
+            titulo_estado, tipo = "FALTA EL BANCO DE TRABAJO", "atencion"
 
         self.cuadro_estado_hydra2d.actualizar(
             titulo="ESTADO DEL MOTOR DE CÁLCULO 2D",
@@ -7375,9 +7383,12 @@ class HydroAndinaProDialog(QDialog):
             subtitulo=f"HYDRA2DGPU v{estado['version']}" if estado["version"] else "HYDRA2DGPU",
             metricas=[("Instalado", "sí" if estado["instalado"] else "no"),
                        ("Activado", "sí" if estado["activo"] else "no"),
-                       ("Motor CUDA", "sí" if estado["motor_disponible"] else "no")],
-            leyenda=("Las tres condiciones se cumplen: puede abrir la ventana de HYDRA2DGPU y "
-                      "ejecutar la simulación 2D." if listo else
+                       ("Motor CUDA", "sí" if estado["motor_disponible"] else "no"),
+                       ("Banco de trabajo",
+                        "sí" if estado.get("banco_trabajo_disponible") else "no")],
+            leyenda=("Todo listo. El banco de trabajo se abre ACOPLADO dentro de la ventana de "
+                      "QGIS, no como ventana aparte: al pulsar «Abrir», esta ventana se minimiza "
+                      "sola para dejarlo a la vista." if listo else
                       "Revise el detalle debajo: cada condición se corrige de una forma distinta."),
             tipo=tipo)
 
@@ -7389,8 +7400,36 @@ class HydroAndinaProDialog(QDialog):
             hydra2d_bridge.abrir_ventana_hydra2d()
         except hydra2d_bridge.Hydra2DNoDisponible as e:
             QMessageBox.warning(self, "HYDRA2DGPU no disponible", str(e))
+            return
         except Exception as e:
             QMessageBox.critical(self, "Error al abrir HYDRA2DGPU", str(e))
+            return
+
+        # El banco de trabajo de HYDRA2DGPU se ACOPLA como panel dentro de
+        # la ventana principal de QGIS; no abre una ventana propia. Este
+        # diálogo es una ventana de nivel superior, así que se quedaría
+        # delante tapándolo y daría la impresión de que el botón no hizo
+        # nada. Por eso se minimiza solo y se trae QGIS al frente.
+        #
+        # También importa para los errores: si el banco de trabajo falla
+        # al abrirse, HYDRA2DGPU lo informa en la BARRA DE MENSAJES de
+        # QGIS, que igualmente quedaría oculta detrás de este diálogo.
+        try:
+            self.showMinimized()
+            ventana_qgis = self.iface.mainWindow()
+            ventana_qgis.raise_()
+            ventana_qgis.activateWindow()
+            self.iface.messageBar().pushMessage(
+                "HydroAndina Pro",
+                "Banco de trabajo de HYDRA2DGPU abierto como panel acoplado. La ventana de "
+                "HydroAndina Pro se minimizó para dejarlo a la vista; recupérela desde la barra "
+                "de tareas cuando termine.",
+                level=0, duration=12)
+        except Exception:
+            # Traer ventanas al frente es una comodidad: si el gestor de
+            # ventanas no coopera, el banco de trabajo ya está abierto y
+            # no tiene sentido reportar un fallo por esto.
+            pass
 
     def _on_revisar_insumos_hydra2d(self):
         r = hydra2d_bridge.resumen_insumos_disponibles(

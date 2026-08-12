@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.2.69
+version=0.2.70
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,26 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.2.70: CORRECCION de "no corre el HYDRA2D": el boton abria el modelo 2D pero no se veia.
+      CAUSA PRINCIPAL: el banco de trabajo de HYDRA2DGPU NO abre una ventana propia -- se ACOPLA como
+      panel dentro de la ventana principal de QGIS. La ventana de HydroAndina Pro es una ventana de
+      nivel superior, asi que se quedaba delante tapandolo por completo, y el boton parecia no hacer
+      nada. Peor aun: si el banco de trabajo fallaba al abrirse, HYDRA2DGPU lo informa en la BARRA DE
+      MENSAJES de QGIS, que quedaba igualmente oculta detras. Ahora, al pulsar «Abrir ventana de
+      HYDRA2DGPU», la ventana de HydroAndina Pro se minimiza sola, se trae QGIS al frente y se deja un
+      mensaje en su barra explicando donde quedo el panel y como recuperar la ventana. El cuadro de
+      estado y el texto explicativo lo advierten tambien de antemano.
+      SEGUNDO ERROR, PROPIO: el diagnostico comprobaba el modulo equivocado. Daba "MOTOR CUDA: si" si
+      podia importar `swe2d`, que es el paquete Python de la interfaz del modelo -- importable
+      perfectamente sin que exista el solucionador. La extension compilada C++/CUDA que de verdad
+      resuelve las ecuaciones es `hydra_swe2d`, y es la que comprueba el propio HYDRA2DGPU en su
+      _backend_available() antes de abrir el banco de trabajo o lanzar su instalador. Con la
+      comprobacion anterior, un equipo sin el solucionador habria visto "MOTOR 2D LISTO" y luego el
+      instalador apareciendo sin explicacion. Ahora se comprueban los DOS por separado y se reportan
+      en filas distintas: si falta hydra_swe2d el problema es el motor CUDA; si falta swe2d es una
+      instalacion incompleta del plugin, que se corrige de otra forma.
+      Verificado contra el entorno real de la maquina (~/.hydra2dgpu/Lib/site-packages, con el
+      sys.path que arma el propio HYDRA2DGPU al activarse): ambos paquetes presentes, v0.3.1 detectada.
     - v0.2.69: CORRECCION del error "El punto de salida cae en una celda sin datos (nodata) del MDE",
       que interrumpia por completo el calculo morfometrico de la Pestaña 2.
       CAUSA: el punto de salida de una cuenca esta, POR DEFINICION, en su borde. Al recortar el MDE

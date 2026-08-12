@@ -80,7 +80,9 @@ def estado_hydra2d() -> dict:
     """
     estado = {
         "instalado": False, "activo": False, "motor_disponible": False,
+        "banco_trabajo_disponible": False,
         "version": None, "ruta": None, "detalle_motor": None,
+        "detalle_banco_trabajo": None,
     }
 
     carpeta = _carpeta_plugins_qgis()
@@ -106,15 +108,35 @@ def estado_hydra2d() -> dict:
     except Exception:
         pass
 
-    # El motor va en un entorno aparte que el propio instalador de
-    # HYDRA2DGPU añade al sys.path al activarse; por eso esta comprobación
-    # solo es fiable con el plugin ya activo.
+    # El motor va en un entorno aparte (~/.hydra2dgpu) que el propio
+    # instalador de HYDRA2DGPU añade al sys.path al activarse; por eso
+    # esta comprobación solo es fiable con el plugin ya activo.
+    #
+    # SE COMPRUEBA hydra_swe2d, NO swe2d: son dos cosas distintas y
+    # confundirlas da un falso "listo". `swe2d` es el paquete Python del
+    # banco de trabajo, que puede importarse perfectamente sin que exista
+    # el solucionador; `hydra_swe2d` es la extensión compilada C++/CUDA
+    # que de verdad resuelve las ecuaciones. Es además exactamente lo que
+    # comprueba HYDRA2DGPU en su propio _backend_available() antes de
+    # abrir el banco de trabajo o lanzar su instalador, así que este
+    # diagnóstico coincide con lo que hará el plugin al pulsar «Abrir».
     try:
         import importlib
-        importlib.import_module("swe2d")
+        importlib.import_module("hydra_swe2d")
         estado["motor_disponible"] = True
     except Exception as e:
         estado["detalle_motor"] = str(e)
+
+    # El paquete del banco de trabajo se reporta aparte: si falta ESTE
+    # y no el solucionador, el problema es otro (instalación incompleta
+    # del plugin, no del motor CUDA).
+    try:
+        import importlib
+        importlib.import_module("swe2d")
+        estado["banco_trabajo_disponible"] = True
+    except Exception as e:
+        estado["banco_trabajo_disponible"] = False
+        estado["detalle_banco_trabajo"] = str(e)
 
     return estado
 
@@ -146,9 +168,21 @@ def mensaje_estado(estado: dict) -> str:
             "CUDA 12 (no hace falta instalar el CUDA Toolkit: el paquete lo incluye).\n\n"
             f"Detalle técnico: {estado['detalle_motor']}"
         )
+    if not estado.get("banco_trabajo_disponible", True):
+        return (
+            f"{NOMBRE_PLUGIN} v{estado['version'] or '?'} tiene su motor de cálculo (hydra_swe2d) "
+            "disponible, pero NO su paquete de banco de trabajo (swe2d).\n\n"
+            "Es una instalación incompleta del plugin, no un problema del motor CUDA: reinstálelo "
+            f"desde {URL_PROYECTO}.\n\n"
+            f"Detalle técnico: {estado.get('detalle_banco_trabajo')}"
+        )
     return (
         f"{NOMBRE_PLUGIN} v{estado['version'] or '?'} está instalado, activo y con su motor de "
-        "cálculo disponible."
+        "cálculo (extensión compilada hydra_swe2d) disponible.\n\n"
+        "IMPORTANTE — dónde aparece: el banco de trabajo de HYDRA2DGPU NO abre una ventana propia, "
+        "se ACOPLA como panel dentro de la ventana principal de QGIS. Al pulsar «Abrir ventana de "
+        "HYDRA2DGPU», esta ventana de HydroAndina Pro se minimiza sola para que pueda verlo; si no, "
+        "quedaría tapado detrás y parecería que no ocurrió nada."
     )
 
 
