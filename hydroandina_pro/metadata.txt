@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.2.64
+version=0.2.65
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,27 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.2.65: el desplegable de desagregacion temporal de la Pestaña 6 (Caudales Maximos) pasa de 4 a
+      8 metodos para generar el hietograma de diseño.
+      *** FALTABA EL SCS TIPO IA ***, reportado por el usuario: el nucleo solo tenia los tipos I, II y
+      III pese a que el NRCS define CUATRO. Su ausencia obligaba a usar el Tipo I en climas de regimen
+      maritimo, que es justo donde el IA corresponde, SOBRESTIMANDO el caudal punta. Verificado tras
+      agregarlo, con P24=100 mm en 24 h: el Tipo IA da el pico mas bajo (7.94 mm) y mas temprano (t=7 h)
+      de los cuatro, frente a 11.78 mm del Tipo I, 23.14 del III y 31.79 del II, conservando la lamina
+      total exacta en todos.
+      SE INCORPORAN ADEMAS los metodos de curva IDF de la Pestaña 5 como formas de desagregar:
+      Dyck y Peschke / Grobe, Frederich Bell (1969) e IILA-SENAMHI-UNI (1983). Los cuatro metodos
+      basados en IDF comparten el reparto por bloques alternos -- lo que cambia es de donde sale la
+      curva que los alimenta -- y se convierten a su exponente de escalamiento equivalente, que es el
+      parametro que consume core/design_storm.py. Bell arrastra su aviso de rango: esta calibrado para
+      5-120 min, de modo que al usarlo para una tormenta de varias horas se advierte que verifique la
+      duracion elegida.
+      El selector pasa a identificar cada opcion por CLAVE y no por indice: la habilitacion de los
+      campos de exponente y duracion se decidia comparando currentIndex() == 0, que se habria roto en
+      silencio al insertar opciones nuevas, aplicando los parametros del metodo equivocado.
+      PENDIENTE de la misma peticion: el grafico de alto impacto del hietograma seleccionado junto a sus
+      valores, y conectar ui/chart_style.py (creado en esta version, con el estilo comun de leyendas de
+      alto impacto por rcParams) a los modulos de lienzo.
     - v0.2.64: el SCS-CN pasa a ser un METODO SELECCIONABLE MAS en la Pestaña 3, con su propia pagina,
       su grafico y su cuadro resumen de alto impacto, como los otros seis. Reportado por el usuario: la
       pestaña se llama "Metodos de perdida SCS-CN / Horton / Green-Ampt / otros" pero el numero de

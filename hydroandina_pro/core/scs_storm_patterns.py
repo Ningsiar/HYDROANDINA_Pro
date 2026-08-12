@@ -59,6 +59,13 @@ def _curva_adimensional_sigmoidal(a: float, k: float, n_puntos: int = 289) -> Li
 # Parámetros de forma por tipo (ver advertencia de aproximación arriba).
 _PARAMETROS_TIPO = {
     "I":   {"a": 3.0, "k": 0.80},   # más suave, pico más temprano (~t=0.35-0.40)
+    # Tipo IA: el MENOS intenso de los cuatro (clima marítimo del Pacífico
+    # noroeste). Su pico es el más temprano y el más aplanado, de modo que
+    # para una misma lámina de 24 h produce el caudal punta más bajo. Se
+    # añadió en la v0.2.65 -- faltaba pese a ser uno de los cuatro tipos
+    # estándar del NRCS, y su ausencia obligaba a usar el Tipo I, que
+    # sobrestima el pico en climas de ese régimen.
+    "IA":  {"a": 2.0, "k": 0.70},
     "II":  {"a": 9.0, "k": 1.00},   # más intensa, pico agudo centrado (t=0.5)
     "III": {"a": 6.0, "k": 1.00},   # intensa, centrada, cola posterior más pesada que II
 }

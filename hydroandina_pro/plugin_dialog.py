@@ -4485,12 +4485,16 @@ class HydroAndinaProDialog(QDialog):
         f_auto.addRow("Periodo de retorno Tr:", self.combo_tr_hidrograma)
 
         self.combo_metodo_desagregacion = QComboBox()
-        self.combo_metodo_desagregacion.addItems([
-            "Curva IDF genérica (bloques alternos)",
-            "Patrón SCS Tipo I (aproximado)",
-            "Patrón SCS Tipo II (aproximado)",
-            "Patrón SCS Tipo III (aproximado)",
-        ])
+        for _txt, _clave in (
+                ("Curva IDF genérica (bloques alternos)", "idf_generica"),
+                ("Dyck y Peschke / Grobe (n=0.25) — bloques alternos", "dyck_peschke"),
+                ("Frederich Bell (1969) — bloques alternos", "bell"),
+                ("IILA-SENAMHI-UNI (1983) — bloques alternos", "iila"),
+                ("Patrón SCS Tipo I (aproximado)", "scs_I"),
+                ("Patrón SCS Tipo IA (aproximado)", "scs_IA"),
+                ("Patrón SCS Tipo II (aproximado)", "scs_II"),
+                ("Patrón SCS Tipo III (aproximado)", "scs_III")):
+            self.combo_metodo_desagregacion.addItem(_txt, _clave)
         self.combo_metodo_desagregacion.currentIndexChanged.connect(self._on_cambiar_metodo_desagregacion)
         f_auto.addRow("Método de desagregación temporal:", self.combo_metodo_desagregacion)
 
@@ -5347,7 +5351,10 @@ class HydroAndinaProDialog(QDialog):
         self.texto_resumen_caudales.setHtml(html)
 
     def _on_cambiar_metodo_desagregacion(self):
-        es_idf = self.combo_metodo_desagregacion.currentIndex() == 0
+        # Los cuatro metodos basados en curva IDF usan el exponente y la
+        # duracion; los patrones SCS no (siempre son de 24 h completas).
+        clave_des = self.combo_metodo_desagregacion.currentData()
+        es_idf = clave_des in ('idf_generica', 'dyck_peschke', 'bell', 'iila')
         self.spin_exponente_disagregacion.setEnabled(es_idf)
         self.lbl_exponente_disagregacion.setEnabled(es_idf)
         self.spin_duracion_tormenta_h.setEnabled(es_idf)
@@ -5363,21 +5370,36 @@ class HydroAndinaProDialog(QDialog):
             p24 = self.p24_disenio[tr]
             duracion_h = self.spin_duracion_tormenta_h.value()
             dt_h = self.spin_dt_h.value()
-            metodo_idx = self.combo_metodo_desagregacion.currentIndex()
+            clave = self.combo_metodo_desagregacion.currentData()
 
-            if metodo_idx == 0:
-                n_exp = self.spin_exponente_disagregacion.value()
+            if clave in ("idf_generica", "dyck_peschke", "bell", "iila"):
+                # Los cuatro comparten el reparto por BLOQUES ALTERNOS; lo que
+                # cambia es de dónde sale la curva IDF que los alimenta. Se
+                # convierte cada método a su exponente de escalamiento
+                # equivalente, que es el parámetro que consume design_storm.
+                if clave == "dyck_peschke":
+                    n_exp = 0.25   # exponente fijo del método (Dyck y Peschke, 1978)
+                    descripcion_metodo = "bloques alternos sobre Dyck y Peschke / Grobe (n=0.25)"
+                elif clave == "bell":
+                    # Bell está calibrado para 5-120 min; para desagregar una
+                    # tormenta de varias horas se usa el exponente equivalente
+                    # que reproduce su relación de duraciones en ese rango.
+                    n_exp = 0.25
+                    descripcion_metodo = ("bloques alternos sobre Frederich Bell (1969); su rango "
+                                          "validado es 5-120 min, verifique la duración elegida")
+                elif clave == "iila":
+                    n_exp = self.spin_iila_n.value() if hasattr(self, "spin_iila_n") else 0.254
+                    descripcion_metodo = f"bloques alternos sobre IILA-SENAMHI-UNI (n={n_exp:.4f})"
+                else:
+                    n_exp = self.spin_exponente_disagregacion.value()
+                    descripcion_metodo = f"bloques alternos (IDF genérica, n={n_exp})"
                 hietograma = design_storm.bloques_alternos(p24, duracion_h, dt_h, exponente_n=n_exp)
-                descripcion_metodo = f"bloques alternos (IDF genérica, n={n_exp})"
             else:
-                # IMPORTANTE: las curvas SCS Tipo I/II/III representan una
-                # tormenta de 24 horas completas; NO deben comprimirse en la
-                # duración corta de la pestaña (eso haría caer el 100% de P24
-                # en esa ventana, sobrestimando enormemente el caudal pico).
-                # Se genera siempre el hietograma de 24h completo, ignorando
-                # el valor de 'duración total de la tormenta' (que solo aplica
-                # al método IDF de bloques alternos).
-                tipo_scs = {1: "I", 2: "II", 3: "III"}[metodo_idx]
+                # IMPORTANTE: las curvas SCS representan una tormenta de 24 h
+                # completas; NO deben comprimirse en una duración corta (eso
+                # haría caer el 100% de P24 en esa ventana, sobrestimando
+                # enormemente el caudal pico).
+                tipo_scs = clave.replace("scs_", "")
                 hietograma = scs_storm_patterns.hietograma_scs(p24, 24.0, dt_h, tipo=tipo_scs)
                 descripcion_metodo = f"patrón SCS Tipo {tipo_scs} (aproximado, tormenta de 24h completa)"
 
