@@ -1858,6 +1858,7 @@ class HydroAndinaProDialog(QDialog):
         h_sel_inf.addWidget(QLabel("Modelo:"))
         self.combo_modelo_infiltracion = QComboBox()
         for _txt, _clave in (
+                ("SCS — Número de Curva (usa el S calculado arriba)", "scs_cn"),
                 ("Green-Ampt (1911) — físicamente basado", "green_ampt"),
                 ("Horton (1940) — empírico exponencial", "horton"),
                 ("Philip (1957) — sorptividad + gravedad", "philip"),
@@ -1873,6 +1874,20 @@ class HydroAndinaProDialog(QDialog):
         v_inf.addLayout(h_sel_inf)
 
         self.stack_infiltracion = QStackedWidget()
+
+        # -- SCS — Número de Curva --
+        _p, _f = self._nueva_pagina_infiltracion()
+        _l = QLabel(
+            "Usa la retención potencial máxima <b>S</b> del número de curva calculado en la sección "
+            "superior de esta pestaña: no requiere parámetros adicionales aquí.<br><br>"
+            "A diferencia de los otros seis, es un <b>método agregado de evento</b>: su abstracción "
+            "depende solo de la lámina acumulada, no de la intensidad instantánea. Por eso no tiene "
+            "curva de capacidad de infiltración, y su gráfico omite esa curva en vez de dibujar una "
+            "línea inventada. Dos tormentas con la misma lámina total le dan el mismo resultado aunque "
+            "una sea corta e intensa y la otra larga y suave — que es justamente la limitación que los "
+            "demás modelos vienen a cubrir.")
+        _l.setWordWrap(True); _f.addRow(_l)
+        self._cerrar_pagina_infiltracion(_p, _f, "scs_cn")
 
         # -- Green-Ampt --
         _p, _f = self._nueva_pagina_infiltracion()
@@ -2202,6 +2217,8 @@ class HydroAndinaProDialog(QDialog):
         Pestaña 3, para que la Pestaña 7 pueda reutilizarlos sin duplicar
         los controles."""
         clave = clave or self.combo_modelo_infiltracion.currentData()
+        if clave == "scs_cn":
+            return {}  # no tiene parámetros propios: usa el S del número de curva
         if clave == "green_ampt":
             return {"conductividad_k_mm_h": self.spin_ga3_k.value(),
                     "succion_psi_mm": self.spin_ga3_psi.value(),
@@ -2232,6 +2249,10 @@ class HydroAndinaProDialog(QDialog):
 
     def _ejecutar_modelo_infiltracion(self, clave, hietograma, dt_h):
         params = self.parametros_infiltracion(clave)
+        if clave == "scs_cn":
+            # El S viene de la sección de número de curva de esta misma pestaña.
+            s_mm = (self.cn_resultados or {}).get("S_mm")
+            return infiltration.perdidas_scs_cn(hietograma, dt_h, s_mm)
         funciones = {
             "green_ampt": infiltration.infiltracion_green_ampt,
             "horton": infiltration.infiltracion_horton,

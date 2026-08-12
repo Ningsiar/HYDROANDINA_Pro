@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.2.63
+version=0.2.64
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,27 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.2.64: el SCS-CN pasa a ser un METODO SELECCIONABLE MAS en la Pestaña 3, con su propia pagina,
+      su grafico y su cuadro resumen de alto impacto, como los otros seis. Reportado por el usuario: la
+      pestaña se llama "Metodos de perdida SCS-CN / Horton / Green-Ampt / otros" pero el numero de
+      curva no figuraba en el desplegable, asi que era el unico que no generaba tabla, grafico ni
+      entrada propia en el resumen.
+      Nueva perdidas_scs_cn() en core/infiltration.py que envuelve el numero de curva en el MISMO
+      formato de resultado que los demas modelos. Reutiliza lluvia_efectiva_incremental() de
+      core/unit_hydrographs.py -- la implementacion que el plugin ya tenia verificada -- en vez de
+      reimplementar la ecuacion: dos copias de la misma formula acabarian divergiendo y el usuario no
+      sabria cual se aplico. Verificado que devuelve las mismas claves que Green-Ampt y que su balance
+      de masa cierra en 0.0e+00.
+      DIFERENCIA QUE SE RESPETA EN VEZ DE DISIMULAR: el SCS-CN es un metodo AGREGADO de evento, cuya
+      abstraccion depende solo de la lamina acumulada y no de la intensidad instantanea, de modo que no
+      tiene curva de capacidad de infiltracion. Su lista de capacidad va a None y el grafico OMITE esa
+      curva, en lugar de dibujar una linea inventada que sugeriria una comparacion que no existe. Su
+      equivalente al encharcamiento se reporta como el instante en que se supera la abstraccion inicial
+      Ia = 0.2*S y empieza a generarse escorrentia, que si es comparable con los demas.
+      El boton de comparacion pasa a ejecutar los SIETE metodos por la misma via, eliminando el caso
+      especial que antes construia el resultado del numero de curva a mano. Se verifico por analisis del
+      codigo que el orden del desplegable coincide exactamente con el de las paginas del stack, que es
+      lo que evita que seleccionar un metodo muestre los parametros de otro.
     - v0.2.63: PUENTE HACIA HYDRA2DGPU (core/hydra2d_bridge.py), primera pieza del modulo de
       modelamiento hidraulico 2D que ocupara la Pestaña 8.
       ENFOQUE: puente, no copia de codigo, siguiendo el mismo patron que core/cn_generator_bridge.py ya

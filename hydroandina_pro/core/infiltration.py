@@ -1047,6 +1047,51 @@ def _resumen_infiltracion(lluvia_total: List[float], infiltracion: List[float],
     }
 
 
+def perdidas_scs_cn(hietograma_mm: Sequence[float], dt_h: float, s_mm: float) -> dict:
+    """
+    Número de curva SCS envuelto en el MISMO formato de resultado que los
+    otros seis modelos, para que pueda seleccionarse, graficarse y
+    resumirse igual que ellos.
+
+    Reutiliza lluvia_efectiva_incremental() de core/unit_hydrographs.py --
+    la implementación que el plugin ya usaba y tiene verificada -- en vez
+    de reimplementar la ecuación aquí: dos copias de la misma fórmula
+    acabarían divergiendo y el usuario no sabría cuál se aplicó.
+
+    A diferencia de los demás, el SCS-CN NO tiene una curva de capacidad
+    de infiltración instantánea: es un método agregado de evento cuya
+    abstracción depende solo de la lámina acumulada. Por eso su lista de
+    capacidad va a None y el gráfico omite esa curva, en vez de dibujar
+    una línea inventada que sugeriría una comparación que no existe.
+    """
+    serie = _validar_hietograma(hietograma_mm, dt_h)
+    if s_mm is None or s_mm <= 0:
+        raise InfiltrationError(
+            "No hay una retención potencial máxima S válida. Calcule primero el número de curva en "
+            "la sección superior de esta pestaña."
+        )
+    from .unit_hydrographs import lluvia_efectiva_incremental
+    efectiva = list(lluvia_efectiva_incremental(serie, s_mm))
+    infiltrado = [p - e for p, e in zip(serie, efectiva)]
+
+    # El "encharcamiento" del SCS-CN es el instante en que se supera la
+    # abstracción inicial Ia = 0.2*S y empieza a generarse escorrentía:
+    # es el equivalente conceptual y permite compararlo con los demás.
+    paso_inicio = next((i for i, e in enumerate(efectiva) if e > 0), None)
+
+    resultado = _resumen_infiltracion(
+        serie, infiltrado, efectiva, [float("nan")] * len(serie), dt_h,
+        "SCS — Número de Curva", {"S_mm": round(s_mm, 3), "Ia_mm": round(0.2 * s_mm, 3)},
+        paso_inicio)
+    resultado["capacidad_infiltracion_mm_h"] = [None] * len(serie)
+    resultado["nota_metodo"] = (
+        "Método agregado de evento: la abstracción depende solo de la lámina acumulada, no de la "
+        "intensidad instantánea, por lo que no tiene curva de capacidad de infiltración. Dos tormentas "
+        "de igual lámina total dan el mismo resultado aunque una sea corta e intensa."
+    )
+    return resultado
+
+
 def comparar_modelos_perdidas(hietograma_mm: Sequence[float], dt_h: float,
                                s_mm_scs: Optional[float] = None,
                                green_ampt: Optional[dict] = None,
