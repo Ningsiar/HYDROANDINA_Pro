@@ -225,6 +225,93 @@ def extraer_y_recortar_red(raster_cauces, ruta_cuenca_vector, region, cellsize=N
     return red_recortada
 
 
+def diagnosticar_nodata(ruta_o_capa) -> dict:
+    """
+    Cuenta las celdas SIN DATO de un MDE y su porcentaje sobre el total.
+
+    Se separa del relleno para poder INFORMAR antes de modificar nada: si
+    el MDE viene con un 30% de vacíos, rellenarlos es posible pero el
+    resultado es en buena parte interpolado, y el usuario debe saberlo
+    antes de calcular parámetros sobre él.
+    """
+    from osgeo import gdal
+    import numpy as np
+
+    ruta = ruta_o_capa if isinstance(ruta_o_capa, str) else ruta_o_capa.source()
+    ds = gdal.Open(ruta)
+    if ds is None:
+        raise RuntimeError(f"No se pudo abrir el MDE para diagnosticar sus vacíos: {ruta}")
+    banda = ds.GetRasterBand(1)
+    nodata = banda.GetNoDataValue()
+    arr = banda.ReadAsArray()
+    total = arr.size
+    ds = None
+
+    if nodata is not None:
+        n_vacias = int(np.sum(arr == nodata))
+    else:
+        # Sin valor sin-dato declarado solo se pueden detectar los NaN de
+        # los rásteres en punto flotante; los rellenos con un entero
+        # arbitrario son indetectables sin más información, y se advierte.
+        n_vacias = int(np.sum(np.isnan(arr.astype("float64"))))
+
+    porcentaje = (n_vacias / total * 100.0) if total else 0.0
+    return {
+        "nodata_declarado": nodata,
+        "celdas_totales": total,
+        "celdas_sin_dato": n_vacias,
+        "porcentaje_sin_dato": round(porcentaje, 4),
+        "tiene_vacios": n_vacias > 0,
+        "advertencia": (
+            "El MDE no declara valor sin-dato, así que solo se pudieron detectar celdas NaN. Si el "
+            "ráster usa un entero convencional (0, -32768) como relleno sin declararlo, esos huecos "
+            "pasarán inadvertidos y contaminarán las estadísticas."
+            if nodata is None else None
+        ),
+    }
+
+
+def rellenar_nodata(dem_layer, distancia_maxima_px: int = 100, iteraciones_suavizado: int = 2,
+                     context=None, feedback=None):
+    """
+    Rellena las celdas sin dato de un MDE por interpolación (gdal:fillnodata,
+    que usa ponderación inversa a la distancia desde los bordes del hueco y
+    luego suaviza el parche).
+
+    POR QUÉ HACE FALTA, Y POR QUÉ NO ES LO MISMO QUE r.fill.dir: el
+    relleno de sumideros que ya aplica calcular_flujo() elimina
+    DEPRESIONES cerradas -- celdas con dato, pero más bajas que todas sus
+    vecinas -- para que el flujo D8 no quede atrapado. No toca las celdas
+    SIN DATO. Los MDE descargados (SRTM, ASTER, Copernicus) traen vacíos
+    por sombra de radar o nubosidad, frecuentes justo en terreno abrupto
+    como el altoandino. Esos huecos rompen la cadena: la dirección de
+    flujo no puede propagarse a través de ellos, la cuenca delineada sale
+    recortada o partida, y las estadísticas del MDE (cotas, pendiente,
+    curva hipsométrica) se calculan sobre una muestra con agujeros.
+
+    distancia_maxima_px: radio máximo, en celdas, desde el que se buscan
+        valores válidos para interpolar. Huecos más anchos que el doble de
+        esta distancia quedan parcialmente sin rellenar.
+    iteraciones_suavizado: pasadas de suavizado sobre el parche, para que
+        no queden discontinuidades artificiales en el borde del hueco que
+        luego aparecerían como pendientes falsas.
+
+    TRANSPARENCIA: el relleno INTERPOLA, es decir, inventa cotas donde no
+    las hay. Es necesario para que los algoritmos hidrológicos funcionen,
+    pero el resultado en esas celdas no es una medición. Por eso
+    diagnosticar_nodata() informa del porcentaje antes y después.
+    """
+    if distancia_maxima_px <= 0:
+        raise ValueError("La distancia máxima de búsqueda debe ser mayor que 0 celdas.")
+    return processing.run(
+        "gdal:fillnodata",
+        {"INPUT": dem_layer, "BAND": 1, "DISTANCE": distancia_maxima_px,
+         "ITERATIONS": iteraciones_suavizado, "NO_MASK": False,
+         "OUTPUT": QgsProcessingUtils.generateTempFilename("mde_relleno.tif")},
+        context=context, feedback=feedback, is_child_algorithm=True,
+    )["OUTPUT"]
+
+
 # Valor sin-dato para el MDE recortado. Se elige -9999 por ser el
 # convenio más extendido en MDE y quedar muy lejos de cualquier cota
 # real de la Tierra (el punto más bajo emergido está a -430 m).

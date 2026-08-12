@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.2.60
+version=0.2.61
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,33 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.2.61: RELLENO DE CELDAS SIN DATO (voids) del MDE en la Pestaña 1, antes de todo el
+      procesamiento hidrologico.
+      POR QUE HACIA FALTA, Y POR QUE NO LO CUBRIA EL RELLENO QUE YA EXISTIA: la cadena aplicaba
+      grass7:r.fill.dir, que rellena DEPRESIONES -- celdas CON dato mas bajas que todas sus vecinas --
+      para que el flujo D8 no quede atrapado, pero no toca las celdas SIN DATO. Los MDE descargados
+      (SRTM, ASTER, Copernicus) traen vacios por sombra de radar o nubosidad, frecuentes justo en
+      terreno abrupto como el altoandino. A traves de un hueco la direccion de flujo no se puede
+      propagar: la cuenca sale recortada o partida, y las cotas, la pendiente y la curva hipsometrica
+      se calculan sobre una muestra con agujeros.
+      IMPLEMENTACION: nuevas funciones diagnosticar_nodata() y rellenar_nodata() en core/delineation.py,
+      esta ultima sobre gdal:fillnodata (interpolacion por distancia inversa desde los bordes del hueco
+      mas suavizado del parche, para que no queden discontinuidades que aparecerian luego como
+      pendientes falsas). En la Pestaña 1 se agrega una casilla -- activada por defecto -- con el radio
+      maximo de busqueda y las pasadas de suavizado configurables. El relleno se aplica en los DOS
+      flujos que procesan el MDE (generar red de drenaje y delimitar cuenca) y siempre ANTES de
+      calcular el flujo; se verifico ese orden por analisis del arbol sintactico.
+      SE INFORMA EN VEZ DE HACERLO EN SILENCIO, que es lo importante en un dato de partida: el
+      diagnostico se ejecuta antes y despues, y el plugin avisa (a) si el MDE tiene vacios y el relleno
+      esta desactivado, explicando que la cuenca puede salir partida; (b) si tras rellenar aun quedan
+      huecos, porque son mas anchos que el doble del radio de busqueda, indicando que se aumente ese
+      radio o se consiga un MDE de mejor cobertura; y (c) si se relleno todo pero los vacios superaban
+      el 5% del MDE, porque esa fraccion de las cotas NO es una medicion sino una interpolacion, y los
+      parametros morfometricos y el caudal de diseño que se deriven heredan esa incertidumbre.
+      Se detecta ademas y se advierte el caso de un MDE que NO declara valor sin-dato: ahi solo pueden
+      identificarse los NaN, y un relleno con un entero convencional (0, -32768) sin declarar pasaria
+      inadvertido contaminando las estadisticas -- exactamente el mismo tipo de problema que la
+      correccion de la v0.2.58.
     - v0.2.60: los CUADROS RESUMEN FINALES de las 14 pestañas que los tienen se ven ahora COMPLETOS,
       sin barra de desplazamiento propia, y con formato de alto impacto.
       PROBLEMA: se creaban como QTextBrowser con setMinimumHeight(140-200), de modo que el propio

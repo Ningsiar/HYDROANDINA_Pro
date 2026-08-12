@@ -582,6 +582,35 @@ class HydroAndinaProDialog(QDialog):
         self.spin_umbral.setValue(25)
         f4.addRow("Umbral de acumulación de flujo (celdas):", self.spin_umbral)
 
+        # --- Relleno de celdas SIN DATO (voids) del MDE ---
+        self.check_rellenar_nodata = QCheckBox(
+            "Rellenar las celdas SIN DATO del MDE antes de procesar (recomendado)")
+        self.check_rellenar_nodata.setChecked(True)
+        f4.addRow(self.check_rellenar_nodata)
+        lbl_nodata = QLabel(
+            "Los MDE descargados (SRTM, ASTER, Copernicus) traen huecos sin dato por sombra de radar o "
+            "nubosidad, frecuentes justo en terreno abrupto como el altoandino. <b>No es lo mismo que "
+            "el relleno de sumideros</b> que el plugin ya hace: aquel elimina depresiones cerradas "
+            "(celdas CON dato más bajas que sus vecinas) para que el flujo no quede atrapado, pero no "
+            "toca los huecos vacíos. Sin rellenarlos, la dirección de flujo no puede propagarse a "
+            "través de ellos, la cuenca sale recortada o partida, y las cotas y pendientes se calculan "
+            "sobre una muestra con agujeros.<br><br>"
+            "<b>Tenga presente que el relleno INTERPOLA</b>, es decir, estima cotas donde no las hay: "
+            "en esas celdas el resultado no es una medición. El plugin le informa qué porcentaje del "
+            "MDE estaba vacío y cuánto se rellenó, para que pueda juzgarlo."
+        )
+        lbl_nodata.setWordWrap(True)
+        f4.addRow(lbl_nodata)
+        self.spin_nodata_distancia = QSpinBox()
+        self.spin_nodata_distancia.setRange(1, 2000)
+        self.spin_nodata_distancia.setValue(100)
+        f4.addRow("Radio máximo de búsqueda para interpolar (celdas):", self.spin_nodata_distancia)
+        self.spin_nodata_suavizado = QSpinBox()
+        self.spin_nodata_suavizado.setRange(0, 20)
+        self.spin_nodata_suavizado.setValue(2)
+        f4.addRow("Pasadas de suavizado del parche (evita bordes artificiales):",
+                   self.spin_nodata_suavizado)
+
         self.btn_generar_red = QPushButton("Paso A: Generar red de drenaje (Stream Network)")
         self.btn_generar_red.clicked.connect(self._on_generar_red_drenaje)
         limitar_ancho_boton(self.btn_generar_red)
@@ -754,6 +783,8 @@ class HydroAndinaProDialog(QDialog):
                 )
                 dem_layer = obtener_capa(resultado_reproyeccion["OUTPUT"], context, es_raster=True, nombre="mde_utm")
 
+            dem_layer, self.diagnostico_nodata = self._rellenar_nodata_si_procede(
+                dem_layer, context, feedback)
             self.dem_layer = dem_layer
 
             # Calcular flujo y generar la red de drenaje (reutilizando las
@@ -949,6 +980,76 @@ class HydroAndinaProDialog(QDialog):
         epsg = (32700 if lat < 0 else 32600) + zona
         return QgsCoordinateReferenceSystem(f"EPSG:{epsg}"), lon, lat
 
+    def _rellenar_nodata_si_procede(self, dem_layer, context, feedback):
+        """
+        Diagnostica los vacíos del MDE y los rellena si el usuario lo pidió.
+        Devuelve la capa (rellenada o la original) y deja el informe en la
+        barra de estado.
+
+        Se informa SIEMPRE del porcentaje de vacíos, incluso cuando el
+        relleno está desactivado: saber que el MDE tiene un 20% de huecos
+        explica de antemano por qué la cuenca puede salir partida, en vez
+        de dejar que el usuario lo descubra por un error posterior.
+        """
+        try:
+            diag = delineation.diagnosticar_nodata(dem_layer)
+        except Exception:
+            return dem_layer, None  # el diagnóstico nunca debe bloquear el proceso
+
+        if diag.get("advertencia"):
+            self.lbl_estado_tab1.setText("Aviso: " + diag["advertencia"])
+        if not diag["tiene_vacios"]:
+            return dem_layer, diag
+        if not self.check_rellenar_nodata.isChecked():
+            QMessageBox.warning(
+                self, "El MDE tiene celdas sin dato",
+                f"El MDE tiene {diag['celdas_sin_dato']:,} celdas sin dato "
+                f"({diag['porcentaje_sin_dato']:.2f}% del total) y el relleno está DESACTIVADO.\n\n"
+                "La dirección de flujo no puede propagarse a través de esos huecos: la cuenca puede "
+                "salir recortada o partida, y las cotas y pendientes se calcularán sobre una muestra "
+                "incompleta. Active «Rellenar las celdas SIN DATO» en el paso 4."
+            )
+            return dem_layer, diag
+
+        self.lbl_estado_tab1.setText(
+            f"Rellenando {diag['celdas_sin_dato']:,} celdas sin dato "
+            f"({diag['porcentaje_sin_dato']:.2f}% del MDE)...")
+        ruta_rellenada = delineation.rellenar_nodata(
+            dem_layer, distancia_maxima_px=self.spin_nodata_distancia.value(),
+            iteraciones_suavizado=self.spin_nodata_suavizado.value(),
+            context=context, feedback=feedback,
+        )
+        capa_rellenada = obtener_capa(ruta_rellenada, context, es_raster=True, nombre="mde_sin_vacios")
+
+        diag_despues = delineation.diagnosticar_nodata(capa_rellenada)
+        diag["porcentaje_tras_relleno"] = diag_despues["porcentaje_sin_dato"]
+        diag["celdas_tras_relleno"] = diag_despues["celdas_sin_dato"]
+
+        if diag_despues["tiene_vacios"]:
+            # Quedan huecos: son más anchos que el radio de búsqueda.
+            QMessageBox.warning(
+                self, "Quedaron celdas sin dato tras el relleno",
+                f"Se rellenaron {diag['celdas_sin_dato'] - diag_despues['celdas_sin_dato']:,} celdas, "
+                f"pero aún quedan {diag_despues['celdas_sin_dato']:,} "
+                f"({diag_despues['porcentaje_sin_dato']:.2f}%).\n\n"
+                "Esos huecos son más anchos que el doble del radio de búsqueda. Aumente el «radio "
+                "máximo de búsqueda para interpolar» en el paso 4 y vuelva a ejecutar, o consiga un "
+                "MDE de mejor cobertura para la zona."
+            )
+        elif diag["porcentaje_sin_dato"] > 5.0:
+            # Se rellenó todo, pero una fracción alta del MDE es ahora
+            # interpolada: hay que decirlo antes de que se use en diseño.
+            QMessageBox.warning(
+                self, "Buena parte del MDE quedó interpolada",
+                f"Se rellenaron todas las celdas sin dato, pero eran el "
+                f"{diag['porcentaje_sin_dato']:.2f}% del MDE.\n\n"
+                "Esa fracción de las cotas NO es una medición, sino una interpolación desde los bordes "
+                "de los huecos. Los parámetros morfométricos y el caudal de diseño que se deriven "
+                "heredan esa incertidumbre: verifique la cobertura del MDE antes de un diseño "
+                "definitivo."
+            )
+        return capa_rellenada, diag
+
     def _on_run_delineation(self):
         dem_layer = self.combo_dem.currentLayer()
         if dem_layer is None:
@@ -1033,10 +1134,15 @@ class HydroAndinaProDialog(QDialog):
                     + detalle_grados
                 )
 
-            self.dem_layer = dem_layer
-
             context = QgsProcessingContext()
             feedback = QgsProcessingFeedback()
+
+            # El relleno de vacíos va ANTES de calcular el flujo: si el MDE
+            # tiene huecos, la dirección de flujo no puede propagarse a
+            # través de ellos y la cuenca sale recortada o partida.
+            dem_layer, self.diagnostico_nodata = self._rellenar_nodata_si_procede(
+                dem_layer, context, feedback)
+            self.dem_layer = dem_layer
 
             self.lbl_estado_tab1.setText("Calculando dirección y acumulación de flujo...")
             # Si el Paso A (generar red de drenaje) ya se ejecutó en esta
