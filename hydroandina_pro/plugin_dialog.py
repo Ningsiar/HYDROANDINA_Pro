@@ -23,9 +23,10 @@ from qgis.core import (
     QgsProject, QgsMapLayerProxyModel, QgsCoordinateReferenceSystem,
     QgsCoordinateTransform, QgsPointXY, QgsGeometry, QgsWkbTypes,
     QgsProcessingContext, QgsProcessingFeedback, QgsRasterLayer, QgsVectorLayer,
+    QgsFeature, QgsField,
 )
 from qgis.gui import QgsMapLayerComboBox, QgsMapToolEmitPoint
-from qgis.PyQt.QtCore import Qt
+from qgis.PyQt.QtCore import Qt, QVariant
 from qgis.PyQt.QtGui import QFont, QColor
 from qgis.PyQt.QtWidgets import (
     QDialog, QTabWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox,
@@ -407,6 +408,9 @@ class HydroAndinaProDialog(QDialog):
         self.contador_cuencas = 0
         self.nombre_cuenca_activa = None
         self.map_tool = None
+        self.capa_estructuras_2d = None   # capa de líneas (memoria) de estructuras 2D insertadas desde el mapa (item 8)
+        self._primer_clic_estructura_2d = None
+        self.map_tool_estructura_2d = None
 
         layout = QVBoxLayout(self)
         self.tabs = QTabWidget()
@@ -8539,6 +8543,224 @@ class HydroAndinaProDialog(QDialog):
             estructuras.append(swe2d.Estructura(tipo, (f1, c1), (f2, c2), parametros, nombre))
         return estructuras
 
+    # ------------------------------------------------------------------
+    # Insertar estructura 2D desde el mapa (item 8, fase 1): 2 clics ->
+    # fila/columna de la malla, fila en tabla_estructuras_2d, y feature en
+    # una capa de líneas exportable. Mismo patrón de QgsMapToolEmitPoint
+    # que _on_canvas_clicked (Pestaña 1) y las secciones de socavación.
+    # ------------------------------------------------------------------
+    def _fila_columna_desde_punto_2d(self, punto: QgsPointXY):
+        dom = self.dominio_2d
+        columna = int((punto.x() - dom["x_min"]) / dom["dx"])
+        fila = int((dom["y_max"] - punto.y()) / dom["dy"])
+        return fila, columna
+
+    def _activar_map_tool_estructura_2d(self, checked):
+        canvas = self.iface.mapCanvas()
+        if checked:
+            if not getattr(self, "dominio_2d", None):
+                QMessageBox.warning(
+                    self, "Falta el dominio",
+                    "Cargue primero el dominio de cálculo (sección 1) -- se necesita su "
+                    "geotransformación para convertir el clic del mapa a fila/columna de la malla.")
+                self.btn_marcar_estructura_2d.setChecked(False)
+                return
+            self._primer_clic_estructura_2d = None
+            self.map_tool_estructura_2d = QgsMapToolEmitPoint(canvas)
+            self.map_tool_estructura_2d.canvasClicked.connect(self._on_canvas_clicked_estructura_2d)
+            canvas.mapToolSet.connect(self._on_map_tool_changed_estructura_2d)
+            canvas.setMapTool(self.map_tool_estructura_2d)
+            self.btn_marcar_estructura_2d.setText("Clic en el INICIO de la estructura...")
+            self.hide()
+        else:
+            if self.map_tool_estructura_2d is not None:
+                try:
+                    canvas.mapToolSet.disconnect(self._on_map_tool_changed_estructura_2d)
+                except TypeError:
+                    pass
+                canvas.unsetMapTool(self.map_tool_estructura_2d)
+            self.btn_marcar_estructura_2d.setText(
+                "📍 Marcar los 2 puntos de la estructura en el mapa (clic inicio → clic fin)")
+            self._restaurar_ventana()
+
+    def _on_map_tool_changed_estructura_2d(self, herramienta_nueva, herramienta_anterior):
+        if herramienta_nueva is not self.map_tool_estructura_2d:
+            self.btn_marcar_estructura_2d.setChecked(False)
+            self.btn_marcar_estructura_2d.setText(
+                "📍 Marcar los 2 puntos de la estructura en el mapa (clic inicio → clic fin)")
+            self._restaurar_ventana()
+
+    def _on_canvas_clicked_estructura_2d(self, punto, button):
+        if self._primer_clic_estructura_2d is None:
+            self._primer_clic_estructura_2d = QgsPointXY(punto)
+            self.btn_marcar_estructura_2d.setText("Clic en el FIN de la estructura...")
+            return
+        punto_inicio = self._primer_clic_estructura_2d
+        punto_fin = QgsPointXY(punto)
+        self._primer_clic_estructura_2d = None
+
+        canvas = self.iface.mapCanvas()
+        if self.map_tool_estructura_2d is not None:
+            try:
+                canvas.mapToolSet.disconnect(self._on_map_tool_changed_estructura_2d)
+            except TypeError:
+                pass
+            canvas.unsetMapTool(self.map_tool_estructura_2d)
+        self.btn_marcar_estructura_2d.setChecked(False)
+        self.btn_marcar_estructura_2d.setText(
+            "📍 Marcar los 2 puntos de la estructura en el mapa (clic inicio → clic fin)")
+        self._restaurar_ventana()
+
+        fila1, col1 = self._fila_columna_desde_punto_2d(punto_inicio)
+        fila2, col2 = self._fila_columna_desde_punto_2d(punto_fin)
+        nombre = self.edit_insertar_nombre_2d.text().strip() or \
+            f"Estructura {self.tabla_estructuras_2d.rowCount() + 1}"
+        tipo = self.combo_insertar_tipo_2d.currentText()
+        param1 = self.spin_insertar_param1_2d.value()
+        param2_3 = self.edit_insertar_param23_2d.text().strip()
+
+        self._agregar_fila_estructura_2d(nombre, tipo, fila1, col1, fila2, col2, param1, param2_3)
+        self._agregar_feature_capa_estructuras_2d(
+            nombre, tipo, fila1, col1, fila2, col2, param1, param2_3, punto_inicio, punto_fin)
+        self.edit_insertar_nombre_2d.clear()
+        self.lbl_estado_estructuras_2d.setText(
+            f"Estado: «{nombre}» ({tipo}) insertada -- fila={fila1},col={col1} → fila={fila2},col={col2}.")
+
+    def _primera_fila_vacia_o_nueva(self, tabla, columna_clave: int = 1):
+        """Devuelve el índice de la primera fila SIN datos en `columna_clave`
+        (para reaprovechar filas en blanco de una TablaPegable creada con
+        varias filas vacías por defecto), o agrega una fila nueva al final
+        si no encuentra ninguna."""
+        for fila in range(tabla.rowCount()):
+            item = tabla.item(fila, columna_clave)
+            if not item or not item.text().strip():
+                return fila
+        fila_nueva = tabla.rowCount()
+        tabla.setRowCount(fila_nueva + 1)
+        return fila_nueva
+
+    def _agregar_fila_estructura_2d(self, nombre, tipo, fila1, col1, fila2, col2, param1, param2_3):
+        fila = self._primera_fila_vacia_o_nueva(self.tabla_estructuras_2d, columna_clave=1)
+        valores = [nombre, tipo, str(fila1), str(col1), str(fila2), str(col2),
+                   f"{param1:g}", param2_3]
+        for col, valor in enumerate(valores):
+            self.tabla_estructuras_2d.setItem(fila, col, QTableWidgetItem(valor))
+        ajustar_alto_tabla(self.tabla_estructuras_2d, filas_visibles_max=8)
+
+    def _capa_sigue_en_proyecto(self, capa) -> bool:
+        if capa is None:
+            return False
+        try:
+            return QgsProject.instance().mapLayer(capa.id()) is not None
+        except RuntimeError:
+            return False  # el objeto C++ subyacente ya fue eliminado (capa quitada del panel)
+
+    def _obtener_capa_estructuras_2d(self):
+        """Capa de líneas (memoria) que acumula TODAS las estructuras
+        insertadas desde el mapa o importadas desde otra capa en esta
+        sesión -- se crea la primera vez que hace falta y se reutiliza
+        mientras siga en el proyecto (si el usuario la borra del panel de
+        capas, se vuelve a crear vacía en el próximo insert)."""
+        if not self._capa_sigue_en_proyecto(self.capa_estructuras_2d):
+            crs = QgsProject.instance().crs()
+            capa = QgsVectorLayer(f"LineString?crs={crs.authid()}",
+                                   "Estructuras 2D (HydroAndina Pro)", "memory")
+            proveedor = capa.dataProvider()
+            proveedor.addAttributes([
+                QgsField("nombre", QVariant.String),
+                QgsField("tipo", QVariant.String),
+                QgsField("fila1", QVariant.Int), QgsField("col1", QVariant.Int),
+                QgsField("fila2", QVariant.Int), QgsField("col2", QVariant.Int),
+                QgsField("parametro1", QVariant.Double),
+                QgsField("param2_3", QVariant.String),
+            ])
+            capa.updateFields()
+            QgsProject.instance().addMapLayer(capa)
+            self.capa_estructuras_2d = capa
+        return self.capa_estructuras_2d
+
+    def _agregar_feature_capa_estructuras_2d(self, nombre, tipo, fila1, col1, fila2, col2,
+                                              param1, param2_3, punto_inicio, punto_fin):
+        capa = self._obtener_capa_estructuras_2d()
+        feat = QgsFeature(capa.fields())
+        feat.setGeometry(QgsGeometry.fromPolylineXY([punto_inicio, punto_fin]))
+        feat.setAttributes([nombre, tipo, int(fila1), int(col1), int(fila2), int(col2),
+                             float(param1), param2_3])
+        capa.dataProvider().addFeature(feat)
+        capa.updateExtents()
+        capa.triggerRepaint()
+
+    def _on_importar_estructuras_desde_lineas(self):
+        """Lee cada feature de línea de la capa elegida, convierte su
+        primer y último vértice a fila/columna con la geotransformación
+        del dominio, y agrega una fila por feature -- para no tener que
+        marcar de a una cuando ya existe una capa digitalizada (p.ej. el
+        eje de varias alcantarillas de un mismo proyecto)."""
+        if not getattr(self, "dominio_2d", None):
+            QMessageBox.warning(self, "Falta el dominio",
+                                 "Cargue primero el dominio de cálculo (sección 1).")
+            return
+        capa_origen = self.combo_capa_lineas_estructuras_2d.currentLayer()
+        if capa_origen is None:
+            QMessageBox.warning(self, "Falta la capa", "Elija una capa de líneas para importar.")
+            return
+        tipo = self.combo_insertar_tipo_2d.currentText()
+        param1 = self.spin_insertar_param1_2d.value()
+        param2_3 = self.edit_insertar_param23_2d.text().strip()
+        importadas = 0
+        for feature in capa_origen.getFeatures():
+            geom = feature.geometry()
+            if geom is None or geom.isEmpty():
+                continue
+            vertices = [v for v in geom.vertices()]
+            if len(vertices) < 2:
+                continue
+            punto_inicio = QgsPointXY(vertices[0])
+            punto_fin = QgsPointXY(vertices[-1])
+            fila1, col1 = self._fila_columna_desde_punto_2d(punto_inicio)
+            fila2, col2 = self._fila_columna_desde_punto_2d(punto_fin)
+            campos_texto = [f.name().lower() for f in feature.fields()]
+            nombre = None
+            for candidato in ("nombre", "name", "id"):
+                if candidato in campos_texto:
+                    valor = feature[feature.fields()[campos_texto.index(candidato)].name()]
+                    if valor:
+                        nombre = str(valor)
+                        break
+            nombre = nombre or f"Estructura {self.tabla_estructuras_2d.rowCount() + 1}"
+            self._agregar_fila_estructura_2d(nombre, tipo, fila1, col1, fila2, col2, param1, param2_3)
+            self._agregar_feature_capa_estructuras_2d(
+                nombre, tipo, fila1, col1, fila2, col2, param1, param2_3, punto_inicio, punto_fin)
+            importadas += 1
+        if importadas == 0:
+            QMessageBox.warning(self, "Nada que importar",
+                                 "La capa elegida no tiene features de línea con al menos 2 vértices.")
+            return
+        self.lbl_estado_estructuras_2d.setText(
+            f"Estado: {importadas} estructura(s) importada(s) desde «{capa_origen.name()}» "
+            f"(tipo «{tipo}» y parámetros del formulario aplicados a todas -- edítelas en la tabla "
+            "si alguna necesita valores distintos).")
+
+    def _on_exportar_capa_estructuras_2d(self):
+        if not self._capa_sigue_en_proyecto(self.capa_estructuras_2d) or \
+                self.capa_estructuras_2d.featureCount() == 0:
+            QMessageBox.warning(self, "Sin estructuras insertadas",
+                                 "Inserte al menos una estructura desde el mapa (o impórtelas desde "
+                                 "una capa de líneas) antes de exportar.")
+            return
+        ruta_base, _ = QFileDialog.getSaveFileName(
+            self, "Exportar capa de estructuras 2D", "estructuras_2d", "ESRI Shapefile (*.shp)")
+        if not ruta_base:
+            return
+        ruta_base = ruta_base[:-4] if ruta_base.lower().endswith(".shp") else ruta_base
+        try:
+            salidas = exporters.exportar_vector(self.capa_estructuras_2d, ruta_base)
+            QMessageBox.information(
+                self, "Capa exportada",
+                "Estructuras exportadas a:\n" + "\n".join(salidas.values()))
+        except Exception as e:
+            QMessageBox.critical(self, "Error exportando la capa", str(e))
+
     def _on_ejecutar_simulacion_2d(self):
         if not getattr(self, "dominio_2d", None):
             QMessageBox.warning(self, "Falta el dominio",
@@ -9079,6 +9301,72 @@ class HydroAndinaProDialog(QDialog):
             "para una alcantarilla (p.ej. «1.2; 15»).</i>")
         lbl_est_ayuda.setWordWrap(True)
         v_est.addWidget(lbl_est_ayuda)
+
+        # -- Insertar estructura desde el mapa (item 8): en vez de adivinar
+        # fila/columna a mano, se marca la estructura con 2 clics sobre el
+        # mapa (mismo patrón de QgsMapToolEmitPoint que ya usan la Pestaña 1
+        # y las secciones de socavación/sedimentos) y se agrega la fila
+        # sola. Cada estructura insertada así también queda en una capa de
+        # líneas exportable, para tenerla como capa GIS del proyecto.
+        gb_insertar = QGroupBox("Insertar estructura desde el mapa (opcional)")
+        v_ins = QVBoxLayout(gb_insertar)
+        lbl_ins = QLabel(
+            "Complete el tipo y los parámetros abajo, marque los 2 puntos de la estructura en el "
+            "mapa (clic de inicio, clic de fin) y se agrega sola una fila a la tabla de arriba con "
+            "la fila/columna correctas -- ya no hay que calcularlas a mano. También puede importar "
+            "varias de una vez desde una capa de líneas ya digitalizada, o exportar todas las "
+            "insertadas aquí a un shapefile."
+        )
+        lbl_ins.setWordWrap(True)
+        v_ins.addWidget(lbl_ins)
+
+        f_ins = QFormLayout()
+        f_ins.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.edit_insertar_nombre_2d = QLineEdit()
+        self.edit_insertar_nombre_2d.setPlaceholderText("(opcional -- se numera sola si se deja vacío)")
+        f_ins.addRow("Nombre:", self.edit_insertar_nombre_2d)
+        self.combo_insertar_tipo_2d = QComboBox()
+        self.combo_insertar_tipo_2d.addItems(["vertedero", "orificio", "alcantarilla"])
+        f_ins.addRow("Tipo:", self.combo_insertar_tipo_2d)
+        self.spin_insertar_param1_2d = QDoubleSpinBox()
+        self.spin_insertar_param1_2d.setRange(-1000.0, 100000.0)
+        self.spin_insertar_param1_2d.setDecimals(3)
+        f_ins.addRow("Parámetro 1 (cota de cresta / área / cota de entrada):", self.spin_insertar_param1_2d)
+        self.edit_insertar_param23_2d = QLineEdit()
+        self.edit_insertar_param23_2d.setPlaceholderText("p.ej. 12;1.84  o  1.2;15")
+        f_ins.addRow("Parámetro 2 / 3 (longitud;C  o  diámetro;longitud):", self.edit_insertar_param23_2d)
+        v_ins.addLayout(f_ins)
+
+        self.btn_marcar_estructura_2d = QPushButton(
+            "📍 Marcar los 2 puntos de la estructura en el mapa (clic inicio → clic fin)")
+        self.btn_marcar_estructura_2d.setCheckable(True)
+        self.btn_marcar_estructura_2d.toggled.connect(self._activar_map_tool_estructura_2d)
+        v_ins.addWidget(self.btn_marcar_estructura_2d)
+
+        h_lineas = QHBoxLayout()
+        h_lineas.addWidget(QLabel("O importar desde una capa de líneas ya digitalizada:"))
+        self.combo_capa_lineas_estructuras_2d = QgsMapLayerComboBox()
+        self.combo_capa_lineas_estructuras_2d.setFilters(QgsMapLayerProxyModel.LineLayer)
+        self.combo_capa_lineas_estructuras_2d.setAllowEmptyLayer(True)
+        h_lineas.addWidget(self.combo_capa_lineas_estructuras_2d)
+        btn_importar_lineas_2d = QPushButton("Importar filas desde esta capa")
+        btn_importar_lineas_2d.clicked.connect(self._on_importar_estructuras_desde_lineas)
+        h_lineas.addWidget(btn_importar_lineas_2d)
+        v_ins.addLayout(h_lineas)
+
+        h_export_est = QHBoxLayout()
+        btn_exportar_capa_estructuras_2d = QPushButton(
+            "💾 Exportar capa de estructuras insertadas (SHP / KML / GeoJSON)")
+        btn_exportar_capa_estructuras_2d.clicked.connect(self._on_exportar_capa_estructuras_2d)
+        h_export_est.addWidget(btn_exportar_capa_estructuras_2d)
+        h_export_est.addStretch()
+        v_ins.addLayout(h_export_est)
+
+        self.lbl_estado_estructuras_2d = QLabel("Estado: ninguna estructura insertada desde el mapa todavía.")
+        self.lbl_estado_estructuras_2d.setWordWrap(True)
+        v_ins.addWidget(self.lbl_estado_estructuras_2d)
+
+        v_est.addWidget(gb_insertar)
         v.addWidget(gb_est)
 
         # ---------------- 5. CONTROL NUMÉRICO ----------------

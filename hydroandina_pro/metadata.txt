@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.3.7
+version=0.3.8
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,43 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.3.8: item 8 -- fase 1 de 4 (Pestaña 8, Simulación Hidráulica 2D).
+      Hasta ahora, cada estructura de la tabla del punto 4 exigía calcular
+      a mano la fila/columna de la malla desde las coordenadas reales --
+      con el factor de remuestreo de por medio, un cálculo tedioso y
+      propenso a error. Ahora se puede marcar la estructura con 2 clics
+      sobre el mapa (clic de inicio, clic de fin -- mismo mecanismo de
+      QgsMapToolEmitPoint que ya usan la Pestaña 1 y las secciones de
+      socavación/sedimentos) y la fila se agrega sola, con la
+      fila/columna ya convertidas usando la geotransformación del dominio
+      cargado. También se puede importar de una vez varias estructuras
+      desde una capa de líneas ya digitalizada (toma el primer y último
+      vértice de cada feature, y el atributo nombre/name/id si existe).
+      Cada estructura insertada por cualquiera de las dos vías queda
+      además en una capa de líneas propia ("Estructuras 2D (HydroAndina
+      Pro)", en memoria, con nombre/tipo/fila1/col1/fila2/col2/parametro1/
+      param2_3 como atributos) que se puede exportar a SHP/KML/GeoJSON con
+      un botón -- así la ubicación de las estructuras queda como una capa
+      GIS reutilizable, no solo como filas de una tabla dentro del plugin.
+      Reutiliza core/exporters.py::exportar_vector(), sin módulo nuevo.
+      La simulación de lluvia sobre toda la malla (rain-on-grid) para
+      encontrar el caudal pico, que también pedía este ítem, YA estaba
+      disponible desde antes (spin_lluvia_2d, sección 3) y no necesitó
+      cambios.
+      Verificado con QGIS 3.40.1 real en modo headless (25 comprobaciones):
+      conversión punto→fila/columna contra un geotransform conocido a
+      mano, reaprovechamiento de filas en blanco de la tabla antes de
+      crecerla, 2 clics simulados con los atributos y la geometría
+      resultante verificados campo por campo, importación desde una capa
+      de líneas con nombres tomados de sus atributos, exportación a
+      SHP/KML/GeoJSON releída y confirmada con OGR, y los casos sin
+      dominio cargado / sin nada que exportar avisando en vez de
+      reventar.
+      Pendiente: fase 2 (dibujar una estructura con el mouse, creando su
+      propia capa/shapefile desde cero en vez de solo insertar una
+      prediseñada), fase 3 (video embebido de la simulación), fase 4
+      (visualización 3D del terreno+estructuras con corte transversal
+      interactivo).
     - v0.3.7: item 9 completo -- fase 2 de 2 (reporte Word con PLANTILLA
       docxtpl, tal como se pidió originalmente). Nuevo
       core/report_generator_docxtpl.py: usa docxtpl sobre una plantilla
