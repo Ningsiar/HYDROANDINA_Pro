@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.3.3
+version=0.3.4
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,46 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.3.4: item 7 completo -- fase 1 de 2 (Pestaña 7, Diseño de Estructuras
+      Hidráulicas). Se quitó "Vados / Badén" del desplegable de estructuras
+      (se verifica como Canales, que ya incluye borde libre). Se corrigió el
+      hueco real detectado al revisar la pestaña: el botón "Usar Qp de la
+      pestaña 6" solo existía en Canales -- Alcantarilla y Sumidero (las que
+      calculan una CAPACIDAD, no reciben un Q de diseño directo) no tenían
+      forma de contrastar esa capacidad contra el caudal pico calculado en
+      la pestaña 6. Ahora ambas tienen un campo "Qp objetivo (opcional)" con
+      botón de autocompletado desde la pestaña 6, y el resultado indica
+      explícitamente si la capacidad calculada cumple o no ese Qp. También
+      faltaba por completo un enlace de n desde la pestaña 4 (solo existía
+      el de pendiente S desde la morfometría): se agregó el botón "Usar n de
+      la pestaña 4" en Canales y Alcantarilla, que prioriza el n recién
+      calculado con el catálogo de métodos del item 4 y cae al n de Kerby si
+      no hay ninguno calculado todavía. Se agregó además un desplegable de
+      materiales de referencia (concreto, PVC, HDPE, fierro fundido dúctil,
+      acero, mampostería, vidrio/acrílico, canales de tierra, etc. --
+      core/roughness_materials.py, 17 materiales) que rellena el n al
+      elegir uno, igual de editable después. Por último, todos los gráficos
+      de sección transversal (rectangular, triangular, trapezoidal,
+      parabólico, irregular, circular y cajón) ahora dibujan un espesor de
+      muro/revestimiento de 0.10 m de referencia -- puramente visual (a la
+      escala real de un canal de 1-3 m una línea sin espesor era
+      imperceptible), calculado con un offset perpendicular geométrico
+      genérico que se verificó válido tanto para contornos abiertos
+      (canales) como para el contorno cerrado de la sección circular.
+      Pendiente para una fase 2: el cuadro comparativo final entre TODOS
+      los tipos de estructura calculados en la sesión como tabla (hoy es
+      texto) con una recomendación de mejor desempeño hidráulico -- se
+      difirió porque estructuras de categorías distintas (canal vs.
+      alcantarilla vs. verificación de borde libre) no son directamente
+      comparables entre sí sin una regla de comparación bien pensada.
+      Verificado con QGIS 3.40.1 real en modo headless (24 comprobaciones):
+      desaparición de Vados/Badén sin desalinear el stack de páginas,
+      enlaces de Q/S/n en Canales y Alcantarilla, verificación cumple/no
+      cumple en Alcantarilla y Sumidero con Qp objetivo real y absurdamente
+      alto, combo de materiales, y la geometría del offset del muro (incluye
+      un caso circular con dirección de giro distinta a los canales
+      abiertos, para confirmar que la misma fórmula de normal funciona en
+      ambos).
     - v0.3.3: item 4 completo (fase 3 de 9; quedan el mapa IILA-SENAMHI del item 5, item 7, y los
       subsistemas nuevos de los items 8 y 9).
       NUEVOS MODULOS core/runoff_coefficient.py y core/roughness_methods.py, con dos metodos

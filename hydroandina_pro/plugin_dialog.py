@@ -40,7 +40,7 @@ from .core import (delineation, morphometry, curve_number, tc_methods, dem_downl
                     sediment_transport, debris_flow, climate_change, mean_flow_models, etp_methods,
                     low_flows, phabsim, groundwater_flow, well_hydraulics, idf_curves,
                     regionalization, gridded_validation, swe2d, mesh_export,
-                    runoff_coefficient, roughness_methods)
+                    runoff_coefficient, roughness_methods, roughness_materials)
 from .core.qgis_layer_utils import obtener_capa
 from .ui.hypsometric_canvas import HypsometricCanvas
 from .ui.hydrograph_canvas import HydrographCanvas
@@ -7369,7 +7369,7 @@ class HydroAndinaProDialog(QDialog):
         h_sel.addWidget(QLabel("Estructura hidráulica:"))
         self.combo_tipo_estructura = QComboBox()
         self.combo_tipo_estructura.addItems([
-            "Canales", "Vados / Badén", "Alcantarilla", "Enrocado (RipRap)",
+            "Canales", "Alcantarilla", "Enrocado (RipRap)",
             "Sumideros", "Cunetas de coronación", "Pontón", "Puente", "Defensa Ribereña",
         ])
         self.combo_tipo_estructura.currentIndexChanged.connect(
@@ -7380,7 +7380,6 @@ class HydroAndinaProDialog(QDialog):
 
         self.stack_estructura = QStackedWidget()
         self.stack_estructura.addWidget(self._pagina_canales("Canales"))
-        self.stack_estructura.addWidget(self._pagina_canales("Vados / Badén (verificar como canal + borde libre a la calzada)"))
         self.stack_estructura.addWidget(self._pagina_alcantarilla())
         self.stack_estructura.addWidget(self._pagina_enrocado())
         self.stack_estructura.addWidget(self._pagina_sumidero())
@@ -7404,8 +7403,8 @@ class HydroAndinaProDialog(QDialog):
         self._agregar_pestaña_con_scroll(tab, "7. Diseño Estructuras Hidráulicas")
 
     def _fila_fuente_datos(self, layout: QFormLayout, prefijo: str):
-        """Botones para tomar Q de la pestaña 6 y S/n de la morfometría,
-        comunes a varias páginas de la pestaña 7."""
+        """Botones para tomar Q de la pestaña 6, S de la morfometría (pestaña
+        2) y n de la pestaña 4, comunes a varias páginas de la pestaña 7."""
         h = QHBoxLayout()
         btn_q = QPushButton("Usar Qp de la pestaña 6 (caudal pico)")
         btn_q.clicked.connect(lambda: self._usar_qp_pestaña6(prefijo))
@@ -7413,7 +7412,56 @@ class HydroAndinaProDialog(QDialog):
         btn_s = QPushButton("Usar pendiente de la morfometría")
         btn_s.clicked.connect(lambda: self._usar_pendiente_morfometria(prefijo))
         h.addWidget(btn_s)
+        btn_n = QPushButton("Usar n de la pestaña 4")
+        btn_n.clicked.connect(lambda: self._usar_n_pestaña4(prefijo))
+        h.addWidget(btn_n)
         layout.addRow(h)
+
+    def _usar_n_pestaña4(self, prefijo: str):
+        """Trae el coeficiente de rugosidad n desde la Pestaña 4: prioriza
+        el último valor calculado con el catálogo de métodos (item 4:
+        granulométrico/Cowan/Keulegan/sección compuesta) si ya se calculó
+        en esta sesión, y si no cae al n de Kerby (el único n manual de
+        esa pestaña)."""
+        n, fuente = None, ""
+        if getattr(self, "coef_n_calculado", None) is not None:
+            n = self.coef_n_calculado
+            fuente = "calculado en la Pestaña 4 con el catálogo de métodos de rugosidad"
+        elif hasattr(self, "spin_n_kerby"):
+            n = self.spin_n_kerby.value()
+            fuente = "n de Kerby (Pestaña 4)"
+        if n is None:
+            QMessageBox.warning(
+                self, "Falta el coeficiente n",
+                "Calcule primero un n en la Pestaña 4 (sección «Coeficiente de rugosidad de "
+                "Manning n — métodos de cálculo»), o ingrese al menos el n de Kerby.")
+            return
+        spin = getattr(self, f"spin_{prefijo}_n", None)
+        if spin is not None:
+            spin.setValue(n)
+        else:
+            QMessageBox.information(self, "n traído de la Pestaña 4", f"n = {n} ({fuente})")
+
+    def _agregar_selector_material_n(self, layout: QFormLayout, spin_n: QDoubleSpinBox):
+        """Desplegable con valores TÍPICOS de n por material de tubería o
+        revestimiento (core.roughness_materials), a modo de catálogo de
+        referencia estilo fabricante (p.ej. Master Flow) y de las tablas
+        clásicas de Chow (1959)/ASCE. Al elegir un material se rellena el
+        spinbox de n; el valor sigue siendo editable a mano después --
+        es un punto de partida, no un valor normativo fijo."""
+        combo_material = QComboBox()
+        combo_material.addItem("(elegir material de referencia)", None)
+        for nombre, n in roughness_materials.TABLA_MATERIALES_N_DEFAULT:
+            combo_material.addItem(f"{nombre}  (n≈{n:.3f})", n)
+
+        def _al_elegir(indice):
+            valor = combo_material.itemData(indice)
+            if valor is not None:
+                spin_n.setValue(valor)
+
+        combo_material.currentIndexChanged.connect(_al_elegir)
+        layout.addRow("Material (referencia, opcional):", combo_material)
+        return combo_material
 
     def _usar_qp_pestaña6(self, prefijo: str):
         if not self.hidrograma_resultado:
@@ -7465,6 +7513,7 @@ class HydroAndinaProDialog(QDialog):
             "Creager_Q_m3s": "Q Creager (m³/s)",
             "Qp_SCS_Snyder_Clark_m3s": "Qp SCS/Snyder/Clark (m³/s) [referencia]",
             "spread_T_m": "Ancho de inundación T (m)", "tirante_borde_m": "Tirante en el borde (m)",
+            "Qp_objetivo_m3s": "Qp objetivo (pestaña 6) (m³/s)",
         }
 
         html = "<h3>Cuadro resumen final — Hidráulica y Drenaje</h3>"
@@ -7509,6 +7558,7 @@ class HydroAndinaProDialog(QDialog):
         spin_n.setDecimals(4)
         spin_n.setValue(0.014)
         f.addRow("Coef. de rugosidad de Manning n:", spin_n)
+        combo_material = self._agregar_selector_material_n(f, spin_n)
 
         spin_s = QDoubleSpinBox()
         spin_s.setRange(0.0001, 1.0)
@@ -7556,6 +7606,7 @@ class HydroAndinaProDialog(QDialog):
 
         prefijo = f"canal_{id(pagina)}"
         setattr(self, f"combo_{prefijo}_forma", combo_forma)
+        setattr(self, f"combo_{prefijo}_material", combo_material)
         setattr(self, f"spin_{prefijo}_n", spin_n)
         setattr(self, f"spin_{prefijo}_s", spin_s)
         setattr(self, f"spin_{prefijo}_q", spin_q)
@@ -7710,6 +7761,7 @@ class HydroAndinaProDialog(QDialog):
 
         spin_n = QDoubleSpinBox(); spin_n.setRange(0.008, 0.2); spin_n.setDecimals(4); spin_n.setValue(0.013)
         f.addRow("Coef. de Manning n:", spin_n)
+        combo_material = self._agregar_selector_material_n(f, spin_n)
         spin_s = QDoubleSpinBox(); spin_s.setRange(0.0001, 1.0); spin_s.setDecimals(5); spin_s.setValue(0.01)
         f.addRow("Pendiente S (m/m):", spin_s)
         spin_diametro = QDoubleSpinBox(); spin_diametro.setRange(0.1, 5.0); spin_diametro.setDecimals(3); spin_diametro.setValue(1.0)
@@ -7720,8 +7772,25 @@ class HydroAndinaProDialog(QDialog):
         f.addRow("Altura máxima (solo cajón) (m):", spin_alto)
         spin_y = QDoubleSpinBox(); spin_y.setRange(0.01, 5.0); spin_y.setDecimals(3); spin_y.setValue(0.6)
         f.addRow("Tirante de trabajo y (m):", spin_y)
+        spin_qp_objetivo = QDoubleSpinBox(); spin_qp_objetivo.setRange(0.0, 10000.0); spin_qp_objetivo.setDecimals(3)
+        spin_qp_objetivo.setSpecialValueText("(sin verificar contra un Qp objetivo)")
+        f.addRow("Qp objetivo a verificar (opcional) (m³/s):", spin_qp_objetivo)
 
         v.addLayout(f)
+
+        h_fuente = QHBoxLayout()
+        btn_qp = QPushButton("Usar Qp de la pestaña 6 (caudal pico)")
+        btn_qp.clicked.connect(lambda: self.spin_alcant_qp_objetivo.setValue(
+            self.hidrograma_resultado["caudal_pico_m3s"]) if self.hidrograma_resultado else
+            QMessageBox.warning(self, "Falta el caudal", "Calcule primero el hidrograma en la pestaña 6."))
+        h_fuente.addWidget(btn_qp)
+        btn_s2 = QPushButton("Usar pendiente de la morfometría")
+        btn_s2.clicked.connect(lambda: self._usar_pendiente_morfometria("alcant"))
+        h_fuente.addWidget(btn_s2)
+        btn_n2 = QPushButton("Usar n de la pestaña 4")
+        btn_n2.clicked.connect(lambda: self._usar_n_pestaña4("alcant"))
+        h_fuente.addWidget(btn_n2)
+        v.addLayout(h_fuente)
 
         btn = QPushButton("Calcular capacidad")
         v.addWidget(btn)
@@ -7736,8 +7805,10 @@ class HydroAndinaProDialog(QDialog):
 
         self.spin_alcant_n, self.spin_alcant_s = spin_n, spin_s
         self.combo_alcant_tipo = combo_tipo
+        self.combo_alcant_material = combo_material
         self.spin_alcant_diametro, self.spin_alcant_ancho = spin_diametro, spin_ancho
         self.spin_alcant_alto, self.spin_alcant_y = spin_alto, spin_y
+        self.spin_alcant_qp_objetivo = spin_qp_objetivo
         self.lbl_alcant_resultado = lbl_estado
 
         btn.clicked.connect(self._on_calcular_alcantarilla)
@@ -7756,6 +7827,23 @@ class HydroAndinaProDialog(QDialog):
                 )
                 etiqueta_pct, valor_pct = "% de altura llena", r["porcentaje_lleno_altura"]
                 self.canvas_alcant_seccion.plot_cajon(self.spin_alcant_ancho.value(), self.spin_alcant_alto.value(), y)
+
+            # Verificación opcional contra el Qp de diseño (pestaña 6): la
+            # capacidad se calcula para el tirante de trabajo y ingresado,
+            # así que "cumple" aquí significa que a ESE tirante ya se
+            # transporta el Qp objetivo -- no es un dimensionamiento
+            # automático del diámetro/tirante necesario.
+            qp_obj = self.spin_alcant_qp_objetivo.value()
+            fila_verificacion = []
+            if qp_obj > 0:
+                cumple_qp = r["caudal_m3_s"] >= qp_obj
+                fila_verificacion = [
+                    ("Qp objetivo (pestaña 6)", qp_obj, "m³/s"),
+                    ("¿Capacidad ≥ Qp objetivo?", "Sí" if cumple_qp else "No", "",
+                     "al tirante de trabajo y ingresado; si NO cumple, aumente D/ancho/alto o el "
+                     "tirante de trabajo, y vuelva a calcular"),
+                ]
+
             self.lbl_alcant_resultado.setText(f"Estado: calculado. {r['advertencia']}")
             poblar_tabla_parametros(self.tabla_alcant_resultado, [
                 ("Área", r["area_m2"], "m²"),
@@ -7764,11 +7852,13 @@ class HydroAndinaProDialog(QDialog):
                 (etiqueta_pct, valor_pct, "%"),
                 ("Caudal (capacidad)", r["caudal_m3_s"], "m³/s"),
                 ("Velocidad", r["velocidad_m_s"], "m/s"),
+                *fila_verificacion,
             ])
             self.resultados_hidraulica_drenaje[f"Alcantarilla - {self.combo_alcant_tipo.currentText()}"] = {
                 "tipo": "Alcantarilla", "subtipo": self.combo_alcant_tipo.currentText(),
                 "n": n, "S": s, "tirante_m": y,
                 **{k: v for k, v in r.items() if k != "advertencia"},
+                **({"Qp_objetivo_m3s": qp_obj, "cumple": cumple_qp} if qp_obj > 0 else {}),
             }
             self._actualizar_texto_resumen_hidraulica()
         except Exception as e:
@@ -7848,7 +7938,16 @@ class HydroAndinaProDialog(QDialog):
         f.addRow("Tirante sobre el sumidero y (m):", spin_y)
         spin_cw = QDoubleSpinBox(); spin_cw.setRange(1.0, 2.5); spin_cw.setDecimals(2); spin_cw.setValue(1.66)
         f.addRow("Coeficiente de vertedero Cw:", spin_cw)
+        spin_qp_objetivo = QDoubleSpinBox(); spin_qp_objetivo.setRange(0.0, 10000.0); spin_qp_objetivo.setDecimals(3)
+        spin_qp_objetivo.setSpecialValueText("(sin verificar contra un Qp objetivo)")
+        f.addRow("Qp objetivo a verificar (opcional) (m³/s):", spin_qp_objetivo)
         v.addLayout(f)
+
+        btn_qp = QPushButton("Usar Qp de la pestaña 6 (caudal pico)")
+        btn_qp.clicked.connect(lambda: spin_qp_objetivo.setValue(self.hidrograma_resultado["caudal_pico_m3s"])
+                                if self.hidrograma_resultado else
+                                QMessageBox.warning(self, "Falta el caudal", "Calcule primero el hidrograma en la pestaña 6."))
+        v.addWidget(btn_qp)
 
         btn = QPushButton("Calcular capacidad de intercepción")
         v.addWidget(btn)
@@ -7864,14 +7963,26 @@ class HydroAndinaProDialog(QDialog):
         def calcular():
             try:
                 r = hydraulic_structures.sumidero_capacidad_vertedero(spin_l.value(), spin_y.value(), spin_cw.value())
+                qp_obj = spin_qp_objetivo.value()
+                fila_verificacion = []
+                cumple_qp = None
+                if qp_obj > 0:
+                    cumple_qp = r["caudal_interceptado_m3_s"] >= qp_obj
+                    fila_verificacion = [
+                        ("Qp objetivo (pestaña 6)", qp_obj, "m³/s"),
+                        ("¿Intercepta el Qp objetivo?", "Sí" if cumple_qp else "No", "",
+                         "si NO cumple, aumente L o agregue sumideros adicionales en serie"),
+                    ]
                 lbl_estado.setText(f"Estado: calculado. {r['advertencia']}")
                 poblar_tabla_parametros(tabla_resultado, [
                     ("Caudal interceptado", r["caudal_interceptado_m3_s"], "m³/s"),
+                    *fila_verificacion,
                 ])
                 self.canvas_sumidero.plot_ventana_sumidero(spin_l.value(), spin_y.value(), r["caudal_interceptado_m3_s"])
                 self.resultados_hidraulica_drenaje["Sumidero"] = {
                     "tipo": "Sumidero", "L_m": spin_l.value(), "y_m": spin_y.value(), "Cw": spin_cw.value(),
                     "caudal_interceptado_m3_s": r["caudal_interceptado_m3_s"],
+                    **({"Qp_objetivo_m3s": qp_obj, "cumple": cumple_qp} if qp_obj > 0 else {}),
                 }
                 self._actualizar_texto_resumen_hidraulica()
             except Exception as e:

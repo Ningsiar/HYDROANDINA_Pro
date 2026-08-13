@@ -45,9 +45,45 @@ class SeccionTransversalCanvas(FigureCanvas):
         self.ax.margins(y=0.18)
         self.ax.grid(True, linestyle=":", linewidth=0.5)
 
+    def _offset_perpendicular(self, xs, zs, espesor):
+        """Desplaza cada vértice del contorno xs/zs una distancia `espesor`
+        hacia AFUERA (perpendicular al contorno en cada punto), solo para
+        DIBUJAR un espesor de muro/revestimiento constante -- no es un
+        cálculo estructural ni interviene en la hidráulica.
+
+        Válido para cualquier contorno de este módulo porque todos se
+        recorren en el mismo sentido: de la esquina superior izquierda,
+        bajando por el fondo, hasta la esquina superior derecha (o, para
+        la sección circular, dando la vuelta completa en sentido
+        antihorario). En ambos casos, rotar el vector tangente de cada
+        segmento 90° en sentido HORARIO -- (dx,dz) -> (dz,-dx) -- da el
+        normal que apunta hacia afuera del área mojada."""
+        n = len(xs)
+        xs_ext, zs_ext = [], []
+        for i in range(n):
+            i0, i1 = max(i - 1, 0), min(i + 1, n - 1)
+            dx, dz = xs[i1] - xs[i0], zs[i1] - zs[i0]
+            norma = math.hypot(dx, dz) or 1.0
+            nx, nz = dz / norma, -dx / norma
+            xs_ext.append(xs[i] + nx * espesor)
+            zs_ext.append(zs[i] + nz * espesor)
+        return xs_ext, zs_ext
+
+    def _dibujar_muro(self, xs_fondo, zs_fondo, espesor=0.10):
+        """Banda de espesor constante (0.10 m por defecto) a lo largo del
+        contorno mojado, SOLO para que el muro/revestimiento sea visible
+        en el dibujo (a la escala real de canales de 1-3 m, una línea sin
+        espesor es imperceptible). El espesor real de diseño estructural
+        del muro está fuera del alcance de este plugin."""
+        xs_ext, zs_ext = self._offset_perpendicular(xs_fondo, zs_fondo, espesor)
+        self.ax.fill(list(xs_fondo) + list(reversed(xs_ext)), list(zs_fondo) + list(reversed(zs_ext)),
+                      color="#B5B2AC", alpha=0.8, zorder=2.5, linewidth=0.3, edgecolor="#7A7773")
+
     def _dibujar_fondo_y_agua(self, xs_fondo, zs_fondo, y_agua, z_min):
-        """Dibuja el contorno del fondo del canal y la superficie libre del
+        """Dibuja el muro/revestimiento (espesor referencial 0.10 m, solo
+        visual), el contorno del fondo del canal y la superficie libre del
         agua (nivel y_agua sobre z_min), con relleno celeste bajo el agua."""
+        self._dibujar_muro(xs_fondo, zs_fondo)
         self.ax.plot(xs_fondo, zs_fondo, "-", color="#3B3B3B", linewidth=2, zorder=3)
         nivel = z_min + y_agua
         x_izq, x_der = min(xs_fondo), max(xs_fondo)
