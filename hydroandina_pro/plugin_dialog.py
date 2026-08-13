@@ -46,7 +46,8 @@ from .core import (delineation, morphometry, curve_number, tc_methods, dem_downl
                     sediment_transport, debris_flow, climate_change, mean_flow_models, etp_methods,
                     low_flows, phabsim, groundwater_flow, well_hydraulics, idf_curves,
                     regionalization, gridded_validation, swe2d, mesh_export,
-                    runoff_coefficient, roughness_methods, roughness_materials)
+                    runoff_coefficient, roughness_methods, roughness_materials,
+                    iila_senamhi_zones)
 from .core.qgis_layer_utils import obtener_capa
 from .ui.hypsometric_canvas import HypsometricCanvas
 from .ui.hydrograph_canvas import HydrographCanvas
@@ -4259,6 +4260,92 @@ class HydroAndinaProDialog(QDialog):
         f_mi.addRow("Periodo de retorno para comparar los métodos:", self.combo_tr_comparacion_idf)
         v_mi.addLayout(f_mi)
 
+        # -- Autocompletar IILA-SENAMHI con datos verificados (item 5) --
+        # No existe un mapa clicable público de las zonas IILA-SENAMHI (se
+        # buscó explícitamente -- ver PROYECTOS/HydroAndina_Pro/
+        # ESTADO_PROYECTO.md). En su lugar, dos vías con datos REALES
+        # transcritos de un estudio hidrológico verificado
+        # (core/iila_senamhi_zones.py, con sus límites documentados ahí).
+        gb_iila_auto = QGroupBox(
+            "Autocompletar IILA-SENAMHI con datos verificados (sin mapa clicable -- no existe uno "
+            "público; ver nota)")
+        v_auto = QVBoxLayout(gb_iila_auto)
+        lbl_auto = QLabel(
+            "<b>Por P24 del sitio (recomendado)</b> — aplica las razones universales de la Tabla 39 "
+            "del propio estudio IILA-SENAMHI sobre el P24(Tr) que usted ya calculó arriba, para "
+            "cualquier punto del Perú, sin ubicar ninguna zona. Verificado entre 3 y 24 horas "
+            "(por debajo, el régimen del método cambia de fórmula y no se pudo reconstruir de la "
+            "fuente disponible).<br>"
+            "<b>Por zona/subzona regional</b> — catálogo PARCIAL (sierra sur/Cusco y alrededores, "
+            "las únicas subzonas para las que se consiguieron coeficientes reales) con a, n y K'g "
+            "verificados, para completar directamente las curvas de arriba."
+        )
+        lbl_auto.setWordWrap(True)
+        v_auto.addWidget(lbl_auto)
+
+        self.combo_metodo_auto_iila = QComboBox()
+        self.combo_metodo_auto_iila.addItems(
+            ["Por P24 del sitio (recomendado)", "Por zona/subzona regional (parcial)"])
+        v_auto.addWidget(self.combo_metodo_auto_iila)
+
+        self.stack_auto_iila = QStackedWidget()
+
+        pagina_p24 = QWidget()
+        f_p24 = QFormLayout(pagina_p24)
+        f_p24.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.spin_duracion_p24_iila = QDoubleSpinBox()
+        self.spin_duracion_p24_iila.setRange(3.0, 24.0)
+        self.spin_duracion_p24_iila.setDecimals(2)
+        self.spin_duracion_p24_iila.setValue(6.0)
+        f_p24.addRow("Duración (h, entre 3 y 24):", self.spin_duracion_p24_iila)
+        btn_calc_p24_iila = QPushButton("Calcular Pt/It para todos los Tr ya calculados")
+        btn_calc_p24_iila.clicked.connect(self._on_calcular_iila_por_p24)
+        f_p24.addRow(btn_calc_p24_iila)
+        self.stack_auto_iila.addWidget(pagina_p24)
+
+        pagina_zona = QWidget()
+        f_zona = QFormLayout(pagina_zona)
+        f_zona.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.combo_subzona_iila = QComboBox()
+        for clave in sorted(iila_senamhi_zones.NOMBRES_SUBZONAS_37):
+            self.combo_subzona_iila.addItem(iila_senamhi_zones.NOMBRES_SUBZONAS_37[clave], clave)
+        f_zona.addRow("Subzona:", self.combo_subzona_iila)
+        self.spin_altitud_iila = QDoubleSpinBox()
+        self.spin_altitud_iila.setRange(0.0, 6000.0)
+        self.spin_altitud_iila.setDecimals(0)
+        self.spin_altitud_iila.setSpecialValueText("(no ingresada)")
+        f_zona.addRow("Altitud Y (msnm, si la subzona la requiere):", self.spin_altitud_iila)
+        self.spin_dc_iila = QDoubleSpinBox()
+        self.spin_dc_iila.setRange(0.0, 500.0)
+        self.spin_dc_iila.setDecimals(1)
+        self.spin_dc_iila.setSpecialValueText("(no ingresada)")
+        f_zona.addRow("Distancia a la cordillera Dc (km, si la subzona la requiere):", self.spin_dc_iila)
+        self.spin_tr_zona_iila = QDoubleSpinBox()
+        self.spin_tr_zona_iila.setRange(2.0, 1000.0)
+        self.spin_tr_zona_iila.setDecimals(0)
+        self.spin_tr_zona_iila.setValue(10.0)
+        f_zona.addRow("Periodo de retorno T (años):", self.spin_tr_zona_iila)
+        self.spin_duracion_zona_iila = QDoubleSpinBox()
+        self.spin_duracion_zona_iila.setRange(3.0, 24.0)
+        self.spin_duracion_zona_iila.setDecimals(2)
+        self.spin_duracion_zona_iila.setValue(6.0)
+        f_zona.addRow("Duración (h, entre 3 y 24):", self.spin_duracion_zona_iila)
+        btn_calc_zona_iila = QPushButton("Calcular con esta subzona")
+        btn_calc_zona_iila.clicked.connect(self._on_calcular_iila_por_zona)
+        f_zona.addRow(btn_calc_zona_iila)
+        self.btn_usar_zona_iila = QPushButton("Usar a / K / n en las curvas de arriba")
+        self.btn_usar_zona_iila.setEnabled(False)
+        self.btn_usar_zona_iila.clicked.connect(self._on_usar_zona_iila)
+        f_zona.addRow(self.btn_usar_zona_iila)
+        self.stack_auto_iila.addWidget(pagina_zona)
+
+        self.combo_metodo_auto_iila.currentIndexChanged.connect(self.stack_auto_iila.setCurrentIndex)
+        v_auto.addWidget(self.stack_auto_iila)
+
+        self.tabla_resultado_auto_iila = crear_tabla_parametros()
+        v_auto.addWidget(self.tabla_resultado_auto_iila)
+        v_mi.addWidget(gb_iila_auto)
+
         self.btn_metodos_idf = QPushButton("Generar y comparar los métodos de IDF")
         self.btn_metodos_idf.clicked.connect(self._on_calcular_metodos_idf)
         limitar_ancho_boton(self.btn_metodos_idf)
@@ -4362,6 +4449,66 @@ class HydroAndinaProDialog(QDialog):
             self.canvas_no_estacionario.plot_no_estacionario(comp, datos, anios)
         except Exception as e:
             QMessageBox.critical(self, "Error en el análisis no estacionario", str(e))
+
+    def _on_calcular_iila_por_p24(self):
+        """Método por P24 del sitio (Tabla 39, item 5) -- no requiere
+        ubicar ninguna zona: aplica las razones universales sobre el
+        P24(Tr) que ya se calculó en el análisis de frecuencia."""
+        if not self.p24_disenio:
+            QMessageBox.warning(
+                self, "Falta el análisis de frecuencia",
+                "Calcule primero el análisis de frecuencia (sección 2) para obtener las P24h de diseño.")
+            return
+        duracion = self.spin_duracion_p24_iila.value()
+        filas = []
+        for tr, p24 in sorted(self.p24_disenio.items()):
+            try:
+                r = iila_senamhi_zones.precipitacion_intensidad_desde_p24(p24, duracion)
+            except iila_senamhi_zones.IilaSenamhiZonasError as e:
+                QMessageBox.warning(self, "No se pudo calcular", str(e))
+                return
+            filas.append((f"Tr = {tr} años", r["p_t_mm"], "mm",
+                          f"intensidad = {r['i_t_mm_h']} mm/h  (P24 = {p24} mm)"))
+        poblar_tabla_parametros(self.tabla_resultado_auto_iila, filas)
+
+    def _on_calcular_iila_por_zona(self):
+        """Método por zona/subzona (Tablas 37-38, item 5) -- catálogo
+        parcial (sierra sur/Cusco), régimen de 3 a 24 horas."""
+        subzona = self.combo_subzona_iila.currentData()
+        altitud = self.spin_altitud_iila.value() or None
+        dc = self.spin_dc_iila.value() or None
+        try:
+            r = iila_senamhi_zones.precipitacion_intensidad_zona(
+                subzona, tr=self.spin_tr_zona_iila.value(),
+                duracion_h=self.spin_duracion_zona_iila.value(),
+                altitud_m=altitud, distancia_cordillera_km=dc)
+        except iila_senamhi_zones.IilaSenamhiZonasError as e:
+            QMessageBox.warning(self, "No se pudo calcular", str(e))
+            self.btn_usar_zona_iila.setEnabled(False)
+            return
+        poblar_tabla_parametros(self.tabla_resultado_auto_iila, [
+            ("Subzona", iila_senamhi_zones.NOMBRES_SUBZONAS_37.get(subzona, subzona), ""),
+            ("Parámetro n", r["n"], "adim."),
+            ("Parámetro a", r["a"], "mm"),
+            ("Parámetro K'g", r["kg"], "adim."),
+            ("Precipitación Pt", r["p_t_mm"], "mm", f"Tr={r['tr_anios']:.0f} años, t={r['duracion_h']} h"),
+            ("Intensidad It", r["i_t_mm_h"], "mm/h"),
+        ])
+        self._ultimo_resultado_zona_iila = r
+        self.btn_usar_zona_iila.setEnabled(True)
+
+    def _on_usar_zona_iila(self):
+        r = getattr(self, "_ultimo_resultado_zona_iila", None)
+        if not r:
+            return
+        self.spin_iila_a.setValue(r["a"])
+        self.spin_iila_k.setValue(r["kg"])
+        self.spin_iila_n.setValue(r["n"])
+        QMessageBox.information(
+            self, "Parámetros aplicados",
+            "Se aplicaron a, K y n a las curvas IDF de arriba. Revise «b» -- este catálogo no pudo "
+            "verificar de forma confiable la regla de asignación de b por región de la fuente "
+            "disponible; déjelo en el valor que corresponda a su caso o ajústelo a mano.")
 
     def _on_calcular_metodos_idf(self):
         if not self.p24_disenio:

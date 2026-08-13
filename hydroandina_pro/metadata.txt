@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.3.11
+version=0.3.12
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,50 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.3.12: item 5 -- la ÚLTIMA fase pendiente de las 9 del pedido
+      original (Pestaña 5, autocompletar el método IDF IILA-SENAMHI-UNI
+      por ubicación). Con esto quedan completas las 9 fases.
+      Se buscó explícitamente un mapa clicable público con los polígonos
+      de las zonas/subzonas pluviométricas IILA-SENAMHI y NO existe (ni
+      en SENAMHI, ni en el estudio original de 1983 disponible en
+      repositorios institucionales, ni en ningún otro sitio) -- las
+      tablas del estudio vinculan cada subzona a estaciones pluviométricas
+      y fórmulas de altitud/distancia, no a límites geográficos. En su
+      lugar, se transcribieron y VERIFICARON los coeficientes reales de
+      las Tablas 37, 38 y 39 del propio estudio hidrológico de la empresa
+      (resources/Estudio_Hidrologico_Hidraulico.docx, que a su vez las
+      reproduce del estudio de 1983), en un nuevo
+      core/iila_senamhi_zones.py, con dos vías desde la Pestaña 5:
+      - "Por P24 del sitio" (recomendado): aplica las razones universales
+        de la Tabla 39 sobre el P24(Tr) que el plugin ya calcula en el
+        análisis de frecuencia, válida para CUALQUIER punto del Perú sin
+        ubicar ninguna zona. Verificado contra el caso resuelto real del
+        informe fuente (sus Tablas 40-41): reproduce esos valores con
+        menos de 4% de diferencia entre 3 y 24 horas.
+      - "Por zona/subzona regional": catálogo PARCIAL (11 subzonas de la
+        sierra sur/Cusco y alrededores -- las únicas para las que el
+        informe fuente trae coeficientes reales) con a, n y K'g
+        verificados, con botón para aplicarlos directamente a los campos
+        manuales de IILA-SENAMHI que ya existían en la Pestaña 5.
+      HALLAZGO DE LA PROPIA VERIFICACIÓN (no un supuesto): al contrastar
+      el método "por P24" contra el caso real del informe, a duraciones
+      cortas (1h) la diferencia llegó a 38% -- reveló que la Tabla 39
+      comparte la forma funcional del régimen de 3-24h del método y NO es
+      válida por debajo de 3 horas, donde el régimen real usa una fórmula
+      con el parámetro εg que no se pudo reconstruir ni siquiera
+      extrayendo el objeto de ecuación nativo de Word (OOXML) del
+      documento fuente -- un exponente quedó ilegible. En vez de adivinar
+      ese exponente, ambos métodos RECHAZAN duraciones fuera de 3-24h con
+      un error explícito, documentado en el módulo.
+      Verificado con QGIS 3.40.1 real en modo headless y con Python puro
+      (22 comprobaciones del núcleo + 15 de la interfaz): puntos exactos
+      de la Tabla 39, interpolación log-log contra cálculo manual, el
+      contraste real contra el informe fuente, fórmulas de altitud y de
+      distancia a la cordillera, y los casos de error (subzona sin
+      coeficientes, falta de altitud, duración fuera de régimen, Tr
+      inválido) devolviendo mensajes claros en vez de números
+      silenciosamente incorrectos.
+      Con esto quedan completas las 9 fases del pedido original.
     - v0.3.11: item 8 -- fase 4 de 4, la ÚLTIMA (Pestaña 8, visualización
       3D + corte transversal interactivo). Con esto queda COMPLETO el
       item 8, y con él las 9 fases del pedido original salvo el mapa
