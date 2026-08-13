@@ -39,7 +39,8 @@ from .core import (delineation, morphometry, curve_number, tc_methods, dem_downl
                     data_completion, areal_precipitation, water_yield, scour, soil_loss,
                     sediment_transport, debris_flow, climate_change, mean_flow_models, etp_methods,
                     low_flows, phabsim, groundwater_flow, well_hydraulics, idf_curves,
-                    regionalization, gridded_validation, swe2d, mesh_export)
+                    regionalization, gridded_validation, swe2d, mesh_export,
+                    runoff_coefficient, roughness_methods)
 from .core.qgis_layer_utils import obtener_capa
 from .ui.hypsometric_canvas import HypsometricCanvas
 from .ui.hydrograph_canvas import HydrographCanvas
@@ -2844,6 +2845,7 @@ class HydroAndinaProDialog(QDialog):
 
         self.spin_coef_c = QDoubleSpinBox()
         self.spin_coef_c.setRange(0.0, 1.0)
+        self.spin_coef_c.setDecimals(3)
         self.spin_coef_c.setSingleStep(0.05)
         self.spin_coef_c.setValue(0.5)
         h_top.addWidget(QLabel("Coef. de escorrentía C (solo método FAA):"))
@@ -3004,6 +3006,249 @@ class HydroAndinaProDialog(QDialog):
         v_cav.addWidget(self.canvas_cav)
         v.addWidget(gb_cav)
 
+        # ==================================================================
+        # COEFICIENTE DE ESCORRENTÍA POR DIFERENTES MÉTODOS
+        # ==================================================================
+        gb_esc = QGroupBox(
+            "Coeficiente de escorrentía C — métodos de cálculo (además del manual)"
+        )
+        v_esc = QVBoxLayout(gb_esc)
+        lbl_esc_intro = QLabel(
+            "El coeficiente de escorrentía C (arriba, «Coef. de escorrentía C — solo método FAA») "
+            "trae por defecto <b>0.5</b>: un valor de referencia GENÉRICO, a mitad del rango habitual "
+            "0.1-0.9 del Método Racional, sin corresponder a ninguna cobertura ni suelo en particular "
+            "-- es un punto de partida a reemplazar, no una estimación. Esta sección ofrece dos formas "
+            "trazables de llegar a un C con sustento: <b>ponderado por cobertura</b> (mismo espíritu "
+            "que la tabla de Número de Curva de la Pestaña 3) y <b>derivado del Número de Curva ya "
+            "calculado</b> (C = Q/P con la MISMA ecuación SCS-CN que el resto del plugin, no una "
+            "fórmula de conversión aparte)."
+        )
+        lbl_esc_intro.setWordWrap(True)
+        v_esc.addWidget(lbl_esc_intro)
+
+        h_esc_sel = QHBoxLayout()
+        h_esc_sel.addWidget(QLabel("Método:"))
+        self.combo_metodo_c = QComboBox()
+        self.combo_metodo_c.addItem("Ponderado por uso de suelo / cobertura", "ponderado")
+        self.combo_metodo_c.addItem("Desde el Número de Curva (Pestaña 3)", "desde_cn")
+        self.combo_metodo_c.currentIndexChanged.connect(
+            lambda: self.stack_metodo_c.setCurrentIndex(self.combo_metodo_c.currentIndex()))
+        h_esc_sel.addWidget(self.combo_metodo_c)
+        h_esc_sel.addStretch()
+        v_esc.addLayout(h_esc_sel)
+
+        self.stack_metodo_c = QStackedWidget()
+
+        # -- Página: ponderado por cobertura --
+        _pag_pond = QWidget()
+        _v_pond = QVBoxLayout(_pag_pond)
+        _v_pond.addWidget(QLabel(
+            "Edite el <b>Área (km²)</b> de cada cobertura presente en su cuenca (0 = no está presente) "
+            "y, si lo desea, el C de cada fila -- son valores ORIENTATIVOS de uso extendido en "
+            "ingeniería hidrológica para el Método Racional, no un valor normativo fijo."))
+        self.tabla_coef_c_ponderado = TablaPegable(len(runoff_coefficient.TABLA_COEFICIENTES_C_DEFAULT), 3)
+        self.tabla_coef_c_ponderado.setHorizontalHeaderLabels(["Cobertura", "C", "Área (km²)"])
+        for _i, (_nombre, _c_tip, _c_min, _c_max) in enumerate(runoff_coefficient.TABLA_COEFICIENTES_C_DEFAULT):
+            self.tabla_coef_c_ponderado.setItem(_i, 0, QTableWidgetItem(_nombre))
+            self.tabla_coef_c_ponderado.setItem(_i, 1, QTableWidgetItem(str(_c_tip)))
+            self.tabla_coef_c_ponderado.setItem(_i, 2, QTableWidgetItem("0.0"))
+        aplicar_columna_elastica(self.tabla_coef_c_ponderado, indice_columna_larga=0)
+        ajustar_alto_tabla(self.tabla_coef_c_ponderado, filas_visibles_max=12)
+        _v_pond.addWidget(self.tabla_coef_c_ponderado)
+        self.stack_metodo_c.addWidget(_pag_pond)
+
+        # -- Página: desde el CN --
+        _pag_cn = QWidget()
+        _f_cn = QFormLayout(_pag_cn)
+        _f_cn.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.spin_c_desde_cn_p = QDoubleSpinBox()
+        self.spin_c_desde_cn_p.setRange(0.1, 1000.0)
+        self.spin_c_desde_cn_p.setValue(60.0)
+        _f_cn.addRow("Lámina de diseño P (mm, típicamente el P24 de la Pestaña 5):", self.spin_c_desde_cn_p)
+        _lbl_cn_s = QLabel("(la retención potencial máxima S se toma del Número de Curso "
+                           "ya calculado en la Pestaña 3; calcúlelo ahí primero)")
+        _lbl_cn_s.setWordWrap(True)
+        _f_cn.addRow(_lbl_cn_s)
+        self.stack_metodo_c.addWidget(_pag_cn)
+
+        v_esc.addWidget(self.stack_metodo_c)
+
+        h_esc_btn = QHBoxLayout()
+        btn_autocompletar_c = QPushButton("Autocompletar P24 (Pestaña 5)")
+        btn_autocompletar_c.clicked.connect(self._on_autocompletar_coef_c)
+        limitar_ancho_boton(btn_autocompletar_c)
+        h_esc_btn.addWidget(btn_autocompletar_c)
+        btn_calc_c = QPushButton("Calcular C")
+        btn_calc_c.clicked.connect(self._on_calcular_coef_c)
+        limitar_ancho_boton(btn_calc_c)
+        h_esc_btn.addWidget(btn_calc_c)
+        self.btn_usar_c = QPushButton("Usar este C arriba (Método Racional)")
+        self.btn_usar_c.clicked.connect(self._on_usar_coef_c_calculado)
+        self.btn_usar_c.setEnabled(False)
+        limitar_ancho_boton(self.btn_usar_c)
+        h_esc_btn.addWidget(self.btn_usar_c)
+        h_esc_btn.addStretch()
+        v_esc.addLayout(h_esc_btn)
+
+        self.cuadro_coef_c = CuadroResumenImpacto(ancho_maximo=720)
+        self.cuadro_coef_c.actualizar(
+            titulo="C SIN CALCULAR", valor_principal="—",
+            subtitulo="Elija un método y pulse «Calcular C»")
+        centrar_en_layout(self.cuadro_coef_c, v_esc)
+        self.tabla_resultado_coef_c = crear_tabla_parametros()
+        v_esc.addWidget(self.tabla_resultado_coef_c)
+        v.addWidget(gb_esc)
+
+        # ==================================================================
+        # COEFICIENTE DE RUGOSIDAD DE MANNING POR DIFERENTES MÉTODOS
+        # ==================================================================
+        gb_rug = QGroupBox(
+            "Coeficiente de rugosidad de Manning n — métodos de cálculo (además del manual de Kerby)"
+        )
+        v_rug = QVBoxLayout(gb_rug)
+        lbl_rug_intro = QLabel(
+            "El n de Kerby (arriba) también admite un valor manual sin sustento trazable. Esta sección "
+            "ofrece cuatro familias de método reconocidas en hidráulica fluvial: "
+            "<b>granulométricos</b> (relacionan n con el tamaño del sedimento del lecho), el "
+            "<b>aditivo de Cowan</b> (ajusta un n base por inspección visual del tramo, sin "
+            "granulometría), <b>logarítmico de Keulegan</b> (de la mecánica de fluidos, base de los "
+            "modelos 2D tipo Iber/TELEMAC), y <b>ponderación en secciones compuestas</b> (cuando la "
+            "rugosidad cambia entre el cauce principal y la llanura de inundación). La quinta familia "
+            "-- calibración inversa contra marcas de agua, o clasificación satelital NDVI -- no se "
+            "calcula aquí: la primera exige un modelo hidráulico ya corrido con datos de campo, y la "
+            "segunda un ráster de cobertura ya clasificado; son flujos de trabajo con insumos propios, "
+            "no una fórmula que este botón pueda completar sin ellos."
+        )
+        lbl_rug_intro.setWordWrap(True)
+        v_rug.addWidget(lbl_rug_intro)
+
+        h_rug_sel = QHBoxLayout()
+        h_rug_sel.addWidget(QLabel("Método:"))
+        self.combo_metodo_n = QComboBox()
+        self.combo_metodo_n.addItem("Granulométrico (Strickler / Limerinos / Meyer-Peter & Müller / Bray)",
+                                    "granulometrico")
+        self.combo_metodo_n.addItem("Aditivo de Cowan (1956)", "cowan")
+        self.combo_metodo_n.addItem("Logarítmico de Keulegan", "keulegan")
+        self.combo_metodo_n.addItem("Ponderación en secciones compuestas (Horton-Einstein / Lotter)",
+                                    "compuesta")
+        self.combo_metodo_n.currentIndexChanged.connect(
+            lambda: self.stack_metodo_n.setCurrentIndex(self.combo_metodo_n.currentIndex()))
+        h_rug_sel.addWidget(self.combo_metodo_n)
+        h_rug_sel.addStretch()
+        v_rug.addLayout(h_rug_sel)
+
+        self.stack_metodo_n = QStackedWidget()
+
+        # -- Página: granulométrico --
+        _pag_gran = QWidget()
+        _f_gran = QFormLayout(_pag_gran)
+        _f_gran.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        _lbl_gran = QLabel(
+            "Ingrese los datos que tenga (de tamizado o conteo Wolman); se calculan todos los métodos "
+            "para los que haya datos suficientes y se omiten los demás. 0 = sin dato.")
+        _lbl_gran.setWordWrap(True)
+        _f_gran.addRow(_lbl_gran)
+        self.spin_gran_d50 = QDoubleSpinBox(); self.spin_gran_d50.setRange(0.0, 5.0)
+        self.spin_gran_d50.setDecimals(4); self.spin_gran_d50.setValue(0.050)
+        _f_gran.addRow("d50 (m, para Strickler y Bray):", self.spin_gran_d50)
+        self.spin_gran_d84 = QDoubleSpinBox(); self.spin_gran_d84.setRange(0.0, 5.0)
+        self.spin_gran_d84.setDecimals(4); self.spin_gran_d84.setValue(0.100)
+        _f_gran.addRow("d84 (m, para Limerinos):", self.spin_gran_d84)
+        self.spin_gran_d90 = QDoubleSpinBox(); self.spin_gran_d90.setRange(0.0, 5.0)
+        self.spin_gran_d90.setDecimals(4); self.spin_gran_d90.setValue(0.120)
+        _f_gran.addRow("d90 (m, para Meyer-Peter & Müller):", self.spin_gran_d90)
+        self.spin_gran_rh = QDoubleSpinBox(); self.spin_gran_rh.setRange(0.0, 500.0)
+        self.spin_gran_rh.setDecimals(3); self.spin_gran_rh.setValue(1.2)
+        _f_gran.addRow("Radio hidráulico Rh (m, para Limerinos):", self.spin_gran_rh)
+        self.stack_metodo_n.addWidget(_pag_gran)
+
+        # -- Página: Cowan --
+        _pag_cowan = QWidget()
+        _f_cowan = QFormLayout(_pag_cowan)
+        _f_cowan.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.combo_cowan_n0 = QComboBox()
+        for _k, (_lo, _hi) in roughness_methods.COWAN_N0_MATERIAL_BASE.items():
+            self.combo_cowan_n0.addItem(f"{_k} ({_lo}-{_hi})", (_lo + _hi) / 2.0)
+        _f_cowan.addRow("n₀ — material base del canal:", self.combo_cowan_n0)
+        self.combo_cowan_n1 = QComboBox()
+        for _k, (_lo, _hi) in roughness_methods.COWAN_N1_IRREGULARIDAD.items():
+            self.combo_cowan_n1.addItem(f"{_k} ({_lo}-{_hi})", (_lo + _hi) / 2.0)
+        _f_cowan.addRow("n₁ — irregularidad de la superficie:", self.combo_cowan_n1)
+        self.combo_cowan_n2 = QComboBox()
+        for _k, (_lo, _hi) in roughness_methods.COWAN_N2_VARIACION_SECCION.items():
+            self.combo_cowan_n2.addItem(f"{_k} ({_lo}-{_hi})", (_lo + _hi) / 2.0)
+        _f_cowan.addRow("n₂ — variación de la sección transversal:", self.combo_cowan_n2)
+        self.combo_cowan_n3 = QComboBox()
+        for _k, (_lo, _hi) in roughness_methods.COWAN_N3_OBSTRUCCIONES.items():
+            self.combo_cowan_n3.addItem(f"{_k} ({_lo}-{_hi})", (_lo + _hi) / 2.0)
+        _f_cowan.addRow("n₃ — efecto de obstrucciones:", self.combo_cowan_n3)
+        self.combo_cowan_n4 = QComboBox()
+        for _k, (_lo, _hi) in roughness_methods.COWAN_N4_VEGETACION.items():
+            self.combo_cowan_n4.addItem(f"{_k} ({_lo}-{_hi})", (_lo + _hi) / 2.0)
+        _f_cowan.addRow("n₄ — vegetación:", self.combo_cowan_n4)
+        self.combo_cowan_m5 = QComboBox()
+        for _k, _v in roughness_methods.COWAN_M5_MEANDRIZACION.items():
+            self.combo_cowan_m5.addItem(f"{_k} (m5={_v})", _v)
+        _f_cowan.addRow("m₅ — grado de meandrización:", self.combo_cowan_m5)
+        self.stack_metodo_n.addWidget(_pag_cowan)
+
+        # -- Página: Keulegan --
+        _pag_keu = QWidget()
+        _f_keu = QFormLayout(_pag_keu)
+        _f_keu.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.spin_keu_ks = QDoubleSpinBox(); self.spin_keu_ks.setRange(0.001, 5.0)
+        self.spin_keu_ks.setDecimals(4); self.spin_keu_ks.setValue(0.150)
+        _f_keu.addRow("Altura de aspereza de Nikuradse ks (m):", self.spin_keu_ks)
+        self.stack_metodo_n.addWidget(_pag_keu)
+
+        # -- Página: secciones compuestas --
+        _pag_comp = QWidget()
+        _v_comp = QVBoxLayout(_pag_comp)
+        _v_comp.addWidget(QLabel(
+            "Una fila por subsección (p.ej. cauce principal + llanuras izquierda/derecha). El radio "
+            "hidráulico total, si lo deja en 0, se DERIVA de las propias subsecciones "
+            "(A_total/P_total) — es la forma geométricamente consistente; solo indíquelo si cuenta con "
+            "un valor propio medido en campo."))
+        self.tabla_secciones_compuestas = TablaPegable(3, 3)
+        self.tabla_secciones_compuestas.setHorizontalHeaderLabels(
+            ["Perímetro mojado Pi (m)", "Radio hidráulico Rhi (m)", "n de la subsección"])
+        ajustar_alto_tabla(self.tabla_secciones_compuestas, filas_visibles_max=8)
+        _v_comp.addWidget(self.tabla_secciones_compuestas)
+        _h_comp_rh = QHBoxLayout()
+        _h_comp_rh.addWidget(QLabel("Radio hidráulico TOTAL de la sección (m, 0 = derivarlo):"))
+        self.spin_comp_rh_total = QDoubleSpinBox()
+        self.spin_comp_rh_total.setRange(0.0, 500.0)
+        self.spin_comp_rh_total.setDecimals(3)
+        self.spin_comp_rh_total.setSpecialValueText("(derivar de las subsecciones)")
+        _h_comp_rh.addWidget(self.spin_comp_rh_total)
+        _h_comp_rh.addStretch()
+        _v_comp.addLayout(_h_comp_rh)
+        self.stack_metodo_n.addWidget(_pag_comp)
+
+        v_rug.addWidget(self.stack_metodo_n)
+
+        h_rug_btn = QHBoxLayout()
+        btn_calc_n = QPushButton("Calcular n")
+        btn_calc_n.clicked.connect(self._on_calcular_coef_n)
+        limitar_ancho_boton(btn_calc_n)
+        h_rug_btn.addWidget(btn_calc_n)
+        self.btn_usar_n = QPushButton("Usar este n arriba (Kerby)")
+        self.btn_usar_n.clicked.connect(self._on_usar_coef_n_calculado)
+        self.btn_usar_n.setEnabled(False)
+        limitar_ancho_boton(self.btn_usar_n)
+        h_rug_btn.addWidget(self.btn_usar_n)
+        h_rug_btn.addStretch()
+        v_rug.addLayout(h_rug_btn)
+
+        self.cuadro_coef_n = CuadroResumenImpacto(ancho_maximo=720)
+        self.cuadro_coef_n.actualizar(
+            titulo="n SIN CALCULAR", valor_principal="—",
+            subtitulo="Elija un método y pulse «Calcular n»")
+        centrar_en_layout(self.cuadro_coef_n, v_rug)
+        self.tabla_resultado_coef_n = crear_tabla_parametros()
+        v_rug.addWidget(self.tabla_resultado_coef_n)
+        v.addWidget(gb_rug)
+
         _lbl_auto_4 = QLabel(
             "Nota: la exportación de la curva hipsométrica y de todos los demás resultados (todos "
             "los formatos, reporte Word y proyecto portable) se centralizó en la pestaña "
@@ -3047,6 +3292,183 @@ class HydroAndinaProDialog(QDialog):
             QMessageBox.information(self, "Exportado", f"Curva hipsométrica guardada en:\n{ruta}")
         except Exception as e:
             QMessageBox.critical(self, "Error exportando la curva hipsométrica", str(e))
+
+    # ------------------------------------------------------------------
+    # Coeficiente de escorrentía C — métodos de cálculo
+    # ------------------------------------------------------------------
+    def _on_autocompletar_coef_c(self):
+        tr_sel, p24_sel = self._tr_diseno_seleccionado()
+        if tr_sel is None:
+            QMessageBox.warning(
+                self, "Falta el análisis de frecuencia",
+                "Calcule primero el análisis de frecuencia en la Pestaña 5 y elija un Tr.")
+            return
+        self.spin_c_desde_cn_p.setValue(p24_sel)
+        QMessageBox.information(
+            self, "Autocompletado",
+            f"P = {p24_sel} mm (P24 del Tr elegido en la Pestaña 6, Tr={tr_sel}).")
+
+    def _on_calcular_coef_c(self):
+        metodo = self.combo_metodo_c.currentData()
+        try:
+            if metodo == "ponderado":
+                coberturas = []
+                for fila in range(self.tabla_coef_c_ponderado.rowCount()):
+                    item_area = self.tabla_coef_c_ponderado.item(fila, 2)
+                    texto_area = item_area.text().strip() if item_area else ""
+                    if not texto_area:
+                        continue
+                    area = float(texto_area.replace(",", "."))
+                    if area <= 0:
+                        continue
+                    nombre = self.tabla_coef_c_ponderado.item(fila, 0).text()
+                    c_val = float(self.tabla_coef_c_ponderado.item(fila, 1).text().replace(",", "."))
+                    coberturas.append((nombre, area, c_val))
+                if not coberturas:
+                    QMessageBox.warning(
+                        self, "Sin coberturas",
+                        "Ingrese el área (km²) de al menos una cobertura (columna «Área (km²)»).")
+                    return
+                r = runoff_coefficient.coeficiente_escorrentia_ponderado(coberturas)
+                self.coef_c_calculado = r["C_ponderado"]
+                filas = [("C ponderado", r["C_ponderado"], "adim.",
+                         f"{r['n_coberturas']} coberturas, área total {r['area_total_km2']} km²")]
+                for d in r["detalle"]:
+                    filas.append((d["cobertura"], d["C"], "", f"{d['porcentaje']}% del área ({d['area_km2']} km²)"))
+                poblar_tabla_parametros(self.tabla_resultado_coef_c, filas, filas_visibles_max=15)
+                subtitulo = f"Ponderado por {r['n_coberturas']} coberturas, {r['area_total_km2']} km²"
+            else:  # desde_cn
+                if not self.cn_resultados:
+                    QMessageBox.warning(
+                        self, "Falta el Número de Curva",
+                        "Calcule primero el Número de Curva en la Pestaña 3.")
+                    return
+                r = runoff_coefficient.coeficiente_escorrentia_desde_cn(
+                    self.spin_c_desde_cn_p.value(), self.cn_resultados["S_mm"])
+                self.coef_c_calculado = r["C_desde_CN"]
+                poblar_tabla_parametros(self.tabla_resultado_coef_c, [
+                    ("C desde el Número de Curva", r["C_desde_CN"], "adim.", r["nota"]),
+                    ("Lámina de diseño P", r["P_mm"], "mm"),
+                    ("Retención potencial máxima S", r["S_mm"], "mm", "Pestaña 3"),
+                    ("Abstracción inicial Ia", r["Ia_mm"], "mm"),
+                    ("Escorrentía directa Q", r["Q_mm"], "mm"),
+                    ("Pérdidas totales (Ia + infiltración)", r["perdidas_mm"], "mm"),
+                ])
+                subtitulo = f"P={r['P_mm']} mm, S={r['S_mm']} mm (Pestaña 3)"
+
+            self.btn_usar_c.setEnabled(True)
+            tipo = "exito" if 0.15 <= self.coef_c_calculado <= 0.85 else "atencion"
+            self.cuadro_coef_c.actualizar(
+                titulo="COEFICIENTE DE ESCORRENTÍA CALCULADO",
+                valor_principal=f"C = {self.coef_c_calculado:.3f}",
+                subtitulo=subtitulo,
+                metricas=[("Método", "Ponderado por cobertura" if metodo == "ponderado" else "Desde CN")],
+                leyenda="pulse «Usar este C arriba» para aplicarlo al Método Racional (Pestaña 4)",
+                tipo=tipo)
+        except (runoff_coefficient.RunoffCoefficientError, ValueError) as e:
+            QMessageBox.warning(self, "No se pudo calcular C", str(e))
+        except Exception as e:
+            QMessageBox.critical(self, "Error calculando el coeficiente de escorrentía", str(e))
+
+    def _on_usar_coef_c_calculado(self):
+        if getattr(self, "coef_c_calculado", None) is None:
+            return
+        self.spin_coef_c.setValue(self.coef_c_calculado)
+        QMessageBox.information(
+            self, "Aplicado",
+            f"C = {self.coef_c_calculado:.3f} aplicado como «Coef. de escorrentía C» arriba.")
+
+    # ------------------------------------------------------------------
+    # Coeficiente de rugosidad de Manning n — métodos de cálculo
+    # ------------------------------------------------------------------
+    def _on_calcular_coef_n(self):
+        metodo = self.combo_metodo_n.currentData()
+        try:
+            if metodo == "granulometrico":
+                r = roughness_methods.comparar_metodos_granulometricos(
+                    d50_m=self.spin_gran_d50.value() or None,
+                    d84_m=self.spin_gran_d84.value() or None,
+                    d90_m=self.spin_gran_d90.value() or None,
+                    radio_hidraulico_m=self.spin_gran_rh.value() or None,
+                )
+                valores = [d["n"] for d in r["resultados"].values()]
+                n_final = sum(valores) / len(valores)
+                self.coef_n_calculado = n_final
+                filas = [("n promedio de los métodos disponibles", round(n_final, 4), "adim.",
+                         f"{len(valores)} de 3 métodos calculados")]
+                for datos in r["resultados"].values():
+                    filas.append((datos["metodo"], datos["n"], "", datos.get("nota", "")))
+                if r["omitidos"]:
+                    filas.append(("Omitidos por falta de dato", "; ".join(r["omitidos"]), ""))
+                subtitulo = f"promedio de {len(valores)} método(s) granulométrico(s)"
+            elif metodo == "cowan":
+                r = roughness_methods.n_cowan(
+                    n0=self.combo_cowan_n0.currentData(), n1=self.combo_cowan_n1.currentData(),
+                    n2=self.combo_cowan_n2.currentData(), n3=self.combo_cowan_n3.currentData(),
+                    n4=self.combo_cowan_n4.currentData(), m5=self.combo_cowan_m5.currentData(),
+                )
+                self.coef_n_calculado = r["n"]
+                f = r["factores"]
+                filas = [
+                    ("n de Cowan", r["n"], "adim.", f"suma de factores = {r['suma_factores']}"),
+                    ("n₀ (material base)", f["n0"], ""), ("n₁ (irregularidad)", f["n1"], ""),
+                    ("n₂ (variación de sección)", f["n2"], ""), ("n₃ (obstrucciones)", f["n3"], ""),
+                    ("n₄ (vegetación)", f["n4"], ""), ("m₅ (meandrización)", f["m5"], ""),
+                ]
+                subtitulo = "Método aditivo de Cowan (1956)"
+            elif metodo == "keulegan":
+                r = roughness_methods.n_keulegan(self.spin_keu_ks.value())
+                self.coef_n_calculado = r["n"]
+                filas = [("n de Keulegan", r["n"], "adim.", f"ks = {r['ks_m']} m")]
+                subtitulo = "Logarítmico de Keulegan"
+            else:  # compuesta
+                subsecciones = []
+                for fila in range(self.tabla_secciones_compuestas.rowCount()):
+                    items = [self.tabla_secciones_compuestas.item(fila, c) for c in range(3)]
+                    textos = [it.text().strip() if it else "" for it in items]
+                    if not all(textos):
+                        continue
+                    p_i, rh_i, n_i = (float(t.replace(",", ".")) for t in textos)
+                    subsecciones.append((p_i, rh_i, n_i))
+                if not subsecciones:
+                    QMessageBox.warning(
+                        self, "Sin subsecciones",
+                        "Ingrese al menos una fila completa (perímetro, radio hidráulico, n).")
+                    return
+                rh_total = self.spin_comp_rh_total.value() or None
+                r_he = roughness_methods.n_equivalente_horton_einstein(
+                    [(p, n) for p, _, n in subsecciones])
+                r_lot = roughness_methods.n_equivalente_lotter(subsecciones, rh_total)
+                self.coef_n_calculado = r_he["n_equivalente"]
+                filas = [
+                    ("Horton-Einstein (velocidad media igual)", r_he["n_equivalente"], "adim."),
+                    ("Lotter (caudal = suma de parciales)", r_lot["n_equivalente"], "adim.",
+                     f"Rh_total usado = {r_lot['radio_hidraulico_total_m']} m"),
+                ]
+                for i, (p_i, rh_i, n_i) in enumerate(subsecciones, 1):
+                    filas.append((f"Subsección {i}", n_i, "", f"P={p_i} m, Rh={rh_i} m"))
+                subtitulo = f"{len(subsecciones)} subsecciones (Horton-Einstein adoptado arriba)"
+
+            poblar_tabla_parametros(self.tabla_resultado_coef_n, filas, filas_visibles_max=15)
+            self.btn_usar_n.setEnabled(True)
+            self.cuadro_coef_n.actualizar(
+                titulo="COEFICIENTE DE RUGOSIDAD CALCULADO",
+                valor_principal=f"n = {self.coef_n_calculado:.4f}",
+                subtitulo=subtitulo,
+                leyenda="pulse «Usar este n arriba» para aplicarlo a Kerby",
+                tipo="exito" if 0.015 <= self.coef_n_calculado <= 0.15 else "atencion")
+        except (roughness_methods.RoughnessError, ValueError) as e:
+            QMessageBox.warning(self, "No se pudo calcular n", str(e))
+        except Exception as e:
+            QMessageBox.critical(self, "Error calculando el coeficiente de rugosidad", str(e))
+
+    def _on_usar_coef_n_calculado(self):
+        if getattr(self, "coef_n_calculado", None) is None:
+            return
+        self.spin_n_kerby.setValue(self.coef_n_calculado)
+        QMessageBox.information(
+            self, "Aplicado",
+            f"n = {self.coef_n_calculado:.4f} aplicado como coeficiente de rugosidad de Kerby arriba.")
 
     def _on_calcular_tc(self):
         if not self.morfometria_resultados:

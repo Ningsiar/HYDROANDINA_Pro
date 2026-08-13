@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.3.2
+version=0.3.3
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,42 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.3.3: item 4 completo (fase 3 de 9; quedan el mapa IILA-SENAMHI del item 5, item 7, y los
+      subsistemas nuevos de los items 8 y 9).
+      NUEVOS MODULOS core/runoff_coefficient.py y core/roughness_methods.py, con dos metodos
+      adicionales de coeficiente de escorrentia C y cuatro familias de metodos de coeficiente de
+      rugosidad de Manning n, seleccionables en la Pestaña 4 junto al valor manual existente.
+      (1) POR QUE EL C MANUAL TRAE 0.5 POR DEFECTO: es un valor de referencia GENERICO, a mitad del
+      rango habitual 0.1-0.9 del Metodo Racional, sin corresponder a ninguna cobertura ni suelo en
+      particular -- un punto de partida a reemplazar, no una estimacion. Ahora la interfaz lo explica
+      y ofrece dos formas trazables de llegar a un C con sustento:
+        - PONDERADO POR COBERTURA: mismo espiritu que la tabla de Numero de Curva de la Pestaña 3,
+          con un catalogo de 12 coberturas y su C tipico (valores orientativos, editables).
+        - DESDE EL NUMERO DE CURVA YA CALCULADO: C = Q/P con la MISMA ecuacion SCS-CN que el resto
+          del plugin usa para las perdidas por infiltracion (Pestaña 3), no una formula de
+          conversion CN->C aparte -- por definicion, si P y S ya dan Q, C = Q/P se sigue
+          directamente. Verificado: crece con P (la cuenca se satura en tormentas mayores) y con el
+          CN (suelo menos permeable), y da C=0 cuando P<=Ia.
+      (2) COEFICIENTE DE RUGOSIDAD, 4 familias (la 5ª -- calibracion inversa / teledetección NDVI --
+      no se implementa como calculo: exige un modelo ya corrido con datos de campo, o un raster de
+      cobertura ya clasificado, que son insumos de otro flujo de trabajo, no una formula):
+        - GRANULOMETRICOS: Strickler, Limerinos, Meyer-Peter & Müller, Bray -- calcula los que
+          tengan datos suficientes (d50/d84/d90/Rh) y omite el resto explicando por que.
+        - ADITIVO DE COWAN (1956): n=(n0+n1+n2+n3+n4)*m5, con los 6 factores seleccionables por
+          desplegable (rangos de Chow, 1959, Tabla 5-6) en vez de tener que buscarlos en un libro.
+        - LOGARITMICO DE KEULEGAN: n≈ks^(1/6)/25.4, base de los modelos 2D tipo Iber/TELEMAC.
+        - SECCIONES COMPUESTAS: Horton-Einstein y Lotter simultaneos. El Rh_total de Lotter se
+          DERIVA de las propias subsecciones (A_total/P_total) si no se indica uno propio -- es la
+          unica forma geometricamente consistente. Documentada ademas una limitacion real del
+          metodo, no un error: con n uniforme pero Rh muy distintos entre subsecciones, Lotter NO
+          reproduce exactamente ese n (desigualdad de Jensen sobre Rhi^(5/3), funcion convexa);
+          Horton-Einstein si lo reproduce siempre, por no depender de Rhi.
+      Ambos coeficientes tienen un boton "Usar este valor arriba" que lo aplica directamente al C del
+      Metodo Racional o al n de Kerby.
+      Verificado con QGIS 3.40.1 real en modo headless: las 4 formulas granulometricas contra calculo
+      manual, Cowan y Keulegan contra formula cerrada, identidad n-uniforme en ambos metodos de
+      seccion compuesta (con la correccion de Rh anterior), C ponderado contra promedio manual, y C
+      desde CN contra la ecuacion SCS-CN calculada a mano -- 27 comprobaciones en total.
     - v0.3.2: item 1 completo (diagnostico grafico de distribuciones + alto de la tabla de Tc) y las
       correcciones de tabla del item 5 (fase 2 de 9; quedan item 4 completo, el mapa IILA-SENAMHI
       clicable del item 5, item 7, y los subsistemas nuevos de los items 8 y 9).
