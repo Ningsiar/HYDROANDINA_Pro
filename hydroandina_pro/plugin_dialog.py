@@ -7394,8 +7394,29 @@ class HydroAndinaProDialog(QDialog):
         # QStackedWidget en este momento), para tener de un vistazo todos
         # los parámetros obtenidos sin tener que ir estructura por
         # estructura. Se actualiza automáticamente al calcular cada una
-        # (ver _actualizar_texto_resumen_hidraulica).
-        v.addWidget(QLabel("<b>Cuadro resumen final — todas las estructuras calculadas en esta sesión:</b>"))
+        # (ver _actualizar_texto_resumen_hidraulica / _actualizar_tabla_comparativa_hidraulica).
+        v.addWidget(QLabel(
+            "<b>Cuadro comparativo final — todas las estructuras calculadas en esta sesión:</b>"))
+        self.tabla_comparativa_hidraulica = QTableWidget(0, 9)
+        self.tabla_comparativa_hidraulica.setHorizontalHeaderLabels([
+            "Estructura", "Tipo", "n", "S (m/m)", "Q / Capacidad (m³/s)", "V (m/s)",
+            "Qp objetivo (m³/s)", "¿Cumple?", "Comentario",
+        ])
+        self.tabla_comparativa_hidraulica.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.tabla_comparativa_hidraulica.horizontalHeader().setSectionResizeMode(0, QHeaderView.Interactive)
+        self.tabla_comparativa_hidraulica.horizontalHeader().setStretchLastSection(True)
+        self.tabla_comparativa_hidraulica.verticalHeader().setVisible(False)
+        v.addWidget(self.tabla_comparativa_hidraulica)
+
+        self.lbl_recomendacion_hidraulica = QLabel()
+        self.lbl_recomendacion_hidraulica.setWordWrap(True)
+        self.lbl_recomendacion_hidraulica.setStyleSheet(
+            "padding:8px; background:#EEF3F8; border:1px solid #B7CBE0; border-radius:4px;")
+        v.addWidget(self.lbl_recomendacion_hidraulica)
+
+        v.addWidget(QLabel(
+            "<b>Detalle completo de cada estructura calculada</b> (todos los parámetros, no solo "
+            "los de la tabla comparativa):"))
         self.texto_resumen_hidraulica = ResumenFinal()
         v.addWidget(self.texto_resumen_hidraulica)
         self._actualizar_texto_resumen_hidraulica()
@@ -7534,6 +7555,129 @@ class HydroAndinaProDialog(QDialog):
                 partes.append(f"{etiqueta} = {valor_str}")
             html += f"<p><b>{nombre}</b><br>" + " &nbsp;|&nbsp; ".join(partes) + "</p><hr>"
         self.texto_resumen_hidraulica.setHtml(html)
+        self._actualizar_tabla_comparativa_hidraulica()
+
+    def _actualizar_tabla_comparativa_hidraulica(self):
+        """Tabla comparativa (una fila por estructura calculada en la
+        sesión) + una recomendación automática en texto. La recomendación
+        solo compara DENTRO de categorías físicamente comparables entre sí
+        (p.ej. canal contra canal, o alcantarilla contra alcantarilla) --
+        comparar, por ejemplo, un canal contra la verificación de borde
+        libre de un puente no tendría sentido hidráulico, así que esas
+        categorías solo se revisan de forma individual (cumple/no cumple,
+        velocidad dentro de un rango razonable)."""
+        filas = []
+        for nombre, r in self.resultados_hidraulica_drenaje.items():
+            tipo = r.get("tipo", "")
+            comentario_partes = []
+            if "numero_froude" in r:
+                comentario_partes.append(f"Fr={r['numero_froude']:.3g} ({r.get('tipo_flujo', '')})")
+            if "porcentaje_lleno_area" in r:
+                comentario_partes.append(f"{r['porcentaje_lleno_area']:.1f}% de área llena")
+            if "porcentaje_lleno_altura" in r:
+                comentario_partes.append(f"{r['porcentaje_lleno_altura']:.1f}% de altura llena")
+            if "D50_cm" in r:
+                comentario_partes.append(f"D50={r['D50_cm']:.1f} cm")
+            if "borde_libre_disponible_m" in r:
+                comentario_partes.append(f"BL disponible={r['borde_libre_disponible_m']:.2f} m")
+            filas.append({
+                "nombre": nombre, "tipo": tipo,
+                "n": r.get("n"), "s": r.get("S"),
+                "q": r.get("Q_m3s", r.get("caudal_m3_s", r.get("caudal_interceptado_m3_s", r.get("Q_o_spread")))),
+                "v": r.get("velocidad_m_s", r.get("V_m_s")),
+                "area": r.get("area_m2"),
+                "qp_obj": r.get("Qp_objetivo_m3s"), "cumple": r.get("cumple"),
+                "comentario": "; ".join(comentario_partes),
+            })
+
+        tabla = self.tabla_comparativa_hidraulica
+        tabla.setRowCount(len(filas))
+        for fila_idx, d in enumerate(filas):
+            valores = [
+                d["nombre"], d["tipo"],
+                f"{d['n']:.4f}" if d["n"] is not None else "—",
+                f"{d['s']:.5f}" if d["s"] is not None else "—",
+                f"{d['q']:.4g}" if d["q"] is not None else "—",
+                f"{d['v']:.3g}" if d["v"] is not None else "—",
+                f"{d['qp_obj']:.4g}" if d["qp_obj"] is not None else "—",
+                ("Sí" if d["cumple"] else "No") if d["cumple"] is not None else "—",
+                d["comentario"] or "—",
+            ]
+            for col, val in enumerate(valores):
+                item = QTableWidgetItem(str(val))
+                item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+                if col == 7 and d["cumple"] is not None:
+                    item.setForeground(QColor("#1E8449") if d["cumple"] else QColor("#B3261E"))
+                tabla.setItem(fila_idx, col, item)
+        ajustar_alto_tabla(tabla, filas_visibles_max=max(len(filas), 1) + 1)
+        tabla.resizeColumnsToContents()
+
+        # -------------------- Recomendación automática --------------------
+        partes_recomendacion = []
+        if not filas:
+            partes_recomendacion.append("Aún no se ha calculado ninguna estructura en esta sesión.")
+        else:
+            con_velocidad = [d for d in filas if d["v"] is not None]
+            rapidas = [d for d in con_velocidad if d["v"] > 4.0]
+            lentas = [d for d in con_velocidad if d["v"] < 0.4]
+            if rapidas:
+                partes_recomendacion.append(
+                    "⚠ Velocidad alta (posible riesgo de erosión/socavación, V &gt; 4 m/s) en: " +
+                    ", ".join(f"{d['nombre']} ({d['v']:.2f} m/s)" for d in rapidas) + ".")
+            if lentas:
+                partes_recomendacion.append(
+                    "⚠ Velocidad baja (posible riesgo de sedimentación, V &lt; 0.4 m/s) en: " +
+                    ", ".join(f"{d['nombre']} ({d['v']:.2f} m/s)" for d in lentas) + ".")
+
+            no_cumplen_bl = [d for d in filas if d["cumple"] is False and
+                              d["tipo"] in ("Pontón", "Puente", "Defensa Ribereña")]
+            if no_cumplen_bl:
+                partes_recomendacion.append(
+                    "✘ NO cumplen el borde libre mínimo: " + ", ".join(d["nombre"] for d in no_cumplen_bl) + ".")
+
+            conduccion = [d for d in filas if d["tipo"] in ("Canal", "Alcantarilla") or
+                          str(d["tipo"]).startswith("Canal (Gutter")]
+            if len(conduccion) >= 2:
+                con_qp = [d for d in conduccion if d["qp_obj"] is not None]
+                if con_qp:
+                    cumplen = [d for d in con_qp if d["cumple"]]
+                    if cumplen:
+                        candidatos_area = [d for d in cumplen if d["area"] is not None]
+                        if candidatos_area:
+                            mejor = min(candidatos_area, key=lambda d: d["area"])
+                            partes_recomendacion.append(
+                                f"✔ De las estructuras de conducción que SÍ cumplen su Qp objetivo, "
+                                f"«{mejor['nombre']}» es la más económica (menor área mojada = "
+                                f"{mejor['area']:.3f} m², V={mejor['v']:.2f} m/s si está disponible).")
+                        else:
+                            partes_recomendacion.append(
+                                "Hay estructuras de conducción que cumplen su Qp objetivo, pero falta el "
+                                "área de alguna para comparar cuál es más económica.")
+                    else:
+                        partes_recomendacion.append(
+                            "✘ NINGUNA de las estructuras de conducción con Qp objetivo definido lo "
+                            "cumple todavía -- revise diámetro/ancho/alto o el tirante de trabajo.")
+                else:
+                    candidatos_v = [d for d in conduccion if d["v"] is not None]
+                    if candidatos_v:
+                        mejor = min(candidatos_v, key=lambda d: abs(d["v"] - 1.5))
+                        partes_recomendacion.append(
+                            f"De los canales calculados (dimensionados cada uno para su propio Q de "
+                            f"diseño; no hay un «cumple/no cumple» que comparar entre ellos), "
+                            f"«{mejor['nombre']}» tiene la velocidad más cercana a un rango típico "
+                            f"no erosivo/no sedimentante (V={mejor['v']:.2f} m/s) -- verifique "
+                            f"igualmente contra la norma local vigente.")
+            elif len(conduccion) == 1:
+                partes_recomendacion.append(
+                    "Solo hay una estructura de conducción (canal o alcantarilla) calculada en esta "
+                    "sesión; calcule al menos otra para obtener una recomendación comparativa.")
+
+        if not partes_recomendacion:
+            partes_recomendacion.append(
+                "Sin observaciones automáticas adicionales para las estructuras calculadas -- revise "
+                "igualmente la tabla comparativa de arriba.")
+        self.lbl_recomendacion_hidraulica.setText(
+            "<b>Recomendación / observaciones automáticas:</b><br>" + "<br>".join(partes_recomendacion))
 
     # ---------------- Página: Canales (y Vados/Cunetas, mismo motor) ----------------
     def _pagina_canales(self, titulo: str) -> QWidget:

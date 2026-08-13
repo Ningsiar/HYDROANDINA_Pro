@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.3.4
+version=0.3.5
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,34 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.3.5: item 7 completo -- fase 2 de 2 (Pestaña 7, Diseño de
+      Estructuras Hidráulicas). El "cuadro resumen final" era solo texto;
+      ahora es una TABLA comparativa real (una fila por estructura
+      calculada en la sesión: n, S, Q/capacidad, V, Qp objetivo, ¿Cumple?
+      con color verde/rojo, y un comentario con el dato más relevante de
+      cada tipo -- Froude y % de área/altura llena en canales y
+      alcantarillas, D50 en enrocado, borde libre disponible en
+      pontón/puente/defensa), seguida de una recomendación automática en
+      texto. La recomendación compara SOLO dentro de categorías
+      físicamente comparables (canal contra canal, alcantarilla contra
+      alcantarilla) -- comparar un canal contra la verificación de borde
+      libre de un puente no tendría sentido hidráulico, así que esas
+      categorías se revisan de forma individual: alerta de velocidad alta
+      (>4 m/s, riesgo de erosión) o baja (<0.4 m/s, riesgo de
+      sedimentación) en cualquier estructura con V calculada, lista de
+      verificaciones de borde libre que NO cumplen, y entre las
+      estructuras de conducción (canal/alcantarilla) con un Qp objetivo
+      definido, recomienda la de menor área mojada entre las que SÍ
+      cumplen (más económica) o advierte si ninguna cumple; si son todas
+      canales sin Qp objetivo (dimensionados cada uno para su propio Q de
+      diseño), recomienda la de velocidad más cercana a un rango típico
+      no erosivo/no sedimentante. El detalle completo por estructura (todo
+      lo que no cabe en la tabla) se conserva debajo, sin cambios.
+      Verificado con QGIS 3.40.1 real en modo headless (15 comprobaciones):
+      tabla vacía al inicio, conteo de filas al calcular, coloreado
+      verde/rojo de ¿Cumple?, aviso de "ninguna cumple", aviso de
+      velocidad alta forzando una pendiente extrema, y aviso de borde
+      libre no cumplido en un puente.
     - v0.3.4: item 7 completo -- fase 1 de 2 (Pestaña 7, Diseño de Estructuras
       Hidráulicas). Se quitó "Vados / Badén" del desplegable de estructuras
       (se verifica como Canales, que ya incluye borde libre). Se corrigió el
