@@ -78,7 +78,8 @@ class MapaCalado2DCanvas(FigureCanvas):
         self.setMinimumSize(int(width * dpi), int(height * dpi))
 
     def plot_mapa(self, h_max, zb, dx, dy, activo=None, entradas=None,
-                  estructuras=None, titulo="Calado máximo (m)"):
+                  estructuras=None, titulo="Calado máximo (m)",
+                  etiqueta_barra="Calado máximo (m)"):
         self.fig.clear()
         self.ax = self.fig.add_subplot(111)
         filas, columnas = h_max.shape
@@ -98,7 +99,7 @@ class MapaCalado2DCanvas(FigureCanvas):
         imagen = self.ax.imshow(agua, cmap=_mapa_color("Blues"), extent=extension,
                                 origin="upper", zorder=2, alpha=0.92)
         barra = self.fig.colorbar(imagen, ax=self.ax, shrink=0.82, pad=0.02)
-        barra.set_label("Calado máximo (m)", fontsize=9.5)
+        barra.set_label(etiqueta_barra, fontsize=9.5)
 
         if entradas:
             for e in entradas:

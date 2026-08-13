@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.3.9
+version=0.3.10
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,42 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.3.10: item 8 -- fase 3 de 4 (Pestaña 8, video embebido de la
+      simulación). Nueva sección "9. Video de la simulación": arma una
+      animación a partir de los instantes que el worker ya capturaba
+      durante la simulación (self.worker_2d.instantes -- t, calado,
+      velocidad en cada intervalo de captura, disponible desde antes pero
+      solo usado hasta ahora para exportar una malla temporal a QGIS) y la
+      reproduce EMBEBIDA dentro del propio plugin, con botones de generar/
+      pausar-reanudar/guardar.
+      Se optó por GIF en vez de MP4: un video real necesitaría ffmpeg
+      instalado aparte (no viene con QGIS, no se puede dar por
+      garantizado), mientras que un GIF se reproduce con QMovie -- parte
+      de Qt, sin códecs ni dependencias adicionales de por medio. Nuevo
+      ui/swe2d_animation.py (generar_gif_calado): reutiliza el MISMO
+      MapaCalado2DCanvas de los resultados estáticos, un cuadro por
+      instante capturado, con un parámetro "usar 1 de cada N instantes"
+      para acortar el GIF sin volver a simular con un intervalo de
+      captura mayor -- el instante final siempre se incluye, caiga o no
+      en ese muestreo. Requiere Pillow para ensamblar el GIF (import
+      perezoso, como openpyxl/python-docx/docxtpl en el resto del
+      plugin); ya estaba instalado en el Python de QGIS.
+      Se agregó también un parámetro etiqueta_barra a
+      MapaCalado2DCanvas.plot_mapa (ui/swe2d_canvas.py) para poder decir
+      "Calado (m)" en cada cuadro de la animación en vez de "Calado
+      MÁXIMO (m)", que sería incorrecto para un instante cualquiera que
+      no sea el último.
+      Verificado con QGIS 3.40.1 real en modo headless (17
+      comprobaciones): sin instantes capturados da un error claro; con
+      paso=1 el GIF tiene exactamente tantos cuadros como instantes;
+      con paso=2 se confirmó tanto el caso en que hay que agregar el
+      último instante aparte como el caso en que ya cae en el muestreo
+      (no se duplica); el GIF generado se releyó con Pillow para
+      confirmar cuadros y bucle infinito; integración completa con la UI
+      (generar, pausar/reanudar alternando el estado real de QMovie, y
+      guardar en la ruta que elija el usuario).
+      Pendiente: fase 4 (visualización 3D del terreno+estructuras con
+      corte transversal interactivo) -- con esto se completa el item 8.
     - v0.3.9: item 8 -- fase 2 de 4 (Pestaña 8, dibujar estructuras con el
       mouse). En vez de reimplementar un rubber-band de digitalización
       propio, se reutilizan las herramientas NATIVAS de QGIS: un botón

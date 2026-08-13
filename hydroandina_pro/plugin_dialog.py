@@ -27,7 +27,7 @@ from qgis.core import (
 )
 from qgis.gui import QgsMapLayerComboBox, QgsMapToolEmitPoint
 from qgis.PyQt.QtCore import Qt, QVariant
-from qgis.PyQt.QtGui import QFont, QColor
+from qgis.PyQt.QtGui import QFont, QColor, QMovie
 from qgis.PyQt.QtWidgets import (
     QDialog, QTabWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox,
     QLabel, QLineEdit, QPushButton, QSpinBox, QDoubleSpinBox, QComboBox,
@@ -72,6 +72,7 @@ from .ui.regionalization_canvas import RegionalizacionCanvas, ValidacionGrillada
 from .ui.swe2d_canvas import (MapaCalado2DCanvas, MapaPeligrosidadCanvas,
                                HidrogramasSwe2DCanvas, PerfilSwe2DCanvas)
 from .ui.swe2d_runner import SimulacionSwe2DWorker, estimar_coste
+from .ui import swe2d_animation
 from .ui.table_utils import (ajustar_alto_tabla, aplicar_columna_elastica, limitar_ancho_tabla,
                               limitar_ancho_boton, crear_tabla_parametros, poblar_tabla_parametros)
 from .ui import export_overlay
@@ -9226,6 +9227,61 @@ class HydroAndinaProDialog(QDialog):
                     cargadas += 1
         return cargadas
 
+    # -- Video de la simulación (item 8, fase 3): GIF armado a partir de
+    # los instantes capturados por el worker, reproducido embebido con
+    # QMovie (parte de Qt, sin códecs ni ffmpeg de por medio). --
+    def _on_generar_animacion_2d(self):
+        instantes = getattr(self.worker_2d, "instantes", None) if getattr(self, "worker_2d", None) else None
+        simulador = getattr(self, "simulador_2d", None)
+        if not instantes or simulador is None:
+            QMessageBox.warning(
+                self, "Sin instantes capturados",
+                "Ejecute la simulación con «Intervalo de captura para la animación» mayor que 0 "
+                "(sección 5) antes de generar el video.")
+            return
+        try:
+            carpeta_tmp = tempfile.mkdtemp(prefix="hydroandina_video_2d_")
+            ruta_tmp = os.path.join(carpeta_tmp, "animacion_2d.gif")
+            info = swe2d_animation.generar_gif_calado(
+                instantes, simulador, ruta_tmp,
+                paso=self.spin_paso_animacion_2d.value(),
+                duracion_frame_ms=self.spin_duracion_frame_2d.value())
+            self._ruta_animacion_2d_actual = info["ruta"]
+            self.movie_animacion_2d.stop()
+            self.movie_animacion_2d.setFileName(info["ruta"])
+            self.movie_animacion_2d.start()
+            self.btn_pausar_animacion_2d.setEnabled(True)
+            self.btn_pausar_animacion_2d.setText("⏸ Pausar")
+            self.btn_guardar_animacion_2d.setEnabled(True)
+            self.lbl_estado_video_2d.setText(
+                f"Estado: animación generada -- {info['n_frames']} cuadros, "
+                f"~{info['duracion_total_s']:.1f} s de reproducción por vuelta (se repite en bucle).")
+        except swe2d_animation.AnimacionSwe2DError as e:
+            QMessageBox.warning(self, "No se pudo generar la animación", str(e))
+        except Exception as e:
+            QMessageBox.critical(self, "Error generando la animación", str(e))
+
+    def _on_pausar_reanudar_animacion_2d(self):
+        en_pausa = self.movie_animacion_2d.state() == QMovie.Paused
+        self.movie_animacion_2d.setPaused(not en_pausa)
+        self.btn_pausar_animacion_2d.setText("▶ Reanudar" if not en_pausa else "⏸ Pausar")
+
+    def _on_guardar_animacion_2d(self):
+        ruta_actual = getattr(self, "_ruta_animacion_2d_actual", None)
+        if not ruta_actual or not os.path.exists(ruta_actual):
+            QMessageBox.warning(self, "Sin animación", "Genere primero la animación.")
+            return
+        ruta_destino, _ = QFileDialog.getSaveFileName(
+            self, "Guardar animación de la simulación 2D", "animacion_2d.gif", "GIF (*.gif)")
+        if not ruta_destino:
+            return
+        try:
+            import shutil
+            shutil.copyfile(ruta_actual, ruta_destino)
+            QMessageBox.information(self, "Animación guardada", f"Guardada en:\n{ruta_destino}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error guardando la animación", str(e))
+
     # ==================================================================
     # PESTAÑA 8 — SIMULACIÓN HIDRÁULICA 2D DE ESTRUCTURAS
     # ==================================================================
@@ -9670,6 +9726,69 @@ class HydroAndinaProDialog(QDialog):
         self.tabla_exportacion_2d = crear_tabla_parametros()
         v_exp.addWidget(self.tabla_exportacion_2d)
         v.addWidget(gb_exp)
+
+        # ---------------- 9. VIDEO DE LA SIMULACIÓN ----------------
+        gb_video = QGroupBox("9. Video de la simulación (animación GIF)")
+        v_video = QVBoxLayout(gb_video)
+        lbl_video_intro = QLabel(
+            "Arma una animación de la evolución del calado a partir de los instantes capturados "
+            "durante la simulación (requiere haber corrido con «Intervalo de captura» mayor que 0 "
+            "en la sección 5), y la reproduce aquí mismo. Se genera como GIF -- reproducible con "
+            "las herramientas propias de Qt, sin depender de códecs de video externos ni de tener "
+            "ffmpeg instalado."
+        )
+        lbl_video_intro.setWordWrap(True)
+        v_video.addWidget(lbl_video_intro)
+
+        f_video = QFormLayout()
+        f_video.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.spin_paso_animacion_2d = QSpinBox()
+        self.spin_paso_animacion_2d.setRange(1, 50)
+        self.spin_paso_animacion_2d.setValue(1)
+        self.spin_paso_animacion_2d.setToolTip(
+            "Usar 1 de cada N instantes capturados -- súbalo para acortar el GIF sin volver a "
+            "simular con un intervalo de captura mayor. El instante final siempre se incluye.")
+        f_video.addRow("Usar 1 de cada N instantes capturados:", self.spin_paso_animacion_2d)
+        self.spin_duracion_frame_2d = QSpinBox()
+        self.spin_duracion_frame_2d.setRange(20, 2000)
+        self.spin_duracion_frame_2d.setValue(200)
+        self.spin_duracion_frame_2d.setSuffix(" ms")
+        f_video.addRow("Duración de cada cuadro:", self.spin_duracion_frame_2d)
+        v_video.addLayout(f_video)
+
+        h_video_btn = QHBoxLayout()
+        btn_generar_animacion_2d = QPushButton("🎬 Generar animación")
+        btn_generar_animacion_2d.clicked.connect(self._on_generar_animacion_2d)
+        limitar_ancho_boton(btn_generar_animacion_2d)
+        h_video_btn.addWidget(btn_generar_animacion_2d)
+        self.btn_pausar_animacion_2d = QPushButton("⏸ Pausar")
+        self.btn_pausar_animacion_2d.clicked.connect(self._on_pausar_reanudar_animacion_2d)
+        self.btn_pausar_animacion_2d.setEnabled(False)
+        h_video_btn.addWidget(self.btn_pausar_animacion_2d)
+        self.btn_guardar_animacion_2d = QPushButton("💾 Guardar animación como…")
+        self.btn_guardar_animacion_2d.clicked.connect(self._on_guardar_animacion_2d)
+        self.btn_guardar_animacion_2d.setEnabled(False)
+        h_video_btn.addWidget(self.btn_guardar_animacion_2d)
+        h_video_btn.addStretch()
+        v_video.addLayout(h_video_btn)
+
+        self.lbl_animacion_2d = QLabel("(genere la animación para verla aquí)")
+        self.lbl_animacion_2d.setAlignment(Qt.AlignCenter)
+        self.lbl_animacion_2d.setMinimumSize(320, 240)
+        self.lbl_animacion_2d.setStyleSheet(
+            "background-color: #1a1a1a; color: #bbbbbb; border: 1px solid #666666;")
+        self.movie_animacion_2d = QMovie()
+        self.lbl_animacion_2d.setMovie(self.movie_animacion_2d)
+        h_video_centrado = QHBoxLayout()
+        h_video_centrado.addStretch()
+        h_video_centrado.addWidget(self.lbl_animacion_2d)
+        h_video_centrado.addStretch()
+        v_video.addLayout(h_video_centrado)
+
+        self.lbl_estado_video_2d = QLabel("Estado: ninguna animación generada todavía.")
+        self.lbl_estado_video_2d.setWordWrap(True)
+        v_video.addWidget(self.lbl_estado_video_2d)
+        v.addWidget(gb_video)
 
         self.resumen_final_2d = ResumenFinal(alto_minimo=120)
         self.resumen_final_2d.setHtml(
