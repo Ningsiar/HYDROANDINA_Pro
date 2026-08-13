@@ -70,7 +70,8 @@ from .ui.groundwater_canvas import GroundwaterCanvas
 from .ui.well_canvas import WellCanvas
 from .ui.regionalization_canvas import RegionalizacionCanvas, ValidacionGrilladaCanvas
 from .ui.swe2d_canvas import (MapaCalado2DCanvas, MapaPeligrosidadCanvas,
-                               HidrogramasSwe2DCanvas, PerfilSwe2DCanvas)
+                               HidrogramasSwe2DCanvas, PerfilSwe2DCanvas,
+                               TerrenoCalado3DCanvas)
 from .ui.swe2d_runner import SimulacionSwe2DWorker, estimar_coste
 from .ui import swe2d_animation
 from .ui.table_utils import (ajustar_alto_tabla, aplicar_columna_elastica, limitar_ancho_tabla,
@@ -412,6 +413,8 @@ class HydroAndinaProDialog(QDialog):
         self.capa_estructuras_2d = None   # capa de líneas (memoria) de estructuras 2D insertadas desde el mapa (item 8)
         self._primer_clic_estructura_2d = None
         self.map_tool_estructura_2d = None
+        self._primer_clic_corte_2d = None
+        self.map_tool_corte_2d = None
 
         layout = QVBoxLayout(self)
         self.tabs = QTabWidget()
@@ -9282,6 +9285,152 @@ class HydroAndinaProDialog(QDialog):
         except Exception as e:
             QMessageBox.critical(self, "Error guardando la animación", str(e))
 
+    # -- Visualización 3D (item 8, fase 4a) --
+    def _on_generar_vista_3d_2d(self):
+        simulador = getattr(self, "simulador_2d", None)
+        if simulador is None:
+            QMessageBox.warning(self, "Sin resultados", "Ejecute primero una simulación.")
+            return
+        try:
+            self.canvas_3d_2d.plot_terreno_calado(
+                simulador.zb, simulador.h_max, simulador.dx, simulador.dy, activo=simulador.activo)
+            self.lbl_estado_3d_2d.setText(
+                "Estado: vista 3D generada -- arrastre con el mouse para rotar, use los botones "
+                "para acercar/alejar o restablecer la vista.")
+        except Exception as e:
+            QMessageBox.critical(self, "Error generando la vista 3D", str(e))
+
+    def _on_zoom_3d_2d(self, factor: float):
+        self.canvas_3d_2d.zoom(factor)
+
+    def _on_restablecer_vista_3d_2d(self):
+        self.canvas_3d_2d.restablecer_vista()
+
+    # -- Corte transversal interactivo (item 8, fase 4b) --
+    def _activar_map_tool_corte_2d(self, checked):
+        canvas = self.iface.mapCanvas()
+        if checked:
+            if not getattr(self, "dominio_2d", None) or getattr(self, "simulador_2d", None) is None:
+                QMessageBox.warning(
+                    self, "Falta la simulación",
+                    "Cargue el dominio (sección 1) y ejecute una simulación antes de trazar el "
+                    "corte transversal.")
+                self.btn_marcar_corte_2d.setChecked(False)
+                return
+            self._primer_clic_corte_2d = None
+            self.map_tool_corte_2d = QgsMapToolEmitPoint(canvas)
+            self.map_tool_corte_2d.canvasClicked.connect(self._on_canvas_clicked_corte_2d)
+            canvas.mapToolSet.connect(self._on_map_tool_changed_corte_2d)
+            canvas.setMapTool(self.map_tool_corte_2d)
+            self.btn_marcar_corte_2d.setText("Clic en el INICIO del corte...")
+            self.hide()
+        else:
+            if self.map_tool_corte_2d is not None:
+                try:
+                    canvas.mapToolSet.disconnect(self._on_map_tool_changed_corte_2d)
+                except TypeError:
+                    pass
+                canvas.unsetMapTool(self.map_tool_corte_2d)
+            self.btn_marcar_corte_2d.setText(
+                "📏 Marcar línea de corte en el mapa (clic inicio → clic fin)")
+            self._restaurar_ventana()
+
+    def _on_map_tool_changed_corte_2d(self, herramienta_nueva, herramienta_anterior):
+        if herramienta_nueva is not self.map_tool_corte_2d:
+            self.btn_marcar_corte_2d.setChecked(False)
+            self.btn_marcar_corte_2d.setText(
+                "📏 Marcar línea de corte en el mapa (clic inicio → clic fin)")
+            self._restaurar_ventana()
+
+    def _muestrear_linea_grilla(self, array2d, fila1, col1, fila2, col2, n_puntos=None):
+        """Muestrea `array2d` (zb, h_max, ...) a lo largo de la línea recta
+        entre (fila1,col1) y (fila2,col2) en coordenadas de malla, con
+        vecino más cercano (suficiente para un corte diagnóstico -- no es
+        un valor de diseño de precisión). n_puntos se autocalcula a partir
+        de la longitud de la línea en celdas si no se indica."""
+        filas, columnas = array2d.shape
+        if n_puntos is None:
+            n_puntos = max(int(round(math.hypot(fila2 - fila1, col2 - col1))) + 1, 2)
+        valores = []
+        for i in range(n_puntos):
+            frac = i / (n_puntos - 1) if n_puntos > 1 else 0.0
+            f = min(max(int(round(fila1 + frac * (fila2 - fila1))), 0), filas - 1)
+            c = min(max(int(round(col1 + frac * (col2 - col1))), 0), columnas - 1)
+            valores.append(float(array2d[f, c]))
+        return valores, n_puntos
+
+    def _on_canvas_clicked_corte_2d(self, punto, button):
+        if self._primer_clic_corte_2d is None:
+            self._primer_clic_corte_2d = QgsPointXY(punto)
+            self.btn_marcar_corte_2d.setText("Clic en el FIN del corte...")
+            return
+        punto_inicio = self._primer_clic_corte_2d
+        punto_fin = QgsPointXY(punto)
+        self._primer_clic_corte_2d = None
+
+        canvas = self.iface.mapCanvas()
+        if self.map_tool_corte_2d is not None:
+            try:
+                canvas.mapToolSet.disconnect(self._on_map_tool_changed_corte_2d)
+            except TypeError:
+                pass
+            canvas.unsetMapTool(self.map_tool_corte_2d)
+        self.btn_marcar_corte_2d.setChecked(False)
+        self.btn_marcar_corte_2d.setText(
+            "📏 Marcar línea de corte en el mapa (clic inicio → clic fin)")
+        self._restaurar_ventana()
+
+        fila1, col1 = self._fila_columna_desde_punto_2d(punto_inicio)
+        fila2, col2 = self._fila_columna_desde_punto_2d(punto_fin)
+        try:
+            self._procesar_corte_transversal_2d(fila1, col1, fila2, col2)
+        except Exception as e:
+            QMessageBox.critical(self, "Error procesando el corte transversal", str(e))
+
+    def _procesar_corte_transversal_2d(self, fila1, col1, fila2, col2):
+        simulador = self.simulador_2d
+        zb_linea, n_puntos = self._muestrear_linea_grilla(simulador.zb, fila1, col1, fila2, col2)
+        h_linea, _ = self._muestrear_linea_grilla(simulador.h_max, fila1, col1, fila2, col2, n_puntos)
+        longitud_m = math.hypot((fila2 - fila1) * simulador.dy, (col2 - col1) * simulador.dx)
+        paso_m = longitud_m / max(n_puntos - 1, 1)
+
+        self.canvas_corte_transversal_2d.plot_perfil(
+            zb_linea, h_linea, paso_m,
+            titulo=f"Corte transversal — fila {fila1},col {col1} → fila {fila2},col {col2}")
+
+        fila_medio = min(max(int(round((fila1 + fila2) / 2.0)), 0), simulador.zb.shape[0] - 1)
+        col_medio = min(max(int(round((col1 + col2) / 2.0)), 0), simulador.zb.shape[1] - 1)
+
+        instantes = getattr(self.worker_2d, "instantes", None) if getattr(self, "worker_2d", None) else None
+        if instantes:
+            tiempos = [instante[0] for instante in instantes]
+            calados_punto = [float(instante[1][fila_medio, col_medio]) for instante in instantes]
+            self.canvas_hidrograma_punto_2d.plot_hidrograma_puntual(
+                tiempos, calados_punto,
+                etiqueta=f"fila {fila_medio}, columna {col_medio} (punto medio del corte)")
+        else:
+            self.canvas_hidrograma_punto_2d.fig.clear()
+            self.canvas_hidrograma_punto_2d.draw()
+
+        vx_final, vy_final = simulador.componentes_velocidad()
+        v_medio = math.hypot(float(vx_final[fila_medio, col_medio]), float(vy_final[fila_medio, col_medio]))
+
+        poblar_tabla_parametros(self.tabla_corte_transversal_2d, [
+            ("Punto de inicio", f"fila {fila1}, columna {col1}", ""),
+            ("Punto final", f"fila {fila2}, columna {col2}", ""),
+            ("Longitud del corte", round(longitud_m, 2), "m"),
+            ("Puntos muestreados", n_puntos, ""),
+            ("Calado máximo en el punto medio", round(float(h_linea[n_puntos // 2]), 3), "m"),
+            ("Calado máximo a lo largo de todo el corte", round(max(h_linea), 3), "m"),
+            ("Velocidad en el punto medio (estado final)", round(v_medio, 3), "m/s",
+             "instantánea al terminar la simulación, no la máxima alcanzada durante el cálculo"),
+            ("Instantes capturados disponibles", len(instantes) if instantes else 0, "",
+             "para el gráfico de calado en el tiempo -- 0 si no se activó la captura antes de simular"),
+        ])
+
+        self.lbl_estado_corte_2d.setText(
+            f"Estado: corte trazado -- {n_puntos} puntos muestreados a lo largo de {longitud_m:.1f} m.")
+
     # ==================================================================
     # PESTAÑA 8 — SIMULACIÓN HIDRÁULICA 2D DE ESTRUCTURAS
     # ==================================================================
@@ -9789,6 +9938,77 @@ class HydroAndinaProDialog(QDialog):
         self.lbl_estado_video_2d.setWordWrap(True)
         v_video.addWidget(self.lbl_estado_video_2d)
         v.addWidget(gb_video)
+
+        # ---------------- 10. VISUALIZACIÓN 3D ----------------
+        gb_3d = QGroupBox("10. Visualización 3D del terreno y el calado")
+        v_3d = QVBoxLayout(gb_3d)
+        lbl_3d = QLabel(
+            "Superficie 3D del terreno con el calado máximo superpuesto -- arrastre con el mouse "
+            "sobre el gráfico para rotar la vista, y use los botones para acercar/alejar/"
+            "restablecer. Por rendimiento, la malla se muestra submuestreada (una simulación real "
+            "tiene demasiadas celdas para una superficie 3D interactiva); alcanza para ubicar la "
+            "mancha de inundación sobre el relieve real de la cuenca."
+        )
+        lbl_3d.setWordWrap(True)
+        v_3d.addWidget(lbl_3d)
+
+        h_3d_btn = QHBoxLayout()
+        btn_generar_3d_2d = QPushButton("🗺 Generar vista 3D")
+        btn_generar_3d_2d.clicked.connect(self._on_generar_vista_3d_2d)
+        limitar_ancho_boton(btn_generar_3d_2d)
+        h_3d_btn.addWidget(btn_generar_3d_2d)
+        btn_acercar_3d_2d = QPushButton("🔍+ Acercar")
+        btn_acercar_3d_2d.clicked.connect(lambda: self._on_zoom_3d_2d(0.8))
+        h_3d_btn.addWidget(btn_acercar_3d_2d)
+        btn_alejar_3d_2d = QPushButton("🔍− Alejar")
+        btn_alejar_3d_2d.clicked.connect(lambda: self._on_zoom_3d_2d(1.25))
+        h_3d_btn.addWidget(btn_alejar_3d_2d)
+        btn_restablecer_3d_2d = QPushButton("Restablecer vista")
+        btn_restablecer_3d_2d.clicked.connect(self._on_restablecer_vista_3d_2d)
+        h_3d_btn.addWidget(btn_restablecer_3d_2d)
+        h_3d_btn.addStretch()
+        v_3d.addLayout(h_3d_btn)
+
+        self.canvas_3d_2d = TerrenoCalado3DCanvas()
+        v_3d.addWidget(self.canvas_3d_2d)
+        self.lbl_estado_3d_2d = QLabel("Estado: sin generar todavía.")
+        self.lbl_estado_3d_2d.setWordWrap(True)
+        v_3d.addWidget(self.lbl_estado_3d_2d)
+        v.addWidget(gb_3d)
+
+        # ---------------- 11. CORTE TRANSVERSAL INTERACTIVO ----------------
+        gb_corte = QGroupBox("11. Corte transversal interactivo")
+        v_corte = QVBoxLayout(gb_corte)
+        lbl_corte = QLabel(
+            "Marque una línea sobre el mapa (2 clics) para obtener el corte transversal del "
+            "terreno y el calado máximo a lo largo de ella, y la evolución del calado EN EL "
+            "TIEMPO en el punto medio de esa línea (a partir de los instantes capturados -- "
+            "requiere haber simulado con «Intervalo de captura» mayor que 0, sección 5)."
+        )
+        lbl_corte.setWordWrap(True)
+        v_corte.addWidget(lbl_corte)
+
+        self.btn_marcar_corte_2d = QPushButton(
+            "📏 Marcar línea de corte en el mapa (clic inicio → clic fin)")
+        self.btn_marcar_corte_2d.setCheckable(True)
+        self.btn_marcar_corte_2d.toggled.connect(self._activar_map_tool_corte_2d)
+        v_corte.addWidget(self.btn_marcar_corte_2d)
+
+        self.tabla_corte_transversal_2d = crear_tabla_parametros()
+        v_corte.addWidget(self.tabla_corte_transversal_2d)
+
+        v_corte.addWidget(QLabel("<b>Perfil del corte (terreno + calado máximo)</b>"))
+        self.canvas_corte_transversal_2d = PerfilSwe2DCanvas(width=8.4, height=4.0)
+        v_corte.addWidget(self.canvas_corte_transversal_2d)
+
+        v_corte.addWidget(QLabel("<b>Calado en el tiempo, en el punto medio del corte</b>"))
+        self.canvas_hidrograma_punto_2d = HidrogramasSwe2DCanvas(width=8.4, height=3.6)
+        v_corte.addWidget(self.canvas_hidrograma_punto_2d)
+
+        self.lbl_estado_corte_2d = QLabel("Estado: ningún corte trazado todavía.")
+        self.lbl_estado_corte_2d.setWordWrap(True)
+        v_corte.addWidget(self.lbl_estado_corte_2d)
+        v.addWidget(gb_corte)
 
         self.resumen_final_2d = ResumenFinal(alto_minimo=120)
         self.resumen_final_2d.setHtml(

@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.3.10
+version=0.3.11
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,48 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.3.11: item 8 -- fase 4 de 4, la ÚLTIMA (Pestaña 8, visualización
+      3D + corte transversal interactivo). Con esto queda COMPLETO el
+      item 8, y con él las 9 fases del pedido original salvo el mapa
+      IILA-SENAMHI del item 5 (bloqueado por conseguir datos regionales
+      confiables, no por trabajo pendiente del plugin).
+      Sección "10. Visualización 3D": superficie del terreno con el
+      calado máximo superpuesto, arrastre con el mouse para rotar
+      (gratis: Axes3D la activa sola sobre los eventos del propio
+      canvas), y botones de acercar/alejar/restablecer -- el zoom se
+      implementó recortando/expandiendo los 3 límites de eje a mano en
+      vez de depender del scroll del mouse, cuyo soporte varía entre
+      versiones de matplotlib. Se usó el eje 3D de matplotlib
+      (mpl_toolkits.mplot3d) y NO el motor Qt3D nativo de QGIS
+      (Qgs3DMapCanvas): necesita un contexto OpenGL real que no está
+      garantizado en un entorno headless y hubiera quedado sin poder
+      probarse -- con matplotlib, en cambio, es el mismo backend Agg que
+      ya usan todos los demás gráficos del plugin. La malla se
+      submuestrea automáticamente (una simulación real tiene demasiadas
+      celdas para una superficie 3D interactiva).
+      Sección "11. Corte transversal interactivo": marcar 2 clics sobre
+      el mapa (mismo patrón ya usado varias veces en el plugin) traza una
+      línea de corte; se muestrea zb/calado máximo a lo largo de ella
+      (vecino más cercano sobre las matrices ya en memoria del
+      simulador, no releyendo un ráster) y se grafica con el mismo
+      PerfilSwe2DCanvas de los resultados estáticos, más una tabla de
+      parámetros (longitud, calado y velocidad en el punto medio). Si se
+      capturaron instantes durante la simulación, se agrega además el
+      calado EN EL TIEMPO en el punto medio de esa línea (nuevo
+      HidrogramasSwe2DCanvas.plot_hidrograma_puntual) -- distinto de la
+      serie agregada de todo el dominio que ya existía, responde "cómo
+      sube y baja el agua AQUÍ".
+      Verificado con QGIS 3.40.1 real en modo headless (21
+      comprobaciones): superficie de terreno+agua con y sin calado,
+      submuestreo automático confirmado en una malla de 400×400, zoom
+      in/out verificado contra el rango exacto de los límites de eje y
+      restablecer volviendo a los originales bit a bit, muestreo de línea
+      contra un cálculo manual exacto (incluida una diagonal que repite
+      una celda al redondear -- comportamiento correcto, no un error),
+      corte horizontal con longitud/punto medio verificados, y el
+      hidrograma puntual releído directamente de las líneas dibujadas en
+      el gráfico para confirmar que coincide con los instantes
+      sintéticos.
     - v0.3.10: item 8 -- fase 3 de 4 (Pestaña 8, video embebido de la
       simulación). Nueva sección "9. Video de la simulación": arma una
       animación a partir de los instantes que el worker ya capturaba

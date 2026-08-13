@@ -292,6 +292,26 @@ class HidrogramasSwe2DCanvas(FigureCanvas):
     def guardar_figura(self, ruta_png):
         self.fig.savefig(ruta_png, dpi=300, bbox_inches="tight")
 
+    def plot_hidrograma_puntual(self, tiempos_s, calados_m, etiqueta="Punto de corte"):
+        """
+        Serie temporal de calado en UN punto de la malla (p.ej. el punto
+        medio de una línea de corte transversal), reconstruida a partir
+        de los instantes capturados -- distinto de plot_series(), que es
+        la serie AGREGADA de todo el dominio (caudales de entrada/salida,
+        volumen, área). Es lo que responde "¿cómo sube y baja el agua
+        AQUÍ, en este punto de la obra?", que la serie agregada no dice.
+        """
+        self.fig.clear()
+        ax = self.fig.add_subplot(111)
+        t_h = np.asarray(tiempos_s, dtype=float) / 3600.0
+        ax.plot(t_h, calados_m, "-", linewidth=2.2, color="#1F6FB2", marker="o", markersize=3)
+        ax.set_xlabel("Tiempo (h)")
+        ax.set_ylabel("Calado (m)")
+        ax.set_title(f"Calado en el tiempo — {etiqueta}", pad=12)
+        ax.grid(True, linestyle=":", linewidth=0.6)
+        self.fig.tight_layout()
+        self.draw()
+
 
 class PerfilSwe2DCanvas(FigureCanvas):
 
@@ -340,6 +360,121 @@ class PerfilSwe2DCanvas(FigureCanvas):
         leyenda_impacto(self.ax, titulo="Elementos del perfil", loc="best")
         self.fig.tight_layout()
         self.draw()
+
+    def guardar_figura(self, ruta_png):
+        self.fig.savefig(ruta_png, dpi=300, bbox_inches="tight")
+
+
+class TerrenoCalado3DCanvas(FigureCanvas):
+    """
+    Vista 3D del terreno con el calado superpuesto (item 8, fase 4a).
+
+    Se usa el eje 3D de matplotlib (mpl_toolkits.mplot3d) en vez del
+    motor Qt3D nativo de QGIS: es el mismo backend Agg que ya usan TODOS
+    los demás gráficos del plugin, así que se puede verificar con una
+    prueba automática (que la superficie se construyó con los datos
+    correctos) igual que cualquier otro -- un `Qgs3DMapCanvas` necesita
+    un contexto OpenGL real, que no está garantizado en un entorno
+    headless, y hubiera quedado sin poder probarse.
+
+    La rotación por arrastre viene GRATIS: Axes3D la activa sola
+    (mouse_init()) sobre los eventos de mouse del propio canvas, sin
+    depender de una barra de herramientas de navegación. El zoom, en
+    cambio, NO se deja al scroll del mouse (su soporte varía entre
+    versiones de matplotlib) -- se implementa aquí mismo recortando o
+    expandiendo los 3 límites de eje, así que funciona igual en
+    cualquier versión.
+    """
+
+    def __init__(self, parent=None, width=7.6, height=6.0, dpi=100):
+        # mpl_toolkits.mplot3d registra el proyector '3d' con solo
+        # importarse -- basta con importarlo aquí, sin usar el nombre,
+        # para que projection="3d" funcione más abajo.
+        from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
+        self.fig = Figure(figsize=(width, height), dpi=dpi)
+        self.ax = self.fig.add_subplot(111, projection="3d")
+        super().__init__(self.fig)
+        self.setParent(parent)
+        self.setMinimumSize(int(width * dpi), int(height * dpi))
+        self._limites_originales = None
+
+    def plot_terreno_calado(self, zb, h, dx, dy, activo=None, submuestreo=None,
+                            exageracion_vertical=2.0, objetivo_puntos_por_eje=150):
+        """
+        zb, h: matrices 2D completas de la malla de simulación (h puede
+            ser el calado máximo o el de un instante cualquiera).
+        submuestreo: usar 1 de cada N celdas en cada eje -- una malla de
+            simulación (cientos de miles de celdas) es inviable como
+            superficie 3D interactiva; se autocalcula si no se indica,
+            apuntando a `objetivo_puntos_por_eje` puntos por lado.
+        exageracion_vertical: cuánto se estira el eje Z respecto a la
+            escala real de X/Y -- sin esto, el relieve de una cuenca real
+            (kilómetros de ancho, decenas de metros de desnivel) se ve
+            como una lámina plana.
+        """
+        self.ax.clear()
+        filas, columnas = zb.shape
+        if submuestreo is None:
+            submuestreo = max(1, int(max(filas, columnas) / max(objetivo_puntos_por_eje, 1)))
+
+        zb_s = zb[::submuestreo, ::submuestreo]
+        h_s = h[::submuestreo, ::submuestreo] if h is not None else None
+        activo_s = activo[::submuestreo, ::submuestreo] if activo is not None else None
+
+        filas_s, columnas_s = zb_s.shape
+        xs = np.arange(columnas_s) * dx * submuestreo
+        ys = np.arange(filas_s) * dy * submuestreo
+        malla_x, malla_y = np.meshgrid(xs, ys)
+        z_valido = np.where(np.isfinite(zb_s), zb_s, np.nan)
+        z_relleno = float(np.nanmin(z_valido)) if np.any(np.isfinite(z_valido)) else 0.0
+        malla_z = np.where(np.isfinite(zb_s), zb_s, z_relleno)
+
+        self.ax.plot_surface(malla_x, malla_y, malla_z, cmap="terrain", linewidth=0,
+                             antialiased=True, alpha=0.95, rstride=1, cstride=1, zorder=1)
+
+        if h_s is not None:
+            agua = np.where(activo_s, h_s, 0.0) if activo_s is not None else h_s
+            mascara_agua = agua > 1e-3
+            if np.any(mascara_agua):
+                malla_z_agua = np.where(mascara_agua, malla_z + agua, np.nan)
+                self.ax.plot_surface(malla_x, malla_y, malla_z_agua, color="#1F6FB2",
+                                     alpha=0.6, linewidth=0, antialiased=True, zorder=2)
+
+        self.ax.set_xlabel("X (m)")
+        self.ax.set_ylabel("Y (m)")
+        self.ax.set_zlabel("Cota (m s.n.m.)")
+        self.ax.set_title(
+            f"Terreno y calado — vista 3D (arrastre para rotar; malla cada "
+            f"{submuestreo} celda(s) de la simulación)", pad=12)
+        try:
+            rango_z = float(np.nanmax(malla_z) - np.nanmin(malla_z))
+            self.ax.set_box_aspect((columnas_s * dx * submuestreo,
+                                    filas_s * dy * submuestreo,
+                                    rango_z * exageracion_vertical + 1e-6))
+        except AttributeError:
+            pass  # matplotlib < 3.3 no tiene set_box_aspect -- se deja la proporción por defecto
+        self.fig.tight_layout()
+        self.draw()
+        self._limites_originales = (self.ax.get_xlim(), self.ax.get_ylim(), self.ax.get_zlim())
+
+    def zoom(self, factor: float):
+        """factor < 1 acerca, > 1 aleja -- recorta o expande los 3
+        límites de eje alrededor de su centro actual."""
+        for obtener, establecer in ((self.ax.get_xlim, self.ax.set_xlim),
+                                    (self.ax.get_ylim, self.ax.set_ylim),
+                                    (self.ax.get_zlim, self.ax.set_zlim)):
+            lo, hi = obtener()
+            centro = (lo + hi) / 2.0
+            semirrango = (hi - lo) / 2.0 * factor
+            establecer(centro - semirrango, centro + semirrango)
+        self.draw()
+
+    def restablecer_vista(self):
+        if self._limites_originales:
+            self.ax.set_xlim(self._limites_originales[0])
+            self.ax.set_ylim(self._limites_originales[1])
+            self.ax.set_zlim(self._limites_originales[2])
+            self.draw()
 
     def guardar_figura(self, ruta_png):
         self.fig.savefig(ruta_png, dpi=300, bbox_inches="tight")
