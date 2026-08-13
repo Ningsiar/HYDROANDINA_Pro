@@ -21,13 +21,13 @@ from qgis.core import (
 )
 from qgis.gui import QgsMapLayerComboBox, QgsMapToolEmitPoint
 from qgis.PyQt.QtCore import Qt
-from qgis.PyQt.QtGui import QFont
+from qgis.PyQt.QtGui import QFont, QColor
 from qgis.PyQt.QtWidgets import (
     QDialog, QTabWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox,
     QLabel, QLineEdit, QPushButton, QSpinBox, QDoubleSpinBox, QComboBox,
     QTableWidget, QTableWidgetItem, QFileDialog, QMessageBox, QRadioButton,
     QButtonGroup, QCheckBox, QWidget, QHeaderView, QPlainTextEdit, QTextBrowser,
-    QApplication, QScrollArea, QStackedWidget, QFrame, QGridLayout,
+    QApplication, QScrollArea, QStackedWidget, QFrame, QGridLayout, QProgressBar,
 )
 
 from .core import (delineation, morphometry, curve_number, tc_methods, dem_download,
@@ -39,7 +39,7 @@ from .core import (delineation, morphometry, curve_number, tc_methods, dem_downl
                     data_completion, areal_precipitation, water_yield, scour, soil_loss,
                     sediment_transport, debris_flow, climate_change, mean_flow_models, etp_methods,
                     low_flows, phabsim, groundwater_flow, well_hydraulics, idf_curves,
-                    regionalization, gridded_validation, hydra2d_bridge)
+                    regionalization, gridded_validation, swe2d, mesh_export)
 from .core.qgis_layer_utils import obtener_capa
 from .ui.hypsometric_canvas import HypsometricCanvas
 from .ui.hydrograph_canvas import HydrographCanvas
@@ -62,6 +62,9 @@ from .ui.phabsim_canvas import PhabsimCanvas
 from .ui.groundwater_canvas import GroundwaterCanvas
 from .ui.well_canvas import WellCanvas
 from .ui.regionalization_canvas import RegionalizacionCanvas, ValidacionGrilladaCanvas
+from .ui.swe2d_canvas import (MapaCalado2DCanvas, MapaPeligrosidadCanvas,
+                               HidrogramasSwe2DCanvas, PerfilSwe2DCanvas)
+from .ui.swe2d_runner import SimulacionSwe2DWorker, estimar_coste
 from .ui.table_utils import (ajustar_alto_tabla, aplicar_columna_elastica, limitar_ancho_tabla,
                               limitar_ancho_boton, crear_tabla_parametros, poblar_tabla_parametros)
 
@@ -276,6 +279,12 @@ INTERPRETACIONES_GENERALES_MORFOMETRIA = {
 }
 
 
+class Swe2DEntradaInvalida(Exception):
+    """Datos incompletos o mal formados en las tablas de la Pestaña 8.
+    Se distingue de un error del solver para poder avisar al usuario con
+    un mensaje que le diga qué corregir, en vez de un volcado tecnico."""
+
+
 class HydroAndinaProDialog(QDialog):
 
     def __init__(self, iface, parent=None):
@@ -403,7 +412,7 @@ class HydroAndinaProDialog(QDialog):
         self._build_tab_precipitacion()
         self._build_tab5()
         self._build_tab_hidraulica_drenaje()
-        self._build_tab_hidraulica_2d()
+        self._build_tab_simulacion_2d()
         self._build_tab_modulos_avanzados()
         self._build_tab_socavacion()
         self._build_tab_perdida_suelos()
@@ -1484,6 +1493,32 @@ class HydroAndinaProDialog(QDialog):
         self.tabla_morfo.setItem(row, 0, item)
         self.tabla_morfo.setSpan(row, 0, 1, self.tabla_morfo.columnCount())
 
+    def _renumerar_tabla_morfo(self):
+        """
+        Numera en la cabecera vertical SOLO las filas de parámetro,
+        dejando en blanco las de encabezado de sección (1 — Parámetros
+        básicos, 2 — Forma, etc.).
+
+        MOTIVO: `tabla_morfo` nunca fija encabezados verticales propios,
+        así que Qt le pone el suyo por defecto (1, 2, 3... para CADA
+        fila insertada). Eso numera también las 6 filas de título de
+        sección como si fueran un parámetro más, y el número que ve el
+        usuario al final ("fila 45") no coincide con la cantidad real de
+        parámetros de la tabla. Una fila de encabezado se reconoce
+        porque `_agregar_titulo_grupo_morfo` la fusiona (columnSpan > 1);
+        se detecta así, en vez de llevar la cuenta aparte, para no poder
+        desincronizarse si algún grupo cambia de orden más adelante.
+        """
+        etiquetas = []
+        contador = 0
+        for fila in range(self.tabla_morfo.rowCount()):
+            if self.tabla_morfo.columnSpan(fila, 0) > 1:
+                etiquetas.append("")
+            else:
+                contador += 1
+                etiquetas.append(str(contador))
+        self.tabla_morfo.setVerticalHeaderLabels(etiquetas)
+
     def _calcular_g3_g4(self, g1: dict):
         """
         Calcula los Grupos 3 (cauce principal) y 4 (pendiente de cuenca +
@@ -1738,6 +1773,7 @@ class HydroAndinaProDialog(QDialog):
             # (el scroll de la pestaña, ya existente, se encarga del resto
             # si la ventana es más chica que el contenido).
             ajustar_alto_tabla(self.tabla_morfo, filas_visibles_max=60)
+            self._renumerar_tabla_morfo()
 
             if g6["alerta_flujo_detritos"]:
                 QMessageBox.warning(self, "Alerta de flujo de detritos", g6["mensaje_alerta"])
@@ -1774,7 +1810,17 @@ class HydroAndinaProDialog(QDialog):
         # Área (km²) -- el % permite distribuir el Área total ya calculada
         # en la Pestaña 2 (Morfometría) en vez de tener que calcular a mano
         # cuántos km² representa cada cobertura.
-        self.tabla_cn = QTableWidget(len(curve_number.TABLA_USOS_ANDINOS_DEFAULT), 7)
+        #
+        # Se agrega UNA fila más al final para el TOTAL acumulado de "%
+        # cuenca" y "Área (km²)": el usuario necesita ver de un vistazo si
+        # el reparto por coberturas realmente suma 100% y si el área
+        # repartida coincide con la de la Pestaña 2, sin tener que sumar a
+        # mano. self._n_filas_uso_suelo_cn guarda cuántas de las filas son
+        # de DATO (las demás rutinas que leen la tabla deben iterar solo
+        # hasta ahí, no hasta rowCount(), para no tratar la fila TOTAL
+        # como si fuera una cobertura más).
+        self._n_filas_uso_suelo_cn = len(curve_number.TABLA_USOS_ANDINOS_DEFAULT)
+        self.tabla_cn = QTableWidget(self._n_filas_uso_suelo_cn + 1, 7)
         self.tabla_cn.setHorizontalHeaderLabels(
             ["Uso de suelo", "CN-A", "CN-B", "CN-C", "CN-D", "% cuenca", "Área (km²)"])
         for i, uso in enumerate(curve_number.TABLA_USOS_ANDINOS_DEFAULT):
@@ -1785,6 +1831,28 @@ class HydroAndinaProDialog(QDialog):
             self.tabla_cn.setItem(i, 4, QTableWidgetItem(str(uso.cn_d)))
             self.tabla_cn.setItem(i, 5, QTableWidgetItem("0.0"))
             self.tabla_cn.setItem(i, 6, QTableWidgetItem("0.0"))
+
+        fila_total = self._n_filas_uso_suelo_cn
+        item_total = QTableWidgetItem("TOTAL")
+        fuente_total = item_total.font()
+        fuente_total.setBold(True)
+        item_total.setFont(fuente_total)
+        item_total.setFlags(item_total.flags() & ~Qt.ItemIsEditable)
+        self.tabla_cn.setItem(fila_total, 0, item_total)
+        for col in (1, 2, 3, 4):
+            relleno = QTableWidgetItem("")
+            relleno.setFlags(relleno.flags() & ~Qt.ItemIsEditable)
+            self.tabla_cn.setItem(fila_total, col, relleno)
+        for col in (5, 6):
+            # Placeholder: el valor real lo escribe _actualizar_totales_tabla_cn()
+            # apenas termine de construirse la pestaña. No editable: es un
+            # resultado calculado, no un dato que el usuario deba tocar.
+            celda_total = QTableWidgetItem("0.0")
+            celda_total.setFont(fuente_total)
+            celda_total.setFlags(celda_total.flags() & ~Qt.ItemIsEditable)
+            self.tabla_cn.setItem(fila_total, col, celda_total)
+        self.tabla_cn.itemChanged.connect(self._on_tabla_cn_item_changed)
+        self._actualizar_totales_tabla_cn()
         # "Uso de suelo" tiene nombres largos (hasta ~49 caracteres, p.ej.
         # "Pastos naturales (ichu / ratio pobre-degradado)"), pero su ancho
         # NATURAL (ResizeToContents) ya cabe cómodo en la ventana (~700px
@@ -1946,7 +2014,7 @@ class HydroAndinaProDialog(QDialog):
         v_inf.addWidget(QLabel(
             "<b>Hietograma de prueba</b> (incrementos de lluvia total en mm, separados por coma). "
             "Sirve para explorar y calibrar los modelos aquí; el cálculo definitivo usa el hietograma "
-            "de la Pestaña 7."))
+            "de la Pestaña 6."))
         h_hieto_inf = QHBoxLayout()
         self.edit_hietograma_infiltracion = QLineEdit("2,4,8,15,28,22,14,9,6,4,3,2")
         h_hieto_inf.addWidget(self.edit_hietograma_infiltracion)
@@ -1957,6 +2025,15 @@ class HydroAndinaProDialog(QDialog):
         self.spin_dt_infiltracion.setValue(0.5)
         h_hieto_inf.addWidget(self.spin_dt_infiltracion)
         v_inf.addLayout(h_hieto_inf)
+
+        h_sync_inf = QHBoxLayout()
+        btn_sync_hieto_inf = QPushButton(
+            "Usar el hietograma de diseño de la Pestaña 6 (misma forma y duración)")
+        btn_sync_hieto_inf.clicked.connect(self._on_sincronizar_hietograma_infiltracion)
+        limitar_ancho_boton(btn_sync_hieto_inf)
+        h_sync_inf.addWidget(btn_sync_hieto_inf)
+        h_sync_inf.addStretch()
+        v_inf.addLayout(h_sync_inf)
 
         h_sel_inf = QHBoxLayout()
         h_sel_inf.addWidget(QLabel("Modelo:"))
@@ -2316,6 +2393,39 @@ class HydroAndinaProDialog(QDialog):
         texto = self.edit_hietograma_infiltracion.text().strip()
         return [float(t) for t in re.findall(r"-?\d+(?:\.\d+)?", texto)]
 
+    def _on_sincronizar_hietograma_infiltracion(self):
+        """
+        Copia el hietograma de PRUEBA de esta pestaña desde el hietograma
+        de DISEÑO real de la Pestaña 6 (misma forma, mismos incrementos,
+        mismo Δt) -- así los modelos de infiltración se ven y se calibran
+        sobre la misma duración de tormenta que el caudal de diseño
+        termina usando, en vez de sobre el hietograma de 12 intervalos ×
+        0.5 h que trae el campo por defecto, que puede durar mucho menos
+        (o más) que la tormenta real del proyecto.
+        """
+        if not hasattr(self, "edit_hietograma"):
+            QMessageBox.warning(
+                self, "Pestaña 6 no disponible",
+                "No se encontró el hietograma de la Pestaña 6 en esta sesión.")
+            return
+        try:
+            hietograma = self._leer_hietograma_actual()
+        except Exception:
+            hietograma = []
+        if not hietograma:
+            QMessageBox.warning(
+                self, "Sin hietograma en la Pestaña 6",
+                "Genere primero el hietograma de diseño en la Pestaña 6 (sección de transformación "
+                "lluvia-escorrentía) antes de sincronizarlo aquí.")
+            return
+        self.edit_hietograma_infiltracion.setText(",".join(f"{v:.2f}" for v in hietograma))
+        self.spin_dt_infiltracion.setValue(self.spin_dt_h.value())
+        QMessageBox.information(
+            self, "Hietograma sincronizado",
+            f"Se copiaron {len(hietograma)} intervalos de Δt={self.spin_dt_h.value()} h "
+            f"({len(hietograma) * self.spin_dt_h.value():.1f} h de duración total) desde la "
+            "Pestaña 6.")
+
     def parametros_infiltracion(self, clave=None):
         """Parámetros del modelo de infiltración configurado en la
         Pestaña 3, para que la Pestaña 7 pueda reutilizarlos sin duplicar
@@ -2607,7 +2717,7 @@ class HydroAndinaProDialog(QDialog):
         area_total_km2 = g1["A"]
         try:
             suma_pct = 0.0
-            for row in range(self.tabla_cn.rowCount()):
+            for row in range(self._n_filas_uso_suelo_cn):
                 item_pct = self.tabla_cn.item(row, 5)
                 texto_pct = item_pct.text().strip() if item_pct else ""
                 pct = float(texto_pct) if texto_pct else 0.0
@@ -2626,11 +2736,70 @@ class HydroAndinaProDialog(QDialog):
             f"Área distribuida: {area_total_km2:.4f} km² (Pestaña 2) repartida según el % de cada fila "
             f"(suma de %: {suma_pct:.1f}%).{aviso_suma}"
         )
+        # setItem() de cada fila ya disparó itemChanged y recalculó la fila
+        # TOTAL en cada vuelta del bucle; se fuerza una última vez para
+        # que quede exacta tras el aviso de suma (defensivo, no hay coste
+        # apreciable con ~7 filas).
+        self._actualizar_totales_tabla_cn()
+
+    def _on_tabla_cn_item_changed(self, item):
+        """Recalcula la fila TOTAL cada vez que el usuario edita a mano
+        una celda de % o de Área en tabla_cn (pegado, escritura directa),
+        no solo cuando pulsa el botón de distribuir por %."""
+        if item.row() == self._n_filas_uso_suelo_cn:
+            return  # la propia fila TOTAL se actualiza más abajo, sin recursión
+        if item.column() in (5, 6):
+            self._actualizar_totales_tabla_cn()
+
+    def _actualizar_totales_tabla_cn(self):
+        """
+        Escribe en la fila TOTAL la suma de "% cuenca" y de "Área (km²)"
+        de las filas de dato (0..self._n_filas_uso_suelo_cn - 1).
+
+        El % acumulado se colorea: verde si queda dentro de ±1% de 100
+        (mismo margen que ya usaba el aviso de _on_distribuir_area_por_porcentaje),
+        rojo si se aleja -- así el usuario ve de un vistazo, sin leer
+        ningún mensaje, si el reparto de coberturas está completo.
+        """
+        suma_pct = 0.0
+        suma_area = 0.0
+        for row in range(self._n_filas_uso_suelo_cn):
+            for col, acumulador in ((5, "pct"), (6, "area")):
+                item = self.tabla_cn.item(row, col)
+                texto = item.text().strip() if item else ""
+                if not texto:
+                    continue
+                try:
+                    valor = float(texto)
+                except ValueError:
+                    continue  # celda a medio editar; se ignora en la suma, no se interrumpe
+                if acumulador == "pct":
+                    suma_pct += valor
+                else:
+                    suma_area += valor
+
+        fila_total = self._n_filas_uso_suelo_cn
+        # blockSignals: escribir en la fila TOTAL dispara itemChanged, que
+        # volvería a llamar a este mismo método -- no es una recursión
+        # infinita (la guarda de _on_tabla_cn_item_changed ya ignora la
+        # fila TOTAL), pero sí un recálculo redundante en cada celda.
+        self.tabla_cn.blockSignals(True)
+        try:
+            item_pct = self.tabla_cn.item(fila_total, 5)
+            item_area = self.tabla_cn.item(fila_total, 6)
+            if item_pct is not None:
+                item_pct.setText(f"{suma_pct:.1f}")
+                color = QColor("#1B5E20") if abs(suma_pct - 100.0) <= 1.0 else QColor("#B3261E")
+                item_pct.setForeground(color)
+            if item_area is not None:
+                item_area.setText(f"{suma_area:.4f}")
+        finally:
+            self.tabla_cn.blockSignals(False)
 
     def _on_calcular_cn(self):
         try:
             usos = []
-            for row in range(self.tabla_cn.rowCount()):
+            for row in range(self._n_filas_uso_suelo_cn):
                 nombre = self.tabla_cn.item(row, 0).text()
                 cn_a = int(self.tabla_cn.item(row, 1).text())
                 cn_b = int(self.tabla_cn.item(row, 2).text())
@@ -2705,17 +2874,17 @@ class HydroAndinaProDialog(QDialog):
         self.spin_l_overland_km.setSpecialValueText("(usar Lc completo)")
         f_extra.addRow("Kerby — long. de flujo laminar inicial L (km, 0 = usar Lc):", self.spin_l_overland_km)
 
-        self.spin_lca_km = QDoubleSpinBox()
-        self.spin_lca_km.setRange(0.0, 200.0)
-        self.spin_lca_km.setDecimals(3)
-        self.spin_lca_km.setSpecialValueText("(usar 0.5 * Lc)")
-        f_extra.addRow("Snyder — distancia al centroide Lca (km, 0 = usar 0.5*Lc):", self.spin_lca_km)
+        self.spin_lca_km_tc = QDoubleSpinBox()
+        self.spin_lca_km_tc.setRange(0.0, 200.0)
+        self.spin_lca_km_tc.setDecimals(3)
+        self.spin_lca_km_tc.setSpecialValueText("(usar 0.5 * Lc)")
+        f_extra.addRow("Snyder — distancia al centroide Lca (km, 0 = usar 0.5*Lc):", self.spin_lca_km_tc)
 
-        self.spin_ct_snyder = QDoubleSpinBox()
-        self.spin_ct_snyder.setRange(0.5, 8.0)
-        self.spin_ct_snyder.setDecimals(2)
-        self.spin_ct_snyder.setValue(2.0)
-        f_extra.addRow("Snyder — coeficiente Ct (1.8-2.2 típico EE.UU.; calibrar):", self.spin_ct_snyder)
+        self.spin_ct_snyder_tc = QDoubleSpinBox()
+        self.spin_ct_snyder_tc.setRange(0.5, 8.0)
+        self.spin_ct_snyder_tc.setDecimals(2)
+        self.spin_ct_snyder_tc.setValue(2.0)
+        f_extra.addRow("Snyder — coeficiente Ct (1.8-2.2 típico EE.UU.; calibrar):", self.spin_ct_snyder_tc)
 
         self.spin_phi_espey = QDoubleSpinBox()
         self.spin_phi_espey.setRange(0.3, 2.0)
@@ -2921,7 +3090,7 @@ class HydroAndinaProDialog(QDialog):
                 s1085_real = se_real
 
             l_overland_km = self.spin_l_overland_km.value() or None
-            lca_km = self.spin_lca_km.value() or None
+            lca_km = self.spin_lca_km_tc.value() or None
 
             params = tc_methods.ParametrosCuenca(
                 lc_km=lc_km_usado,
@@ -2937,7 +3106,7 @@ class HydroAndinaProDialog(QDialog):
                 n_kerby=self.spin_n_kerby.value(),
                 l_overland_km=l_overland_km,
                 lca_km=lca_km,
-                ct_snyder=self.spin_ct_snyder.value(),
+                ct_snyder=self.spin_ct_snyder_tc.value(),
                 phi_espey=self.spin_phi_espey.value(),
                 area_impermeable_frac=self.spin_area_imperm.value(),
                 alpha_ventura_heras=self.spin_alpha_vh.value(),
@@ -5345,11 +5514,11 @@ class HydroAndinaProDialog(QDialog):
         f_env.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
         self.spin_env_dicken = QDoubleSpinBox()
         self.spin_env_dicken.setRange(1.0, 30.0)
-        self.spin_env_dicken.setValue(11.0)
+        self.spin_env_dicken.setValue(6.0)
         f_env.addRow("Coef. de Dicken C_D (6-9 interior, 14-28 costero/monzónico):", self.spin_env_dicken)
         self.spin_env_ryves = QDoubleSpinBox()
         self.spin_env_ryves.setRange(1.0, 15.0)
-        self.spin_env_ryves.setValue(8.5)
+        self.spin_env_ryves.setValue(6.8)
         f_env.addRow("Coef. de Ryves C_R (6.8 interior, hasta 10.2 costero/montaña):", self.spin_env_ryves)
         self.spin_env_myer = QDoubleSpinBox()
         self.spin_env_myer.setRange(0.001, 1.0)
@@ -5359,12 +5528,12 @@ class HydroAndinaProDialog(QDialog):
         f_env.addRow("Coef. de Myer C_M (0.005-1.0; 1.0 = envolvente máxima histórica EE.UU.):", self.spin_env_myer)
         self.spin_env_kresnik = QDoubleSpinBox()
         self.spin_env_kresnik.setRange(0.1, 5.0)
-        self.spin_env_kresnik.setValue(1.0)
+        self.spin_env_kresnik.setValue(0.5)
         f_env.addRow("Coef. de Kresnik C_K (0.2 llana, 2.0-3.0 alpina):", self.spin_env_kresnik)
         self.spin_env_fr = QDoubleSpinBox()
         self.spin_env_fr.setRange(1.0, 7.0)
         self.spin_env_fr.setDecimals(2)
-        self.spin_env_fr.setValue(4.5)
+        self.spin_env_fr.setValue(5.1)
         f_env.addRow(
             "K de Francou-Rodier (2-3 árido, 4-5 templado/tropical, 5.5-6 extremo mundial):", self.spin_env_fr)
         self.spin_env_ventura = QDoubleSpinBox()
@@ -5373,29 +5542,37 @@ class HydroAndinaProDialog(QDialog):
         f_env.addRow("Coef. de Ventura C_v (10-40 según torrencialidad):", self.spin_env_ventura)
         self.spin_env_usgs_kr = QDoubleSpinBox()
         self.spin_env_usgs_kr.setRange(0.5, 200.0)
-        self.spin_env_usgs_kr.setValue(10.0)
+        self.spin_env_usgs_kr.setValue(7.0)
         f_env.addRow("kR de Crippen & Bue (USGS, multiplicador regional):", self.spin_env_usgs_kr)
         self.spin_env_usgs_b = QDoubleSpinBox()
         self.spin_env_usgs_b.setRange(0.10, 1.0)
         self.spin_env_usgs_b.setDecimals(3)
-        self.spin_env_usgs_b.setValue(0.55)
+        self.spin_env_usgs_b.setValue(0.40)
         f_env.addRow("b de Crippen & Bue (exponente regional, típico 0.40-0.65):", self.spin_env_usgs_b)
         self.spin_env_iszkowski_ci = QDoubleSpinBox()
         self.spin_env_iszkowski_ci.setRange(0.01, 20.0)
         self.spin_env_iszkowski_ci.setDecimals(3)
-        self.spin_env_iszkowski_ci.setValue(1.0)
+        self.spin_env_iszkowski_ci.setValue(10.0)
         f_env.addRow("Ci de Iszkowski (coef. regional, sin rango bibliográfico acotado):", self.spin_env_iszkowski_ci)
         self.spin_env_iszkowski_m = QDoubleSpinBox()
         self.spin_env_iszkowski_m.setRange(0.001, 5.0)
         self.spin_env_iszkowski_m.setDecimals(3)
         self.spin_env_iszkowski_m.setValue(0.3)
-        f_env.addRow("m de Iszkowski (factor de forma de la cuenca, p.ej. A/L²):", self.spin_env_iszkowski_m)
+        f_env.addRow("m de Iszkowski (factor de forma A/L² — «Autocompletar» lo trae de la Pestaña 2):",
+                      self.spin_env_iszkowski_m)
         v_env.addLayout(f_env)
 
+        h_env_btn = QHBoxLayout()
+        btn_autocompletar_env = QPushButton("Autocompletar m de Iszkowski desde la morfometría")
+        btn_autocompletar_env.clicked.connect(self._on_autocompletar_envolventes)
+        limitar_ancho_boton(btn_autocompletar_env)
+        h_env_btn.addWidget(btn_autocompletar_env)
         btn_calc_env = QPushButton("Calcular fórmulas envolventes")
         btn_calc_env.clicked.connect(self._on_calcular_caudales_envolventes)
         limitar_ancho_boton(btn_calc_env)
-        v_env.addWidget(btn_calc_env)
+        h_env_btn.addWidget(btn_calc_env)
+        h_env_btn.addStretch()
+        v_env.addLayout(h_env_btn)
 
         self.tabla_resultado_envolventes = crear_tabla_parametros()
         v_env.addWidget(self.tabla_resultado_envolventes)
@@ -5404,7 +5581,7 @@ class HydroAndinaProDialog(QDialog):
         # ---------- Escuelas regionales adicionales ----------
         gb_escuelas = QGroupBox(
             "Escuelas regionales adicionales — Latinoamérica, Europa clásica y Norteamérica histórica "
-            "(Santa María, Springall, Rocha, Possenti, Lauterburg, Turazza, Kuichling, Murphy)"
+            "(Santa María, Springall, Rocha, Lauterburg, Turazza, Murphy)"
         )
         v_esc = QVBoxLayout(gb_escuelas)
         lbl_esc_info = QLabel(
@@ -5413,10 +5590,14 @@ class HydroAndinaProDialog(QDialog):
             "lo que absorbe la diferencia entre una cuenca chilena o brasileña y una altoandina peruana, "
             "así que deben calibrarse. <b>Turazza (Italia)</b> es la precursora del método racional: su "
             "factor 1/(1+0.05·Tc) REDUCE el caudal, al revés que la K de Témez que lo aumenta — compare "
-            "ambos. <b>Kuichling</b> y <b>Murphy</b> NO tienen coeficiente regional: son envolventes fijas "
-            "calibradas contra crecidas históricas de Nueva York y del este de EE. UU., por lo que fuera de "
-            "esas regiones son solo un techo histórico ajeno (esperable que salgan muy por encima del resto, "
-            "no las tome como estimación transferible). Reutilizan A, L, S, C, I y Tc ya ingresados arriba."
+            "ambos. <b>Murphy</b> NO tiene coeficiente regional: es una envolvente fija calibrada contra "
+            "crecidas históricas del este de EE. UU., por lo que fuera de esa región es solo un techo "
+            "histórico ajeno (esperable que salga muy por encima del resto, no lo tome como estimación "
+            "transferible). Reutilizan A, S, C, I y Tc ya ingresados arriba.<br><br>"
+            "<i>Possenti (Italia) y Kuichling (Nueva York) se retiraron de este cálculo: Possenti exige "
+            "repartir el área entre zona montañosa y de valle, un dato que rara vez se tiene con soltura "
+            "en una cuenca altoandina sin levantamiento de detalle, y Kuichling es una envolvente fija sin "
+            "ningún coeficiente que la adapte fuera de Nueva York.</i>"
         )
         lbl_esc_info.setWordWrap(True)
         v_esc.addWidget(lbl_esc_info)
@@ -5427,7 +5608,7 @@ class HydroAndinaProDialog(QDialog):
         self.spin_esc_longitud.setRange(0.01, 5000.0)
         self.spin_esc_longitud.setDecimals(3)
         self.spin_esc_longitud.setValue(10.0)
-        f_esc.addRow("Longitud del cauce principal L (km, para Possenti):", self.spin_esc_longitud)
+        f_esc.addRow("Longitud del cauce principal L (km, para Giandotti abajo):", self.spin_esc_longitud)
         self.spin_esc_p24 = QDoubleSpinBox()
         self.spin_esc_p24.setRange(1.0, 1000.0)
         self.spin_esc_p24.setValue(80.0)
@@ -5446,16 +5627,6 @@ class HydroAndinaProDialog(QDialog):
         self.spin_esc_rocha.setDecimals(3)
         self.spin_esc_rocha.setValue(2.5)
         f_esc.addRow("Coef. de Rocha C_r (1.5-5.0, factor regional brasileño):", self.spin_esc_rocha)
-        self.spin_esc_area_llana = QDoubleSpinBox()
-        self.spin_esc_area_llana.setRange(0.0, 100000.0)
-        self.spin_esc_area_llana.setDecimals(3)
-        self.spin_esc_area_llana.setValue(0.0)
-        f_esc.addRow("Área llana/de valle A_p (km², para Possenti; 0 = toda la cuenca es montañosa):",
-                      self.spin_esc_area_llana)
-        self.spin_esc_possenti = QDoubleSpinBox()
-        self.spin_esc_possenti.setRange(10.0, 300.0)
-        self.spin_esc_possenti.setValue(90.0)
-        f_esc.addRow("Coef. de Possenti C_p (70-120, torrencialidad):", self.spin_esc_possenti)
         self.spin_esc_lauterburg = QDoubleSpinBox()
         self.spin_esc_lauterburg.setRange(0.1, 6.0)
         self.spin_esc_lauterburg.setDecimals(3)
@@ -5482,7 +5653,7 @@ class HydroAndinaProDialog(QDialog):
         # ---------- Métodos complementarios con datos adicionales ----------
         gb_complementarios = QGroupBox(
             "Métodos complementarios que requieren datos adicionales "
-            "(Giandotti, Sokolovsky, Alekseev, Pettis, Fuller, Gumbel-FFA, Talbot)"
+            "(Giandotti, Sokolovsky, Alekseev, Fuller, Gumbel-FFA, Talbot)"
         )
         v_comp = QVBoxLayout(gb_complementarios)
         lbl_comp_info = QLabel(
@@ -5511,7 +5682,7 @@ class HydroAndinaProDialog(QDialog):
         self.spin_comp_lambda_giandotti = QDoubleSpinBox()
         self.spin_comp_lambda_giandotti.setRange(0.01, 1.0)
         self.spin_comp_lambda_giandotti.setDecimals(3)
-        self.spin_comp_lambda_giandotti.setValue(0.15)
+        self.spin_comp_lambda_giandotti.setValue(0.05)
         f_comp.addRow("λ de Giandotti (empírico, absorbe la conversión de unidades):",
                        self.spin_comp_lambda_giandotti)
         self.spin_comp_lamina_sokolovsky = QDoubleSpinBox()
@@ -5521,7 +5692,7 @@ class HydroAndinaProDialog(QDialog):
                        self.spin_comp_lamina_sokolovsky)
         self.spin_comp_duracion_sokolovsky = QDoubleSpinBox()
         self.spin_comp_duracion_sokolovsky.setRange(0.1, 200.0)
-        self.spin_comp_duracion_sokolovsky.setValue(6.0)
+        self.spin_comp_duracion_sokolovsky.setValue(2.0)
         f_comp.addRow("Duración de la crecida T (h, Sokolovsky):", self.spin_comp_duracion_sokolovsky)
         self.spin_comp_alekseev_hp = QDoubleSpinBox()
         self.spin_comp_alekseev_hp.setRange(0.001, 1.0)
@@ -5529,25 +5700,24 @@ class HydroAndinaProDialog(QDialog):
         self.spin_comp_alekseev_hp.setValue(0.0850)
         f_comp.addRow("Hp de Alekseev (lámina de lluvia en METROS, no mm):", self.spin_comp_alekseev_hp)
         self.spin_comp_alekseev_n = QDoubleSpinBox()
-        self.spin_comp_alekseev_n.setRange(0.1, 3.0)
+        self.spin_comp_alekseev_n.setRange(0.1, 5.0)
         self.spin_comp_alekseev_n.setDecimals(3)
-        self.spin_comp_alekseev_n.setValue(0.600)
+        self.spin_comp_alekseev_n.setValue(3.000)
         f_comp.addRow("n de Alekseev (exponente climático):", self.spin_comp_alekseev_n)
         self.spin_comp_alekseev_mu = QDoubleSpinBox()
         self.spin_comp_alekseev_mu.setRange(0.001, 1.0)
         self.spin_comp_alekseev_mu.setDecimals(3)
-        self.spin_comp_alekseev_mu.setValue(0.100)
-        f_comp.addRow("μ de Alekseev (vegetación/cobertura; con μ=1 sobreestima mucho, calibrar):",
+        # Por defecto, el MISMO coeficiente de escorrentía ya calculado
+        # en la Pestaña 4 (self.spin_coef_c, construida antes que esta
+        # pestaña): es la única estimación de cobertura/permeabilidad
+        # que el usuario ya determinó con criterio para esta cuenca, en
+        # vez de un valor genérico desconectado del resto del expediente.
+        # El botón "Autocompletar" de abajo lo vuelve a sincronizar si
+        # el usuario cambia el valor en la Pestaña 4 después.
+        self.spin_comp_alekseev_mu.setValue(
+            self.spin_coef_c.value() if hasattr(self, "spin_coef_c") else 0.500)
+        f_comp.addRow("μ de Alekseev (vegetación/cobertura; por defecto = coef. de escorrentía, Pestaña 4):",
                        self.spin_comp_alekseev_mu)
-        self.spin_comp_pettis_p = QDoubleSpinBox()
-        self.spin_comp_pettis_p.setRange(0.1, 200.0)
-        self.spin_comp_pettis_p.setValue(18.0)
-        f_comp.addRow("P de Pettis (precip. de Tr=100 años en 5 días, en CENTÍMETROS):", self.spin_comp_pettis_p)
-        self.spin_comp_pettis_cp = QDoubleSpinBox()
-        self.spin_comp_pettis_cp.setRange(0.1, 5.0)
-        self.spin_comp_pettis_cp.setDecimals(3)
-        self.spin_comp_pettis_cp.setValue(1.0)
-        f_comp.addRow("Cp de Pettis:", self.spin_comp_pettis_cp)
         self.spin_comp_q_medio = QDoubleSpinBox()
         self.spin_comp_q_medio.setRange(0.0, 100000.0)
         self.spin_comp_q_medio.setDecimals(3)
@@ -5566,7 +5736,7 @@ class HydroAndinaProDialog(QDialog):
         self.spin_comp_talbot_ct = QDoubleSpinBox()
         self.spin_comp_talbot_ct.setRange(0.05, 2.0)
         self.spin_comp_talbot_ct.setDecimals(3)
-        self.spin_comp_talbot_ct.setValue(0.450)
+        self.spin_comp_talbot_ct.setValue(0.200)
         f_comp.addRow("Ct de Talbot (~1.0 montañoso rocoso, ~0.2 llano permeable):", self.spin_comp_talbot_ct)
         v_comp.addLayout(f_comp)
 
@@ -5605,12 +5775,12 @@ class HydroAndinaProDialog(QDialog):
         f_sp.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
         self.spin_sp_area = QDoubleSpinBox()
         self.spin_sp_area.setRange(0.01, 100000.0)
-        self.spin_sp_area.setValue(30.0)
+        self.spin_sp_area.setValue(3.0)
         f_sp.addRow("Área mojada A (m², medida en la sección aforada):", self.spin_sp_area)
         self.spin_sp_radio_h = QDoubleSpinBox()
         self.spin_sp_radio_h.setRange(0.01, 500.0)
         self.spin_sp_radio_h.setDecimals(3)
-        self.spin_sp_radio_h.setValue(1.2)
+        self.spin_sp_radio_h.setValue(0.8)
         f_sp.addRow("Radio hidráulico R = A/P (m):", self.spin_sp_radio_h)
         self.spin_sp_pendiente = QDoubleSpinBox()
         self.spin_sp_pendiente.setRange(0.0001, 1.0)
@@ -5701,18 +5871,16 @@ class HydroAndinaProDialog(QDialog):
                 f"Crippen & Bue = {envolventes['crippen_bue_Q_m3s']} m³/s &nbsp;|&nbsp; "
                 f"Iszkowski = {envolventes['iszkowski_Q_m3s']} m³/s</p><hr>"
             )
-        escuelas = self.resultados_hidraulica_drenaje.get("Caudales escuelas regionales (8 fórmulas)")
+        escuelas = self.resultados_hidraulica_drenaje.get("Caudales escuelas regionales (6 fórmulas)")
         if escuelas:
             hay_algo = True
             html += (
                 "<p><b>Escuelas regionales (Latinoamérica / Europa clásica / Norteamérica histórica)</b><br>"
                 f"Santa María = {escuelas['santa_maria_Q_m3s']} m³/s &nbsp;|&nbsp; "
                 f"Springall = {escuelas['springall_Q_m3s']} m³/s &nbsp;|&nbsp; "
-                f"Rocha = {escuelas['rocha_Q_m3s']} m³/s &nbsp;|&nbsp; "
-                f"Possenti = {escuelas['possenti_Q_m3s']} m³/s<br>"
+                f"Rocha = {escuelas['rocha_Q_m3s']} m³/s<br>"
                 f"Lauterburg = {escuelas['lauterburg_Q_m3s']} m³/s &nbsp;|&nbsp; "
                 f"Turazza = {escuelas['turazza_Q_m3s']} m³/s &nbsp;|&nbsp; "
-                f"Kuichling = {escuelas['kuichling_Q_m3s']} m³/s &nbsp;|&nbsp; "
                 f"Murphy = {escuelas['murphy_Q_m3s']} m³/s</p><hr>"
             )
         complementarios = self.resultados_hidraulica_drenaje.get(
@@ -5721,7 +5889,7 @@ class HydroAndinaProDialog(QDialog):
             hay_algo = True
             partes = []
             for etiqueta, clave in [("Giandotti", "giandotti"), ("Sokolovsky", "sokolovsky"),
-                                     ("Alekseev", "alekseev"), ("Pettis", "pettis"),
+                                     ("Alekseev", "alekseev"),
                                      ("Fuller", "fuller"), ("Gumbel-FFA", "gumbel_ffa")]:
                 if f"{clave}_Q_m3s" in complementarios:
                     partes.append(f"{etiqueta} = {complementarios[f'{clave}_Q_m3s']} m³/s")
@@ -5851,8 +6019,10 @@ class HydroAndinaProDialog(QDialog):
             QMessageBox.critical(self, "Error generando el hietograma", str(e))
 
     def _on_autocompletar_caudales_directos(self):
+        mensajes = []
         if self.morfometria_resultados.get("g1"):
             self.spin_dir_a.setValue(self.morfometria_resultados["g1"]["A"])
+            mensajes.append("A")
         tc_seleccionado = None
         if self.tc_resultados:
             id_boton = self.grupo_radio_metodo.checkedId()
@@ -5864,11 +6034,42 @@ class HydroAndinaProDialog(QDialog):
                         tc_seleccionado = datos_tc["Tc_horas"]
         if tc_seleccionado:
             self.spin_dir_tc.setValue(tc_seleccionado)
+            mensajes.append("Tc")
         if self.morfometria_resultados.get("g3"):
             self.spin_dir_s.setValue(self.morfometria_resultados["g3"]["Se"] * 100.0)
+            mensajes.append("S")
         elif self.morfometria_resultados.get("g4"):
             self.spin_dir_s.setValue(self.morfometria_resultados["g4"]["S_cuenca_pct"])
-        QMessageBox.information(self, "Autocompletado", "Se autocompletaron A, Tc y S con los valores disponibles.")
+            mensajes.append("S")
+
+        # Coeficiente de escorrentía C: el mismo ya determinado en la
+        # Pestaña 4 (método FAA), en vez de dejar un valor genérico
+        # desconectado del resto del expediente.
+        if hasattr(self, "spin_coef_c"):
+            self.spin_dir_c.setValue(self.spin_coef_c.value())
+            mensajes.append("C (Pestaña 4)")
+
+        # Intensidad de lluvia I: se evalúa la ecuación IDF combinada
+        # (Pestaña 5) en t = Tc y en el Tr actualmente elegido, en vez de
+        # dejar el valor genérico de 40 mm/h con el que arranca el
+        # spinbox. Requiere haber calculado la IDF combinada en la
+        # Pestaña 5 y tener un Tc > 0 disponible.
+        combinada = (self.idf_resultados or {}).get("combinada")
+        tr_sel, _ = self._tr_diseno_seleccionado()
+        if combinada and tr_sel and self.spin_dir_tc.value() > 0:
+            t_min = self.spin_dir_tc.value() * 60.0
+            intensidad = combinada["K"] * (tr_sel ** combinada["m"]) / (t_min ** combinada["n_exp"])
+            self.spin_dir_i.setValue(intensidad)
+            mensajes.append(f"I = {intensidad:.2f} mm/h (curva IDF combinada, Tr={tr_sel}, t=Tc)")
+
+        if not mensajes:
+            QMessageBox.warning(
+                self, "Nada que autocompletar",
+                "Calcule primero la morfometría (pestaña 2), el Tc (pestaña 4) y/o la curva IDF "
+                "combinada (pestaña 5)."
+            )
+            return
+        QMessageBox.information(self, "Autocompletado", "Se autocompletó:\n- " + "\n- ".join(mensajes))
 
     def _on_calcular_caudales_directos(self):
         try:
@@ -5903,6 +6104,19 @@ class HydroAndinaProDialog(QDialog):
                 self._actualizar_texto_resumen_hidraulica()
         except direct_discharge_methods.DirectDischargeError as e:
             QMessageBox.warning(self, "No se pudo calcular", str(e))
+
+    def _on_autocompletar_envolventes(self):
+        g2 = self.morfometria_resultados.get("g2")
+        if not g2 or g2.get("Ff") is None:
+            QMessageBox.warning(
+                self, "Falta la morfometría",
+                "Calcule primero el Grupo 2 (forma de la cuenca) en la Pestaña 2 — de ahí se toma "
+                "Ff = A/Lb², el factor de forma que pide Iszkowski.")
+            return
+        self.spin_env_iszkowski_m.setValue(g2["Ff"])
+        QMessageBox.information(
+            self, "Autocompletado",
+            f"m de Iszkowski = {g2['Ff']} (Ff = A/Lb² de la Pestaña 2, Grupo 2 — forma de la cuenca).")
 
     def _on_calcular_caudales_envolventes(self):
         try:
@@ -6222,13 +6436,11 @@ class HydroAndinaProDialog(QDialog):
         if self.morfometria_resultados.get("lc_km"):
             self.spin_esc_longitud.setValue(self.morfometria_resultados["lc_km"])
             mensajes.append("L (longitud del cauce principal) desde la morfometría (pestaña 2).")
-        if self.p24_disenio:
-            # Se toma el Tr más alto disponible: es el escenario de diseño
-            # más desfavorable, coherente con el carácter de "envolvente"
-            # de las fórmulas de esta sección.
-            tr_max = max(self.p24_disenio.keys())
-            self.spin_esc_p24.setValue(self.p24_disenio[tr_max])
-            mensajes.append(f"P24 = {self.p24_disenio[tr_max]} mm (Tr={tr_max} años) desde la pestaña 5.")
+        tr_sel, p24_sel = self._tr_diseno_seleccionado()
+        if tr_sel is not None:
+            self.spin_esc_p24.setValue(p24_sel)
+            mensajes.append(f"P24 = {p24_sel} mm (Tr={tr_sel} años, el elegido en el desplegable de "
+                            "periodo de retorno de esta pestaña) desde la pestaña 5.")
         if not mensajes:
             QMessageBox.warning(
                 self, "Nada que autocompletar",
@@ -6237,22 +6449,54 @@ class HydroAndinaProDialog(QDialog):
             return
         QMessageBox.information(self, "Autocompletado", "Se autocompletó:\n- " + "\n- ".join(mensajes))
 
+    def _tr_diseno_seleccionado(self):
+        """
+        (Tr, P24) del periodo de retorno actualmente elegido en el
+        desplegable "Periodo de retorno Tr" de esta pestaña
+        (`combo_tr_hidrograma`), que es el mismo Tr con el que se generó
+        el hietograma/hidrograma de diseño.
+
+        POR QUÉ NO max(self.p24_disenio.keys()): así estaba antes, y
+        como la lista estándar de periodos de retorno siempre incluye
+        Tr=1000, todas las fórmulas de esta sección (escuelas regionales,
+        Alekseev) quedaban calculadas SIEMPRE para Tr=1000 años, sin
+        importar qué Tr hubiera elegido el usuario para el resto del
+        diseño -- un caudal de una probabilidad de excedencia distinta a
+        la que el proyecto realmente usa, calculado en silencio.
+
+        Devuelve (None, None) si el usuario aún no calculó el análisis
+        de frecuencia o no eligió un Tr.
+        """
+        tr = self.combo_tr_hidrograma.currentData()
+        if tr is None or not self.p24_disenio:
+            return None, None
+        p24 = self.p24_disenio.get(tr)
+        if p24 is None:
+            # El Tr elegido es un T-Diseño personalizado que no quedó
+            # registrado en p24_disenio (solo en el combo): se deriva de
+            # la distribución de mejor ajuste, igual que al agregarlo.
+            mejor = getattr(self, "mejor_ajuste_clave", None)
+            if mejor and self.resultados_frecuencia.get(mejor):
+                dist = self.resultados_frecuencia[mejor]["distribucion"]
+                p24 = round(dist.cuantil(1.0 - 1.0 / tr), 2)
+            else:
+                return None, None
+        return tr, p24
+
     def _on_calcular_escuelas_regionales(self):
         try:
             area_km2 = self.spin_dir_a.value()
-            area_llana = min(self.spin_esc_area_llana.value(), area_km2)
             r = direct_discharge_methods.comparar_escuelas_regionales(
-                area_km2=area_km2, longitud_cauce_km=self.spin_esc_longitud.value(),
+                area_km2=area_km2,
                 pendiente_pct=self.spin_dir_s.value(), p24_mm=self.spin_esc_p24.value(),
                 coef_escorrentia_c=self.spin_dir_c.value(), intensidad_mm_h=self.spin_dir_i.value(),
-                tc_horas=self.spin_dir_tc.value(), area_llana_km2=area_llana,
+                tc_horas=self.spin_dir_tc.value(),
                 coeficiente_santa_maria=self.spin_esc_santa_maria.value(),
                 coeficiente_springall=self.spin_esc_springall.value(),
                 coeficiente_rocha=self.spin_esc_rocha.value(),
-                coeficiente_possenti=self.spin_esc_possenti.value(),
                 coeficiente_lauterburg=self.spin_esc_lauterburg.value(),
             )
-            self.resultados_hidraulica_drenaje["Caudales escuelas regionales (8 fórmulas)"] = {
+            self.resultados_hidraulica_drenaje["Caudales escuelas regionales (6 fórmulas)"] = {
                 "tipo": "Caudales escuelas regionales",
                 **{f"{clave}_Q_m3s": datos["Q_m3_s"] for clave, datos in r.items()},
             }
@@ -6260,11 +6504,9 @@ class HydroAndinaProDialog(QDialog):
                 ("Santa María (Chile)", r["santa_maria"]["Q_m3_s"], "m³/s", r["santa_maria"]["nota"]),
                 ("Springall (México)", r["springall"]["Q_m3_s"], "m³/s", r["springall"]["nota"]),
                 ("Rocha (Brasil)", r["rocha"]["Q_m3_s"], "m³/s", r["rocha"]["nota"]),
-                ("Possenti (Italia)", r["possenti"]["Q_m3_s"], "m³/s", r["possenti"]["nota"]),
                 ("Lauterburg (Suiza)", r["lauterburg"]["Q_m3_s"], "m³/s", r["lauterburg"]["nota"]),
                 ("Turazza (Italia)", r["turazza"]["Q_m3_s"], "m³/s",
                  f"factor de amortiguamiento = {r['turazza']['factor_amortiguamiento']} — {r['turazza']['nota']}"),
-                ("Kuichling (Nueva York)", r["kuichling"]["Q_m3_s"], "m³/s", r["kuichling"]["nota"]),
                 ("Murphy (este de EE. UU.)", r["murphy"]["Q_m3_s"], "m³/s", r["murphy"]["nota"]),
             ])
             self._actualizar_grafico_comparacion_caudales()
@@ -6286,11 +6528,21 @@ class HydroAndinaProDialog(QDialog):
             if lamina > 0:
                 self.spin_comp_lamina_sokolovsky.setValue(lamina)
                 mensajes.append(f"Lámina de escorrentía = {lamina:.2f} mm (lluvia efectiva del hidrograma).")
-        if self.p24_disenio:
-            tr_max = max(self.p24_disenio.keys())
+        tr_sel, p24_sel = self._tr_diseno_seleccionado()
+        if tr_sel is not None:
             # Alekseev pide la lámina en METROS, no en mm.
-            self.spin_comp_alekseev_hp.setValue(self.p24_disenio[tr_max] / 1000.0)
-            mensajes.append(f"Hp de Alekseev = {self.p24_disenio[tr_max] / 1000.0:.4f} m (P24 de Tr={tr_max}).")
+            self.spin_comp_alekseev_hp.setValue(p24_sel / 1000.0)
+            mensajes.append(f"Hp de Alekseev = {p24_sel / 1000.0:.4f} m (P24 del Tr elegido en el "
+                            f"desplegable de esta pestaña, Tr={tr_sel}).")
+        # μ (vegetación/cobertura) de Alekseev: por defecto, el mismo
+        # coeficiente de escorrentía ya calculado en la Pestaña 4 -- es la
+        # única estimación de cobertura/permeabilidad que el usuario ya
+        # determinó con criterio para esta misma cuenca, en vez de dejar
+        # un valor genérico desconectado del resto del expediente.
+        if getattr(self, "spin_coef_c", None) is not None:
+            self.spin_comp_alekseev_mu.setValue(self.spin_coef_c.value())
+            mensajes.append(f"μ de Alekseev = {self.spin_coef_c.value()} (coeficiente de escorrentía "
+                            "de la Pestaña 4).")
         if not mensajes:
             QMessageBox.warning(
                 self, "Nada que autocompletar",
@@ -6332,13 +6584,6 @@ class HydroAndinaProDialog(QDialog):
             )
             resultados["alekseev_Q_m3s"] = r_ale["Q_m3_s"]
             filas.append(("Alekseev", r_ale["Q_m3_s"], "m³/s", r_ale["nota"]))
-
-            r_pet = direct_discharge_methods.caudal_pettis(
-                area_km2=area_km2, longitud_cauce_km=longitud_km,
-                p100_5dias_cm=self.spin_comp_pettis_p.value(), coeficiente_cp=self.spin_comp_pettis_cp.value(),
-            )
-            resultados["pettis_Q_m3s"] = r_pet["Q_m3_s"]
-            filas.append(("Pettis (USACE)", r_pet["Q_m3_s"], "m³/s", r_pet["nota"]))
 
             # Fuller y Gumbel-FFA solo tienen sentido si el usuario aportó
             # la serie AFORADA de caudales máximos anuales.
@@ -6441,12 +6686,12 @@ class HydroAndinaProDialog(QDialog):
                                      ("Bürkli-Ziegler", "burkli_ziegler"), ("Crippen & Bue", "crippen_bue"),
                                      ("Iszkowski", "iszkowski")]:
                 _agregar(etiqueta, envolventes[f"{clave}_Q_m3s"], "Envolvente")
-        escuelas = self.resultados_hidraulica_drenaje.get("Caudales escuelas regionales (8 fórmulas)")
+        escuelas = self.resultados_hidraulica_drenaje.get("Caudales escuelas regionales (6 fórmulas)")
         if escuelas:
             for etiqueta, clave in [("Santa María", "santa_maria"), ("Springall", "springall"),
-                                     ("Rocha", "rocha"), ("Possenti", "possenti"),
+                                     ("Rocha", "rocha"),
                                      ("Lauterburg", "lauterburg"), ("Turazza", "turazza"),
-                                     ("Kuichling", "kuichling"), ("Murphy", "murphy")]:
+                                     ("Murphy", "murphy")]:
                 _agregar(etiqueta, escuelas[f"{clave}_Q_m3s"], "Escuela regional")
         complementarios = self.resultados_hidraulica_drenaje.get(
             "Caudales complementarios (Giandotti/Sokolovsky/...)")
@@ -6454,7 +6699,7 @@ class HydroAndinaProDialog(QDialog):
             # Fuller y Gumbel-FFA solo están presentes si el usuario aportó
             # la serie aforada; Talbot nunca entra (devuelve m², no m³/s).
             for etiqueta, clave in [("Giandotti", "giandotti"), ("Sokolovsky", "sokolovsky"),
-                                     ("Alekseev", "alekseev"), ("Pettis", "pettis"),
+                                     ("Alekseev", "alekseev"),
                                      ("Fuller", "fuller"), ("Gumbel-FFA", "gumbel_ffa")]:
                 if f"{clave}_Q_m3s" in complementarios:
                     _agregar(etiqueta, complementarios[f"{clave}_Q_m3s"], "Complementario")
@@ -7243,243 +7488,946 @@ class HydroAndinaProDialog(QDialog):
     # TAB 8: Módulos Avanzados (completación de datos, precipitación
     # areal, oferta hídrica)
     # ------------------------------------------------------------------
-    def _build_tab_hidraulica_2d(self):
+    # ==================================================================
+    # PESTAÑA 8 — HANDLERS
+    # ==================================================================
+    def _ruta_dem_2d(self):
+        """Ráster de terreno a usar: el MDE recortado de la Pestaña 1 si
+        la casilla está marcada, o la capa elegida en el desplegable."""
+        if self.check_usar_dem_cuenca.isChecked() and self.dem_clip_path:
+            return self.dem_clip_path, "MDE recortado a la cuenca (Pestaña 1)"
+        capa = self.combo_dem_2d.currentLayer()
+        if capa is None:
+            return None, None
+        return capa.source(), capa.name()
+
+    def _on_cargar_dominio_2d(self):
+        ruta, origen = self._ruta_dem_2d()
+        if not ruta:
+            QMessageBox.warning(
+                self, "Falta el terreno",
+                "Seleccione un ráster de terreno, o delimite la cuenca en la Pestaña 1 para usar "
+                "su MDE recortado.")
+            return
+        try:
+            from osgeo import gdal
+            ds = gdal.Open(ruta)
+            if ds is None:
+                raise RuntimeError(f"No se pudo abrir el ráster: {ruta}")
+            gt = ds.GetGeoTransform()
+            banda = ds.GetRasterBand(1)
+            nodata = banda.GetNoDataValue()
+            arr = banda.ReadAsArray().astype(np.float64)
+            wkt = ds.GetProjection()
+            ds = None
+
+            # NoData -> NaN: el solver lo interpreta como fuera del
+            # dominio (muro impermeable), que es exactamente lo que es el
+            # exterior de la cuenca.
+            if nodata is not None:
+                arr = np.where(arr == nodata, np.nan, arr)
+            arr = np.where(arr < -9000.0, np.nan, arr)
+
+            paso = self.spin_remuestreo_2d.value()
+            if paso > 1:
+                arr = arr[::paso, ::paso]
+            dx = abs(gt[1]) * paso
+            dy = abs(gt[5]) * paso
+            x_min = gt[0]
+            y_max = gt[3]
+
+            if arr.shape[0] < 3 or arr.shape[1] < 3:
+                QMessageBox.warning(
+                    self, "Dominio demasiado pequeño",
+                    f"Tras remuestrear con factor {paso} el dominio queda en "
+                    f"{arr.shape[0]}x{arr.shape[1]} celdas. Reduzca el factor de remuestreo.")
+                return
+
+            self.dominio_2d = {
+                "zb": arr, "dx": dx, "dy": dy, "x_min": x_min, "y_max": y_max,
+                "wkt": wkt, "origen": origen, "paso": paso,
+            }
+            self.spin_fila_perfil_2d.setMaximum(arr.shape[0] - 1)
+            self.spin_fila_perfil_2d.setValue(arr.shape[0] // 2)
+
+            validas = int(np.sum(np.isfinite(arr)))
+            z_validas = arr[np.isfinite(arr)]
+            # El caudal de entrada entra en la estimación porque suele
+            # ser el que fija el paso de tiempo (ver _paso_por_fuentes).
+            caudal_max = 0.0
+            for fila_tabla in range(self.tabla_entradas_2d.rowCount()):
+                item = self.tabla_entradas_2d.item(fila_tabla, 2)
+                if item and item.text().strip():
+                    try:
+                        caudal_max = max(caudal_max,
+                                          float(item.text().replace(",", ".")))
+                    except ValueError:
+                        pass
+            if caudal_max <= 0 and self.hidrograma_resultado:
+                caudal_max = float(self.hidrograma_resultado.get("caudal_pico_m3s") or 0.0)
+
+            coste = estimar_coste(
+                arr.shape[0], arr.shape[1], self.spin_tiempo_2d.value(), dx, dy,
+                esquema=self.combo_esquema_2d.currentData(),
+                cfl=self.spin_cfl_2d.value(), n_manning=self.spin_manning_2d.value(),
+                caudal_entrada_max=caudal_max)
+
+            poblar_tabla_parametros(self.tabla_dominio_2d, [
+                ("Origen del terreno", origen, ""),
+                ("Filas × columnas de la malla", f"{arr.shape[0]} × {arr.shape[1]}", "celdas",
+                 f"factor de remuestreo aplicado: {paso}"),
+                ("Tamaño de celda", f"{dx:.2f} × {dy:.2f}", "m"),
+                ("Celdas dentro del dominio", validas, "",
+                 f"{validas / arr.size * 100:.1f} % del rectángulo; el resto es NoData"),
+                ("Extensión del dominio", f"{arr.shape[1] * dx:.0f} × {arr.shape[0] * dy:.0f}", "m"),
+                ("Cota mínima", round(float(z_validas.min()), 2), "m s.n.m."),
+                ("Cota máxima", round(float(z_validas.max()), 2), "m s.n.m."),
+                ("Paso de tiempo estimado", round(coste["dt_estimado_s"], 4), "s",
+                 "para un calado típico de 1 m; el real se recalcula en cada paso"),
+                ("Pasos de tiempo estimados", f"{coste['pasos_estimados']:,}", ""),
+                ("Tiempo de cálculo estimado", round(coste["minutos_estimados"], 1), "min",
+                 "orden de magnitud, no una promesa: depende del equipo"),
+            ], filas_visibles_max=12)
+
+            # El color advierte del coste ANTES de lanzar: una simulación
+            # de horas conviene detectarla ahora y no a los veinte
+            # minutos de espera.
+            minutos = coste["minutos_estimados"]
+            tipo = "exito" if minutos < 3 else ("atencion" if minutos < 20 else "alerta")
+            self.cuadro_dominio_2d.actualizar(
+                titulo="DOMINIO DE CÁLCULO 2D",
+                valor_principal=f"{arr.shape[0]} × {arr.shape[1]} celdas de {dx:.1f} m",
+                subtitulo=origen,
+                metricas=[("Celdas activas", f"{validas:,}"),
+                           ("Δt estimado", f"{coste['dt_estimado_s']:.3f} s"),
+                           ("Pasos", f"{coste['pasos_estimados']:,}"),
+                           ("Cálculo estimado", f"{minutos:.1f} min")],
+                leyenda=("Coste razonable: puede ejecutar directamente." if tipo == "exito" else
+                          ("Coste apreciable: considere subir el factor de remuestreo para tantear "
+                           "y afinar después." if tipo == "atencion" else
+                           "COSTE MUY ALTO. Suba el factor de remuestreo o reduzca el tiempo "
+                           "simulado antes de ejecutar; recuerde que al duplicar la resolución el "
+                           "coste se multiplica por ocho.")),
+                tipo=tipo)
+        except Exception as e:
+            QMessageBox.critical(self, "Error al cargar el dominio", str(e))
+
+    def _on_entrada_automatica_2d(self):
         """
-        Pestaña 8 — Modelamiento Hidráulico 2D.
+        Sitúa la entrada en la celda de mayor cota del dominio activo,
+        que en un MDE recortado a la cuenca es la cabecera. Es un punto
+        de partida razonable para tantear, no un sustituto de situar la
+        entrada donde el proyecto la requiere.
+        """
+        if not getattr(self, "dominio_2d", None):
+            QMessageBox.warning(self, "Falta el dominio",
+                                 "Cargue primero el dominio de cálculo.")
+            return
+        zb = self.dominio_2d["zb"]
+        validas = np.isfinite(zb)
+        # Se excluye el borde: una entrada en el contorno se vaciaría de
+        # inmediato por la condición de salida libre.
+        interior = np.zeros_like(validas)
+        interior[1:-1, 1:-1] = True
+        candidatas = validas & interior
+        if not candidatas.any():
+            QMessageBox.warning(self, "Dominio sin interior",
+                                 "El dominio no tiene celdas interiores válidas.")
+            return
+        z = np.where(candidatas, zb, -np.inf)
+        fila, columna = np.unravel_index(int(np.argmax(z)), z.shape)
+        self.tabla_entradas_2d.setItem(0, 0, QTableWidgetItem(str(int(fila))))
+        self.tabla_entradas_2d.setItem(0, 1, QTableWidgetItem(str(int(columna))))
+        self.tabla_entradas_2d.setItem(0, 2, QTableWidgetItem("0"))
+        QMessageBox.information(
+            self, "Entrada situada",
+            f"Entrada colocada en la fila {fila}, columna {columna} "
+            f"(cota {zb[fila, columna]:.2f} m s.n.m.), la celda más alta del interior del "
+            "dominio.\n\nCon caudal 0 y la casilla marcada, se usará el hidrograma de la "
+            "Pestaña 6.")
 
-        No reimplementa el solucionador: actúa como PUENTE hacia el
-        plugin HYDRA2DGPU (ver core/hydra2d_bridge.py), que resuelve las
-        ecuaciones de aguas someras por volúmenes finitos sobre GPU.
+    def _leer_entradas_2d(self):
+        """Lee la tabla de entradas y adjunta el hidrograma de la Pestaña
+        6 a las que tengan caudal 0."""
+        hidrograma = None
+        if self.check_hidrograma_p6.isChecked() and self.hidrograma_resultado:
+            tiempos = self.hidrograma_resultado.get("tiempos_h") or []
+            caudales = self.hidrograma_resultado.get("caudal_m3s") or []
+            if tiempos and caudales:
+                n = min(len(tiempos), len(caudales))
+                hidrograma = [(tiempos[i] * 3600.0, caudales[i]) for i in range(n)]
 
-        La pestaña existe aunque el motor no esté instalado, y ese es su
-        principal valor: diagnostica cuál de las tres condiciones falla
-        (instalado / activo / motor disponible) y reúne los insumos que
-        las pestañas anteriores ya calcularon, de modo que el usuario
-        sepa qué le falta ANTES de entrar a la otra ventana.
+        entradas = []
+        for fila in range(self.tabla_entradas_2d.rowCount()):
+            celdas = []
+            for col in range(3):
+                item = self.tabla_entradas_2d.item(fila, col)
+                celdas.append(item.text().strip() if item else "")
+            if not celdas[0] or not celdas[1]:
+                continue
+            try:
+                f = int(float(celdas[0]))
+                c = int(float(celdas[1]))
+                q = float(celdas[2].replace(",", ".")) if celdas[2] else 0.0
+            except ValueError:
+                raise Swe2DEntradaInvalida(
+                    f"La fila {fila + 1} de la tabla de entradas tiene valores no numéricos.")
+            if q > 0:
+                entradas.append({"fila": f, "columna": c, "caudal_m3s": q})
+            elif hidrograma:
+                entradas.append({"fila": f, "columna": c, "hidrograma": hidrograma})
+            else:
+                raise Swe2DEntradaInvalida(
+                    f"La entrada de la fila {fila + 1} tiene caudal 0 y no hay hidrograma "
+                    "disponible de la Pestaña 6. Indique un caudal o calcule antes el "
+                    "hidrograma de diseño.")
+        return entradas
+
+    def _leer_estructuras_2d(self):
+        """Construye los objetos Estructura desde la tabla."""
+        estructuras = []
+        for fila in range(self.tabla_estructuras_2d.rowCount()):
+            valores = []
+            for col in range(8):
+                item = self.tabla_estructuras_2d.item(fila, col)
+                valores.append(item.text().strip() if item else "")
+            if not valores[1]:
+                continue
+            tipo = valores[1].lower()
+            try:
+                f1, c1 = int(float(valores[2])), int(float(valores[3]))
+                f2, c2 = int(float(valores[4])), int(float(valores[5]))
+                p1 = float(valores[6].replace(",", "."))
+                extras = [float(x.replace(",", ".")) for x in valores[7].split(";") if x.strip()]
+            except (ValueError, IndexError):
+                raise Swe2DEntradaInvalida(
+                    f"La estructura de la fila {fila + 1} tiene parámetros no numéricos o "
+                    "incompletos.")
+
+            nombre = valores[0] or f"{tipo} {fila + 1}"
+            if tipo == "vertedero":
+                if not extras:
+                    raise Swe2DEntradaInvalida(
+                        f"El vertedero «{nombre}» necesita la longitud de cresta en "
+                        "«Parámetro 2 / 3».")
+                parametros = {"cota_cresta": p1, "longitud": extras[0],
+                              "coef_descarga": extras[1] if len(extras) > 1 else 1.84}
+            elif tipo == "orificio":
+                parametros = {"area": p1,
+                              "coef_descarga": extras[0] if extras else 0.61}
+            elif tipo == "alcantarilla":
+                if not extras:
+                    raise Swe2DEntradaInvalida(
+                        f"La alcantarilla «{nombre}» necesita el diámetro en «Parámetro 2 / 3».")
+                diametro = extras[0]
+                parametros = {"cota_entrada": p1, "diametro": diametro,
+                              "area": math.pi * diametro ** 2 / 4.0,
+                              "longitud": extras[1] if len(extras) > 1 else 10.0}
+            else:
+                raise Swe2DEntradaInvalida(
+                    f"Tipo de estructura no reconocido en la fila {fila + 1}: «{valores[1]}». "
+                    "Use «vertedero», «orificio» o «alcantarilla».")
+
+            estructuras.append(swe2d.Estructura(tipo, (f1, c1), (f2, c2), parametros, nombre))
+        return estructuras
+
+    def _on_ejecutar_simulacion_2d(self):
+        if not getattr(self, "dominio_2d", None):
+            QMessageBox.warning(self, "Falta el dominio",
+                                 "Cargue primero el dominio de cálculo (sección 1).")
+            return
+        try:
+            entradas = self._leer_entradas_2d()
+            estructuras = self._leer_estructuras_2d()
+        except Swe2DEntradaInvalida as e:
+            QMessageBox.warning(self, "Datos de entrada incompletos", str(e))
+            return
+
+        if not entradas and self.spin_lluvia_2d.value() <= 0:
+            QMessageBox.warning(
+                self, "Sin forzamiento",
+                "No hay ninguna entrada de caudal ni lluvia sobre malla: la simulación no "
+                "tendría agua que mover. Añada una entrada o una intensidad de lluvia.")
+            return
+
+        dominio = self.dominio_2d
+        configuracion = {
+            "zb": dominio["zb"], "dx": dominio["dx"], "dy": dominio["dy"],
+            "n_manning": self.spin_manning_2d.value(),
+            "esquema": self.combo_esquema_2d.currentData(),
+            "cfl": self.spin_cfl_2d.value(),
+            "dt_maximo": self.spin_dt_max_2d.value(),
+            "tiempo_total_s": self.spin_tiempo_2d.value(),
+            "entradas": entradas,
+            "estructuras": estructuras,
+            "lluvia_mm_h": self.spin_lluvia_2d.value(),
+            "salida_por_bordes": self.check_salida_bordes_2d.isChecked(),
+            "intervalo_captura_s": self.spin_captura_2d.value(),
+        }
+
+        self.btn_simular_2d.setEnabled(False)
+        self.btn_cancelar_2d.setEnabled(True)
+        self.barra_progreso_2d.setValue(0)
+        self.lbl_estado_2d.setText("Estado: iniciando…")
+
+        self.worker_2d = SimulacionSwe2DWorker(configuracion)
+        self.worker_2d.progreso.connect(self._on_progreso_simulacion_2d)
+        self.worker_2d.terminado.connect(self._on_terminada_simulacion_2d)
+        self.worker_2d.fallo.connect(self._on_fallo_simulacion_2d)
+        self.worker_2d.mensaje.connect(
+            lambda t: self.lbl_estado_2d.setText(f"Estado: {t}"))
+        self.worker_2d.start()
+
+    def _on_cancelar_simulacion_2d(self):
+        if getattr(self, "worker_2d", None):
+            self.worker_2d.cancelar()
+            self.lbl_estado_2d.setText("Estado: cancelando…")
+
+    def _on_progreso_simulacion_2d(self, porcentaje, tiempo_s, calado_max, area_ha):
+        self.barra_progreso_2d.setValue(porcentaje)
+        self.lbl_estado_2d.setText(
+            f"Estado: t = {tiempo_s:,.0f} s ({porcentaje} %)  ·  calado máx. "
+            f"{calado_max:.3f} m  ·  área inundada {area_ha:.2f} ha")
+
+    def _on_fallo_simulacion_2d(self, mensaje):
+        self.btn_simular_2d.setEnabled(True)
+        self.btn_cancelar_2d.setEnabled(False)
+        self.lbl_estado_2d.setText("Estado: la simulación falló.")
+        QMessageBox.critical(self, "Error en la simulación 2D", mensaje)
+
+    def _on_terminada_simulacion_2d(self, simulador, resumen):
+        """
+        Vuelca los resultados a la interfaz.
+
+        TODO EL CUERPO VA PROTEGIDO a propósito. Este método se ejecuta
+        como respuesta a una señal emitida desde el hilo de simulación, y
+        una excepción que escape de aquí no produce un traceback de
+        Python: atraviesa el código C++ de Qt que está emitiendo la señal
+        y ABORTA EL PROCESO. En la práctica eso significa que QGIS se
+        cierra de golpe, sin mensaje y sin guardar el proyecto.
+        Ya ocurrió una vez durante el desarrollo (un nombre de atributo
+        pisado por otra pestaña), y el síntoma fue exactamente ese: QGIS
+        desaparecía sin dejar rastro de la causa.
+        """
+        try:
+            self._volcar_resultados_2d(simulador, resumen)
+        except Exception as e:                     # noqa: BLE001
+            import traceback
+            self.btn_simular_2d.setEnabled(True)
+            self.btn_cancelar_2d.setEnabled(False)
+            self.lbl_estado_2d.setText(
+                "Estado: la simulación terminó, pero falló al mostrar los resultados.")
+            QMessageBox.critical(
+                self, "Error al mostrar los resultados 2D",
+                f"La simulación se completó, pero ocurrió un error al volcar los resultados "
+                f"a la interfaz:\n\n{e}\n\n{traceback.format_exc()}")
+
+    def _volcar_resultados_2d(self, simulador, resumen):
+        self.btn_simular_2d.setEnabled(True)
+        self.btn_cancelar_2d.setEnabled(False)
+        self.simulador_2d = simulador
+        self.resumen_2d = resumen
+        self.lbl_estado_2d.setText(
+            f"Estado: terminada. {resumen['pasos']:,} pasos en "
+            f"{resumen['tiempo_simulado_s']:,.0f} s simulados.")
+
+        balance = resumen["balance"]
+        peligro = simulador.peligrosidad()
+        clasificacion = mesh_export.clasificar_peligrosidad(peligro)
+        self.clasificacion_peligro_2d = clasificacion
+
+        filas = [
+            ("Esquema numérico", resumen["esquema"].replace("_", " "), ""),
+            ("Tiempo simulado", round(resumen["tiempo_simulado_s"], 1), "s"),
+            ("Pasos de tiempo", f"{resumen['pasos']:,}", "",
+             f"Δt medio = {resumen['tiempo_simulado_s'] / max(resumen['pasos'], 1):.4f} s"),
+            ("Calado máximo", round(resumen["calado_maximo_m"], 3), "m"),
+            ("Calado medio en zona inundada", round(resumen["calado_medio_inundado_m"], 3), "m"),
+            ("Velocidad máxima", round(resumen["velocidad_maxima_ms"], 3), "m/s"),
+            ("Peligrosidad máxima h·v", round(resumen["peligrosidad_maxima_m2s"], 3), "m²/s",
+             "clases de la guía FD2320 (Defra/Environment Agency)"),
+            ("Área inundada", round(resumen["area_inundada_ha"], 3), "ha"),
+            ("Celdas del dominio", f"{resumen['celdas_dominio']:,}", ""),
+        ]
+        for clase in clasificacion["reparto"]:
+            filas.append((f"Área en peligro {clase['clase']}",
+                          round(clase["porcentaje"], 2), "%", clase["descripcion"]))
+        filas.extend([
+            ("Volumen entrado", round(balance["volumen_entrado_m3"], 2), "m³"),
+            ("Volumen almacenado", round(balance["volumen_almacenado_m3"], 2), "m³"),
+            ("Volumen salido", round(balance["volumen_salido_m3"], 2), "m³"),
+            ("Error de balance de masa", round(balance["error_relativo_pct"], 6), "%",
+             "ACEPTABLE (< 1 %)" if balance["aceptable"]
+             else "NO ACEPTABLE: no use estos resultados"),
+        ])
+        if not resumen.get("estable", True):
+            filas.append((
+                "Pasos con Δt recortado", resumen["pasos_con_dt_recortado"], "",
+                "el paso estable cayó por debajo del mínimo: baje el CFL o use inercia local"))
+        poblar_tabla_parametros(self.tabla_resultado_2d, filas, filas_visibles_max=26)
+
+        if simulador.estructuras:
+            filas_est = []
+            for est in simulador.estructuras:
+                filas_est.append((
+                    f"{est.nombre} ({est.tipo})", round(est.caudal_maximo, 4), "m³/s",
+                    f"celdas {est.celda_1} ↔ {est.celda_2}; "
+                    f"caudal final {est.caudal_actual:.4f} m³/s"))
+            poblar_tabla_parametros(self.tabla_estructuras_resultado_2d, filas_est,
+                                     filas_visibles_max=10)
+        else:
+            poblar_tabla_parametros(self.tabla_estructuras_resultado_2d, [
+                ("Sin estructuras definidas", "—", "",
+                 "añádalas en la sección 4 para obtener sus caudales")])
+
+        # El estado del cuadro lo decide el BALANCE DE MASA, no lo
+        # espectacular del calado: un resultado que no cierra masa no es
+        # utilizable por muy verosímil que parezca el mapa.
+        tipo = "exito" if balance["aceptable"] and resumen.get("estable", True) else "alerta"
+        self.cuadro_resultado_2d.actualizar(
+            titulo="SIMULACIÓN HIDRÁULICA 2D",
+            valor_principal=f"h_máx = {resumen['calado_maximo_m']:.3f} m   ·   "
+                            f"v_máx = {resumen['velocidad_maxima_ms']:.3f} m/s",
+            subtitulo=f"{resumen['area_inundada_ha']:.2f} ha inundadas en "
+                      f"{resumen['tiempo_simulado_s']:,.0f} s simulados "
+                      f"({resumen['esquema'].replace('_', ' ')})",
+            metricas=[("Área inundada", f"{resumen['area_inundada_ha']:.2f} ha"),
+                       ("Peligro h·v máx", f"{resumen['peligrosidad_maxima_m2s']:.2f} m²/s"),
+                       ("Pasos", f"{resumen['pasos']:,}"),
+                       ("Error de masa", f"{balance['error_relativo_pct']:.4f} %")],
+            leyenda=("El balance de masa cierra: los resultados son consistentes y pueden usarse "
+                      "para dimensionar." if tipo == "exito" else
+                      "EL BALANCE DE MASA NO CIERRA o el paso de tiempo tuvo que recortarse. "
+                      "Baje el número de Courant, use el esquema de inercia local, o remuestree "
+                      "el terreno más grueso. NO utilice estos resultados para diseño."),
+            tipo=tipo)
+
+        self.canvas_mapa_calado_swe2d.plot_mapa(
+            simulador.h_max, simulador.zb, simulador.dx, simulador.dy,
+            activo=simulador.activo, entradas=simulador.entradas,
+            estructuras=simulador.estructuras)
+        self.canvas_peligro_2d.plot_peligrosidad(
+            peligro, clasificacion, simulador.zb, simulador.dx, simulador.dy,
+            activo=simulador.activo)
+        self.canvas_hidrogramas_2d.plot_series(simulador.serie_tiempo, balance=balance)
+        self._on_actualizar_perfil_2d()
+
+        self._actualizar_resumen_final_2d()
+
+    def _on_actualizar_perfil_2d(self):
+        simulador = getattr(self, "simulador_2d", None)
+        if simulador is None:
+            return
+        fila = min(self.spin_fila_perfil_2d.value(), simulador.h_max.shape[0] - 1)
+        zb_linea = np.where(simulador.activo[fila], simulador.zb[fila], np.nan)
+        self.canvas_perfil_2d.plot_perfil(
+            np.nan_to_num(zb_linea, nan=float(np.nanmin(zb_linea)) if np.any(np.isfinite(zb_linea))
+                          else 0.0),
+            simulador.h_max[fila], simulador.dx,
+            titulo=f"Perfil por la fila {fila} — calado máximo alcanzado")
+
+    def _actualizar_resumen_final_2d(self):
+        resumen = getattr(self, "resumen_2d", None)
+        if resumen is None:
+            return
+        balance = resumen["balance"]
+        clasificacion = getattr(self, "clasificacion_peligro_2d", None)
+        simulador = self.simulador_2d
+
+        filas_peligro = ""
+        if clasificacion:
+            filas_peligro = "".join(
+                f"<tr><td style='padding:2px 10px;'>"
+                f"<span style='background:{c['color']};padding:0 8px;'>&nbsp;</span> "
+                f"{c['clase']}</td>"
+                f"<td style='padding:2px 10px;text-align:right;'><b>{c['porcentaje']:.1f} %</b></td>"
+                f"<td style='padding:2px 10px;'>{c['descripcion']}</td></tr>"
+                for c in clasificacion["reparto"])
+
+        filas_estructuras = "".join(
+            f"<li><b>{est.nombre}</b> ({est.tipo}): caudal máximo "
+            f"{est.caudal_maximo:.3f} m³/s</li>"
+            for est in simulador.estructuras) or "<li>No se definieron estructuras.</li>"
+
+        color_balance = "#1B5E20" if balance["aceptable"] else "#7A1712"
+        self.resumen_final_2d.setHtml(f"""
+        <h3 style="margin:0 0 6px 0;color:#1a4a70;">SIMULACIÓN HIDRÁULICA 2D — RESUMEN FINAL</h3>
+        <p style="margin:2px 0;"><b>Modelo:</b> aguas someras 2D en volúmenes finitos sobre malla
+        desplazada, esquema de <b>{resumen['esquema'].replace('_', ' ')}</b>, sobre
+        {resumen['celdas_dominio']:,} celdas de {simulador.dx:.1f} × {simulador.dy:.1f} m.
+        {resumen['pasos']:,} pasos de tiempo para {resumen['tiempo_simulado_s']:,.0f} s simulados.</p>
+
+        <p style="margin:8px 0 2px 0;"><b>Resultados hidráulicos</b></p>
+        <ul style="margin:2px 0;">
+          <li>Calado máximo: <b>{resumen['calado_maximo_m']:.3f} m</b>
+              (medio en zona inundada: {resumen['calado_medio_inundado_m']:.3f} m)</li>
+          <li>Velocidad máxima: <b>{resumen['velocidad_maxima_ms']:.3f} m/s</b></li>
+          <li>Área inundada: <b>{resumen['area_inundada_ha']:.3f} ha</b></li>
+          <li>Peligrosidad máxima h·v: <b>{resumen['peligrosidad_maxima_m2s']:.3f} m²/s</b></li>
+        </ul>
+
+        <p style="margin:8px 0 2px 0;"><b>Reparto del peligro (guía FD2320)</b></p>
+        <table style="border-collapse:collapse;">{filas_peligro}</table>
+
+        <p style="margin:8px 0 2px 0;"><b>Estructuras hidráulicas</b></p>
+        <ul style="margin:2px 0;">{filas_estructuras}</ul>
+
+        <p style="margin:8px 0 2px 0;"><b>Verificación del modelo</b></p>
+        <p style="margin:2px 0;">Entró {balance['volumen_entrado_m3']:,.1f} m³, quedaron
+        almacenados {balance['volumen_almacenado_m3']:,.1f} m³ y salieron
+        {balance['volumen_salido_m3']:,.1f} m³. Error de cierre:
+        <b style="color:{color_balance};">{balance['error_relativo_pct']:.6f} %</b>
+        {'(aceptable)' if balance['aceptable'] else '(NO ACEPTABLE — no use estos resultados)'}.</p>
+        <p style="margin:6px 0 0 0;font-size:8pt;color:#5a5a5a;"><i>El balance de masa es el
+        control de calidad de una simulación 2D: mide si el modelo conserva el agua que se le
+        entrega. Un mapa de inundación verosímil con un balance que no cierra es un mapa
+        equivocado, y por eso se comprueba antes que ningún otro resultado.</i></p>
+        """)
+
+    def _on_exportar_resultados_2d(self):
+        simulador = getattr(self, "simulador_2d", None)
+        if simulador is None:
+            QMessageBox.warning(self, "Sin resultados",
+                                 "Ejecute primero una simulación.")
+            return
+        carpeta = QFileDialog.getExistingDirectory(
+            self, "Carpeta donde guardar los resultados 2D")
+        if not carpeta:
+            return
+        try:
+            dominio = self.dominio_2d
+            instantes = getattr(self.worker_2d, "instantes", None) if \
+                getattr(self, "worker_2d", None) else None
+            rutas = mesh_export.exportar_resultados_completos(
+                simulador, carpeta, "hydroandina_2d",
+                dominio["x_min"], dominio["y_max"],
+                instantes=instantes, wkt_crs=dominio.get("wkt"))
+
+            filas = [("Malla (SMS 2DM)", os.path.basename(rutas["malla_2dm"]), "",
+                      f"{rutas['nodos']:,} nodos y {rutas['elementos']:,} elementos")]
+            if "calado_dat" in rutas:
+                filas.append(("Serie temporal de calado", os.path.basename(rutas["calado_dat"]),
+                              "", f"{len(instantes)} instantes capturados"))
+                filas.append(("Serie temporal de velocidad",
+                              os.path.basename(rutas["velocidad_dat"]), "",
+                              "dataset vectorial: flechas de dirección del flujo"))
+            for clave, etiqueta in (("calado_max_tif", "Calado máximo (GeoTIFF)"),
+                                     ("velocidad_max_tif", "Velocidad máxima (GeoTIFF)"),
+                                     ("peligrosidad_tif", "Peligrosidad h·v (GeoTIFF)")):
+                filas.append((etiqueta, os.path.basename(rutas[clave]), ""))
+            poblar_tabla_parametros(self.tabla_exportacion_2d, filas, filas_visibles_max=8)
+
+            cargadas = self._cargar_resultados_2d_en_qgis(rutas)
+            QMessageBox.information(
+                self, "Resultados exportados",
+                f"Resultados guardados en:\n{carpeta}\n\n"
+                f"Se cargaron {cargadas} capas en el proyecto.\n\n"
+                "Para animar la inundación: seleccione la capa de malla, active el Controlador "
+                "Temporal de QGIS (icono del reloj) y reprodúzcala. En las propiedades de la capa "
+                "puede activar las flechas de velocidad.")
+        except Exception as e:
+            QMessageBox.critical(self, "Error al exportar", str(e))
+
+    def _cargar_resultados_2d_en_qgis(self, rutas):
+        """Carga la malla con sus datasets y los GeoTIFF de máximos."""
+        proyecto = QgsProject.instance()
+        cargadas = 0
+        try:
+            from qgis.core import QgsMeshLayer
+            capa_malla = QgsMeshLayer(rutas["malla_2dm"], "Simulación 2D — malla", "mdal")
+            if capa_malla.isValid():
+                # addDatasets() es el método de QgsMeshLayer para asociar
+                # conjuntos de datos a una malla ya cargada. Se comprueba
+                # su existencia porque el nombre ha cambiado entre
+                # versiones de QGIS, y un AttributeError aquí dejaría al
+                # usuario con la malla sin resultados y sin explicación.
+                for clave in ("calado_dat", "velocidad_dat"):
+                    if clave not in rutas:
+                        continue
+                    if hasattr(capa_malla, "addDatasets"):
+                        capa_malla.addDatasets(rutas[clave])
+                    else:
+                        capa_malla.dataProvider().addDataset(rutas[clave])
+                proyecto.addMapLayer(capa_malla)
+                cargadas += 1
+        except Exception:
+            # Que falle la capa de malla no debe impedir cargar los
+            # ráster de máximos, que son el resultado principal.
+            pass
+
+        for clave, nombre in (("calado_max_tif", "Calado máximo (m)"),
+                               ("velocidad_max_tif", "Velocidad máxima (m/s)"),
+                               ("peligrosidad_tif", "Peligrosidad h·v (m²/s)")):
+            if clave in rutas:
+                capa = QgsRasterLayer(rutas[clave], nombre)
+                if capa.isValid():
+                    proyecto.addMapLayer(capa)
+                    cargadas += 1
+        return cargadas
+
+    # ==================================================================
+    # PESTAÑA 8 — SIMULACIÓN HIDRÁULICA 2D DE ESTRUCTURAS
+    # ==================================================================
+    def _build_tab_simulacion_2d(self):
+        """
+        Simulación bidimensional propia (core/swe2d.py) sobre la grilla
+        del MDE, orientada a cauces y a estructuras hidráulicas.
+
+        No depende de ningún plugin externo ni de GPU: el solver está
+        vectorizado con NumPy, que es lo único que QGIS garantiza.
         """
         tab = QWidget()
         v = QVBoxLayout(tab)
 
         lbl_intro = QLabel(
-            "<b>Modelamiento hidráulico bidimensional</b> por ecuaciones de aguas someras "
-            "(2D shallow water equations) con solucionador de volúmenes finitos acelerado por GPU.<br><br>"
-            "A diferencia del cálculo 1D de la Pestaña 7, el modelo 2D resuelve el flujo sobre una "
-            "malla que cubre toda la llanura: es lo que se necesita para <b>mapas de inundación</b>, "
-            "para flujo que se desborda del cauce y se reparte lateralmente, y para el análisis de "
-            "riesgo por calado y velocidad.<br><br>"
-            "El motor de cálculo es el plugin independiente <b>HYDRA2DGPU</b> (Aaron Sprague, "
-            "licencia MIT). HydroAndina Pro no copia su código: lo usa como dependencia externa y le "
-            "entrega los insumos ya calculados en las pestañas anteriores."
+            "<b>Simulación hidrodinámica bidimensional</b> por las ecuaciones de aguas someras "
+            "(Saint-Venant 2D), resueltas en volúmenes finitos sobre la grilla del MDE con malla "
+            "desplazada, y con las estructuras hidráulicas incorporadas como enlaces internos.<br><br>"
+            "A diferencia del cálculo 1D de la Pestaña 7, aquí el flujo se resuelve en planta: es "
+            "lo que se necesita para <b>manchas de inundación</b>, para flujo que se desborda del "
+            "cauce y se reparte lateralmente, y para evaluar el <b>peligro por calado y velocidad</b> "
+            "aguas arriba y abajo de una obra."
         )
         lbl_intro.setWordWrap(True)
         v.addWidget(lbl_intro)
 
-        # ---------------- Estado del motor ----------------
-        gb_estado = QGroupBox("1. Estado del motor de cálculo 2D")
-        v_estado = QVBoxLayout(gb_estado)
-        self.cuadro_estado_hydra2d = CuadroResumenImpacto(ancho_maximo=720)
-        self.cuadro_estado_hydra2d.actualizar(
-            titulo="ESTADO SIN COMPROBAR", valor_principal="—",
-            subtitulo="Pulse «Comprobar estado» para diagnosticar el motor 2D")
-        centrar_en_layout(self.cuadro_estado_hydra2d, v_estado)
-
-        self.tabla_estado_hydra2d = crear_tabla_parametros()
-        v_estado.addWidget(self.tabla_estado_hydra2d)
-
-        self.texto_estado_hydra2d = ResumenFinal(alto_minimo=90)
-        self.texto_estado_hydra2d.setHtml(
-            "<i>Sin comprobar. El diagnóstico distingue tres condiciones que se corrigen de forma "
-            "distinta: que el plugin esté <b>instalado</b>, que esté <b>activado</b> en QGIS, y que "
-            "su <b>motor CUDA</b> (una extensión compilada que se descarga aparte) esté "
-            "disponible.</i>")
-        v_estado.addWidget(self.texto_estado_hydra2d)
-
-        h_estado = QHBoxLayout()
-        btn_comprobar = QPushButton("Comprobar estado del motor 2D")
-        btn_comprobar.clicked.connect(self._on_comprobar_hydra2d)
-        limitar_ancho_boton(btn_comprobar)
-        h_estado.addWidget(btn_comprobar)
-        self.btn_abrir_hydra2d = QPushButton("Abrir ventana de HYDRA2DGPU")
-        self.btn_abrir_hydra2d.clicked.connect(self._on_abrir_hydra2d)
-        limitar_ancho_boton(self.btn_abrir_hydra2d)
-        h_estado.addWidget(self.btn_abrir_hydra2d)
-        h_estado.addStretch()
-        v_estado.addLayout(h_estado)
-        v.addWidget(gb_estado)
-
-        # ---------------- Insumos ----------------
-        gb_insumos = QGroupBox("2. Insumos disponibles para el modelo 2D")
-        v_insumos = QVBoxLayout(gb_insumos)
-        lbl_insumos = QLabel(
-            "Revisa qué insumos ya calculó usted en las pestañas anteriores y cuáles faltan. "
-            "Conviene resolver los faltantes aquí y no dentro de la ventana de HYDRA2DGPU, donde "
-            "no hay forma de volver atrás sin perder la configuración de la malla."
+        # ---------------- 1. DOMINIO ----------------
+        gb_dom = QGroupBox("1. Dominio de cálculo (terreno)")
+        v_dom = QVBoxLayout(gb_dom)
+        lbl_dom = QLabel(
+            "El terreno define la malla: cada celda del ráster es un volumen de control. "
+            "Puede usar el MDE recortado a la cuenca de la Pestaña 1 o cualquier ráster cargado "
+            "(por ejemplo un levantamiento topográfico de detalle del tramo de la obra).<br><br>"
+            "<b>El factor de remuestreo es la decisión más importante de esta pestaña.</b> El coste "
+            "crece con el número de celdas Y con el número de pasos de tiempo, y al reducir el "
+            "tamaño de celda a la mitad se cuadruplican las celdas y además se reduce a la mitad el "
+            "paso estable: el coste se multiplica por ocho. Empiece grueso para tantear y afine solo "
+            "cuando la configuración esté decidida."
         )
-        lbl_insumos.setWordWrap(True)
-        v_insumos.addWidget(lbl_insumos)
+        lbl_dom.setWordWrap(True)
+        v_dom.addWidget(lbl_dom)
 
-        self.cuadro_insumos_hydra2d = CuadroResumenImpacto(ancho_maximo=720)
-        self.cuadro_insumos_hydra2d.actualizar(
-            titulo="INSUMOS SIN REVISAR", valor_principal="—",
-            subtitulo="Pulse «Revisar insumos»")
-        centrar_en_layout(self.cuadro_insumos_hydra2d, v_insumos)
-        self.tabla_insumos_hydra2d = crear_tabla_parametros()
-        v_insumos.addWidget(self.tabla_insumos_hydra2d)
+        f_dom = QFormLayout()
+        f_dom.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.combo_dem_2d = QgsMapLayerComboBox()
+        self.combo_dem_2d.setFilters(QgsMapLayerProxyModel.RasterLayer)
+        self.combo_dem_2d.setAllowEmptyLayer(True)
+        f_dom.addRow("Ráster de terreno:", self.combo_dem_2d)
 
-        h_insumos = QHBoxLayout()
-        btn_insumos = QPushButton("Revisar insumos")
-        btn_insumos.clicked.connect(self._on_revisar_insumos_hydra2d)
-        limitar_ancho_boton(btn_insumos)
-        h_insumos.addWidget(btn_insumos)
-        btn_exportar_hid = QPushButton("Exportar hidrograma a CSV para el borde de entrada")
-        btn_exportar_hid.clicked.connect(self._on_exportar_hidrograma_hydra2d)
-        limitar_ancho_boton(btn_exportar_hid)
-        h_insumos.addWidget(btn_exportar_hid)
-        h_insumos.addStretch()
-        v_insumos.addLayout(h_insumos)
-        v.addWidget(gb_insumos)
+        self.check_usar_dem_cuenca = QCheckBox(
+            "Usar el MDE recortado a la cuenca de la Pestaña 1 (recomendado)")
+        self.check_usar_dem_cuenca.setChecked(True)
+        f_dom.addRow("", self.check_usar_dem_cuenca)
+
+        self.spin_remuestreo_2d = QSpinBox()
+        self.spin_remuestreo_2d.setRange(1, 20)
+        self.spin_remuestreo_2d.setValue(4)
+        self.spin_remuestreo_2d.setToolTip(
+            "1 = resolución original. 4 = una de cada 4 celdas en cada dirección "
+            "(16 veces menos celdas).")
+        f_dom.addRow("Factor de remuestreo (1 = resolución original):", self.spin_remuestreo_2d)
+        v_dom.addLayout(f_dom)
+
+        h_dom_btn = QHBoxLayout()
+        btn_cargar_dom = QPushButton("Cargar dominio y estimar coste")
+        btn_cargar_dom.clicked.connect(self._on_cargar_dominio_2d)
+        limitar_ancho_boton(btn_cargar_dom)
+        h_dom_btn.addWidget(btn_cargar_dom)
+        h_dom_btn.addStretch()
+        v_dom.addLayout(h_dom_btn)
+
+        self.cuadro_dominio_2d = CuadroResumenImpacto(ancho_maximo=760)
+        self.cuadro_dominio_2d.actualizar(
+            titulo="DOMINIO SIN CARGAR", valor_principal="—",
+            subtitulo="Seleccione el terreno y pulse «Cargar dominio»")
+        centrar_en_layout(self.cuadro_dominio_2d, v_dom)
+        self.tabla_dominio_2d = crear_tabla_parametros()
+        v_dom.addWidget(self.tabla_dominio_2d)
+        v.addWidget(gb_dom)
+
+        # ---------------- 2. RUGOSIDAD ----------------
+        gb_rug = QGroupBox("2. Rugosidad de Manning")
+        v_rug = QVBoxLayout(gb_rug)
+        lbl_rug = QLabel(
+            "La rugosidad controla la resistencia al flujo y, con ella, el calado y la velocidad. "
+            "Un valor uniforme sirve para un primer tanteo; para un cauce real conviene distinguir "
+            "al menos el lecho de las márgenes, porque la llanura de inundación con vegetación "
+            "puede tener el triple de <i>n</i> que el cauce y eso cambia por completo el reparto "
+            "del caudal entre ambos."
+        )
+        lbl_rug.setWordWrap(True)
+        v_rug.addWidget(lbl_rug)
+
+        f_rug = QFormLayout()
+        f_rug.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.spin_manning_2d = QDoubleSpinBox()
+        self.spin_manning_2d.setRange(0.008, 0.300)
+        self.spin_manning_2d.setDecimals(3)
+        self.spin_manning_2d.setSingleStep(0.005)
+        self.spin_manning_2d.setValue(0.035)
+        f_rug.addRow("Manning n uniforme:", self.spin_manning_2d)
+
+        self.combo_manning_ref_2d = QComboBox()
+        for etiqueta, valor in (
+                ("Cauce natural limpio y recto — 0.030", 0.030),
+                ("Cauce natural con piedras y malezas — 0.045", 0.045),
+                ("Cauce de montaña con cantos rodados — 0.050", 0.050),
+                ("Torrentera andina con bloques grandes — 0.070", 0.070),
+                ("Hormigón acabado (canal/obra) — 0.014", 0.014),
+                ("Mampostería de piedra — 0.025", 0.025),
+                ("Llanura de pastos cortos — 0.030", 0.030),
+                ("Llanura con matorral denso — 0.080", 0.080),
+                ("Zona urbanizada (edificaciones) — 0.120", 0.120)):
+            self.combo_manning_ref_2d.addItem(etiqueta, valor)
+        self.combo_manning_ref_2d.currentIndexChanged.connect(
+            lambda: self.spin_manning_2d.setValue(self.combo_manning_ref_2d.currentData()))
+        f_rug.addRow("Valores de referencia (Chow, 1959):", self.combo_manning_ref_2d)
+        v_rug.addLayout(f_rug)
+        v.addWidget(gb_rug)
+
+        # ---------------- 3. CONDICIONES DE CONTORNO ----------------
+        gb_bc = QGroupBox("3. Condiciones de contorno y forzamiento")
+        v_bc = QVBoxLayout(gb_bc)
+        lbl_bc = QLabel(
+            "<b>Entradas de caudal:</b> pegue una fila por punto de inyección con su fila y columna "
+            "en la malla (se muestran en el cuadro del dominio) y el caudal en m³/s. Deje el caudal "
+            "en 0 y marque la casilla de abajo para usar en su lugar el hidrograma de diseño de la "
+            "Pestaña 6, que es lo habitual para una avenida de proyecto.<br><br>"
+            "<b>Salida:</b> por defecto el agua que alcanza el borde del dominio lo abandona y se "
+            "contabiliza. Es la condición razonable cuando el MDE cubre la zona de estudio completa."
+        )
+        lbl_bc.setWordWrap(True)
+        v_bc.addWidget(lbl_bc)
+
+        self.tabla_entradas_2d = TablaPegable(4, 3)
+        self.tabla_entradas_2d.setHorizontalHeaderLabels(
+            ["Fila (0 = norte)", "Columna (0 = oeste)", "Caudal (m³/s)"])
+        limitar_ancho_tabla(self.tabla_entradas_2d, ancho_maximo=520)
+        ajustar_alto_tabla(self.tabla_entradas_2d, filas_visibles_max=6)
+        h_ent = QHBoxLayout()
+        h_ent.addWidget(self.tabla_entradas_2d)
+        h_ent.addStretch()
+        v_bc.addLayout(h_ent)
+
+        h_ent_btn = QHBoxLayout()
+        btn_entrada_auto = QPushButton("Situar la entrada en el punto más alto del cauce")
+        btn_entrada_auto.clicked.connect(self._on_entrada_automatica_2d)
+        limitar_ancho_boton(btn_entrada_auto)
+        h_ent_btn.addWidget(btn_entrada_auto)
+        h_ent_btn.addStretch()
+        v_bc.addLayout(h_ent_btn)
+
+        self.check_hidrograma_p6 = QCheckBox(
+            "Usar el hidrograma de diseño de la Pestaña 6 en las entradas con caudal 0")
+        self.check_hidrograma_p6.setChecked(True)
+        v_bc.addWidget(self.check_hidrograma_p6)
+
+        f_bc = QFormLayout()
+        f_bc.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.spin_lluvia_2d = QDoubleSpinBox()
+        self.spin_lluvia_2d.setRange(0.0, 500.0)
+        self.spin_lluvia_2d.setDecimals(2)
+        self.spin_lluvia_2d.setValue(0.0)
+        self.spin_lluvia_2d.setToolTip(
+            "Lluvia uniforme aplicada a todo el dominio (rain-on-grid). 0 = sin lluvia.")
+        f_bc.addRow("Lluvia sobre malla (mm/h):", self.spin_lluvia_2d)
+        v_bc.addLayout(f_bc)
+
+        self.check_salida_bordes_2d = QCheckBox(
+            "Salida libre por el borde del dominio (desmarque para dominio cerrado)")
+        self.check_salida_bordes_2d.setChecked(True)
+        v_bc.addWidget(self.check_salida_bordes_2d)
+        v.addWidget(gb_bc)
+
+        # ---------------- 4. ESTRUCTURAS ----------------
+        gb_est = QGroupBox("4. Estructuras hidráulicas")
+        v_est = QVBoxLayout(gb_est)
+        lbl_est = QLabel(
+            "Las estructuras se modelan como <b>enlaces internos</b> entre dos celdas, sustituyendo "
+            "el flujo del terreno por su ley de descarga. Es el mismo enfoque de HEC-RAS 2D e Iber, "
+            "y responde a un hecho geométrico: la obra es más pequeña que la celda, así que no se "
+            "resuelve con la malla sino con su ecuación hidráulica.<br><br>"
+            "<b>Vertedero</b> — Q = C·L·H<sup>3/2</sup>, con sumergencia de Villemonte. Parámetros: "
+            "cota de cresta (m), longitud (m), C (1.84 cresta ancha; 2.2 perfil Creager).<br>"
+            "<b>Orificio / compuerta</b> — Q = Cd·A·√(2g·Δh). Parámetros: área (m²), Cd (0.61), y un "
+            "tercer valor no usado (escriba 0).<br>"
+            "<b>Alcantarilla</b> — criterio HDS-5: se calcula el control de entrada y el de salida y "
+            "gobierna el menor. Parámetros: cota de entrada (m), diámetro (m), longitud (m)."
+        )
+        lbl_est.setWordWrap(True)
+        v_est.addWidget(lbl_est)
+
+        self.tabla_estructuras_2d = TablaPegable(4, 8)
+        self.tabla_estructuras_2d.setHorizontalHeaderLabels(
+            ["Nombre", "Tipo", "Fila 1", "Col 1", "Fila 2", "Col 2",
+             "Parámetro 1", "Parámetro 2 / 3"])
+        aplicar_columna_elastica(self.tabla_estructuras_2d, indice_columna_larga=0)
+        ajustar_alto_tabla(self.tabla_estructuras_2d, filas_visibles_max=8)
+        v_est.addWidget(self.tabla_estructuras_2d)
+        lbl_est_ayuda = QLabel(
+            "<i>Tipo: escriba «vertedero», «orificio» o «alcantarilla». En «Parámetro 1» ponga la "
+            "cota de cresta / el área / la cota de entrada; en «Parámetro 2 / 3», la longitud y el "
+            "coeficiente separados por punto y coma (p.ej. «12; 1.84»), o el diámetro y la longitud "
+            "para una alcantarilla (p.ej. «1.2; 15»).</i>")
+        lbl_est_ayuda.setWordWrap(True)
+        v_est.addWidget(lbl_est_ayuda)
+        v.addWidget(gb_est)
+
+        # ---------------- 5. CONTROL NUMÉRICO ----------------
+        gb_num = QGroupBox("5. Esquema y control numérico")
+        v_num = QVBoxLayout(gb_num)
+        lbl_num = QLabel(
+            "<b>Inercia local</b> (Bates, Horritt &amp; Fewtrell, 2010) conserva la aceleración local "
+            "y solo desprecia la convectiva. Es el esquema de LISFLOOD-FP y el que corresponde para "
+            "cauces y estructuras. <b>Es el recomendado y además el más rápido.</b><br><br>"
+            "<b>Onda difusiva</b> desprecia toda la inercia. Al hacerlo la ecuación deja de ser "
+            "hiperbólica y pasa a ser parabólica, cuyo límite de estabilidad explícito "
+            "(Δt ≤ Δx²/4D) es mucho más severo: en un cauce típico exige pasos unas 40 veces "
+            "menores. Resulta pues más simple pero MÁS CARA, y subestima el pico donde la inercia "
+            "importa. Se ofrece para expansión en llanura, no para cauce."
+        )
+        lbl_num.setWordWrap(True)
+        v_num.addWidget(lbl_num)
+
+        f_num = QFormLayout()
+        f_num.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.combo_esquema_2d = QComboBox()
+        self.combo_esquema_2d.addItem("Inercia local (recomendado)", "inercia_local")
+        self.combo_esquema_2d.addItem("Onda difusiva", "onda_difusiva")
+        f_num.addRow("Esquema numérico:", self.combo_esquema_2d)
+
+        self.spin_tiempo_2d = QDoubleSpinBox()
+        self.spin_tiempo_2d.setRange(10.0, 604800.0)
+        self.spin_tiempo_2d.setDecimals(0)
+        self.spin_tiempo_2d.setValue(3600.0)
+        f_num.addRow("Tiempo total de simulación (s):", self.spin_tiempo_2d)
+
+        self.spin_cfl_2d = QDoubleSpinBox()
+        self.spin_cfl_2d.setRange(0.05, 1.0)
+        self.spin_cfl_2d.setDecimals(2)
+        self.spin_cfl_2d.setValue(0.70)
+        self.spin_cfl_2d.setToolTip(
+            "Número de Courant. Bájelo si aparecen oscilaciones o el balance de masa no cierra.")
+        f_num.addRow("Número de Courant (CFL):", self.spin_cfl_2d)
+
+        self.spin_dt_max_2d = QDoubleSpinBox()
+        self.spin_dt_max_2d.setRange(0.01, 300.0)
+        self.spin_dt_max_2d.setDecimals(2)
+        self.spin_dt_max_2d.setValue(10.0)
+        f_num.addRow("Paso de tiempo máximo (s):", self.spin_dt_max_2d)
+
+        self.spin_captura_2d = QDoubleSpinBox()
+        self.spin_captura_2d.setRange(0.0, 86400.0)
+        self.spin_captura_2d.setDecimals(0)
+        self.spin_captura_2d.setValue(300.0)
+        self.spin_captura_2d.setToolTip(
+            "Cada cuánto se guarda un instante para animar el resultado en QGIS. "
+            "0 = no guardar instantes (solo los mapas de máximos).")
+        f_num.addRow("Intervalo de captura para la animación (s):", self.spin_captura_2d)
+        v_num.addLayout(f_num)
+        v.addWidget(gb_num)
+
+        # ---------------- 6. EJECUCIÓN ----------------
+        gb_run = QGroupBox("6. Ejecución")
+        v_run = QVBoxLayout(gb_run)
+        h_run = QHBoxLayout()
+        self.btn_simular_2d = QPushButton("▶  Ejecutar simulación 2D")
+        self.btn_simular_2d.setStyleSheet(
+            "background-color: #1F3864; color: white; font-weight: bold; padding: 8px;")
+        self.btn_simular_2d.clicked.connect(self._on_ejecutar_simulacion_2d)
+        limitar_ancho_boton(self.btn_simular_2d)
+        h_run.addWidget(self.btn_simular_2d)
+        self.btn_cancelar_2d = QPushButton("■  Cancelar")
+        self.btn_cancelar_2d.clicked.connect(self._on_cancelar_simulacion_2d)
+        self.btn_cancelar_2d.setEnabled(False)
+        limitar_ancho_boton(self.btn_cancelar_2d)
+        h_run.addWidget(self.btn_cancelar_2d)
+        h_run.addStretch()
+        v_run.addLayout(h_run)
+
+        self.barra_progreso_2d = QProgressBar()
+        self.barra_progreso_2d.setValue(0)
+        v_run.addWidget(self.barra_progreso_2d)
+        self.lbl_estado_2d = QLabel("Estado: en espera.")
+        self.lbl_estado_2d.setWordWrap(True)
+        v_run.addWidget(self.lbl_estado_2d)
+        v.addWidget(gb_run)
+
+        # ---------------- 7. RESULTADOS ----------------
+        gb_res = QGroupBox("7. Resultados")
+        v_res = QVBoxLayout(gb_res)
+        self.cuadro_resultado_2d = CuadroResumenImpacto(ancho_maximo=760)
+        self.cuadro_resultado_2d.actualizar(
+            titulo="SIN SIMULAR", valor_principal="—",
+            subtitulo="Ejecute la simulación para ver los resultados")
+        centrar_en_layout(self.cuadro_resultado_2d, v_res)
+
+        self.tabla_resultado_2d = crear_tabla_parametros()
+        v_res.addWidget(self.tabla_resultado_2d)
+
+        v_res.addWidget(QLabel("<b>Mapa de calados máximos sobre el relieve</b>"))
+        self.canvas_mapa_calado_swe2d = MapaCalado2DCanvas()
+        v_res.addWidget(self.canvas_mapa_calado_swe2d)
+
+        v_res.addWidget(QLabel("<b>Peligrosidad h·v y reparto del área inundada</b>"))
+        self.canvas_peligro_2d = MapaPeligrosidadCanvas()
+        v_res.addWidget(self.canvas_peligro_2d)
+
+        v_res.addWidget(QLabel("<b>Evolución temporal y cierre del balance de masa</b>"))
+        self.canvas_hidrogramas_2d = HidrogramasSwe2DCanvas()
+        v_res.addWidget(self.canvas_hidrogramas_2d)
+
+        v_res.addWidget(QLabel("<b>Perfil por una fila de la malla</b>"))
+        f_perf = QFormLayout()
+        f_perf.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.spin_fila_perfil_2d = QSpinBox()
+        self.spin_fila_perfil_2d.setRange(0, 100000)
+        self.spin_fila_perfil_2d.valueChanged.connect(self._on_actualizar_perfil_2d)
+        f_perf.addRow("Fila de la malla para el perfil longitudinal:", self.spin_fila_perfil_2d)
+        v_res.addLayout(f_perf)
+        self.canvas_perfil_2d = PerfilSwe2DCanvas()
+        v_res.addWidget(self.canvas_perfil_2d)
+
+        self.tabla_estructuras_resultado_2d = crear_tabla_parametros()
+        v_res.addWidget(QLabel("<b>Caudales por las estructuras</b>"))
+        v_res.addWidget(self.tabla_estructuras_resultado_2d)
+        v.addWidget(gb_res)
+
+        # ---------------- 8. EXPORTACIÓN ----------------
+        gb_exp = QGroupBox("8. Exportación a QGIS")
+        v_exp = QVBoxLayout(gb_exp)
+        lbl_exp = QLabel(
+            "Exporta la malla en formato <b>SMS 2DM</b> con los resultados como conjuntos de datos, "
+            "que QGIS lee de forma nativa con MDAL —el mismo motor que usa para HEC-RAS 2D—, más los "
+            "mapas de máximos en GeoTIFF.<br><br>"
+            "Cargada como capa de malla, la serie temporal se reproduce con el <b>Controlador "
+            "Temporal</b> de QGIS: animación del avance de la inundación y flechas de velocidad. Un "
+            "ráster de máximos responde «hasta dónde llegó»; la malla temporal responde «cuándo "
+            "llegó y con qué velocidad», que es lo que hace falta para justificar un plazo de "
+            "evacuación o el dimensionado de una obra de paso."
+        )
+        lbl_exp.setWordWrap(True)
+        v_exp.addWidget(lbl_exp)
+
+        h_exp = QHBoxLayout()
+        btn_exportar_2d = QPushButton("Exportar resultados y cargarlos en QGIS")
+        btn_exportar_2d.clicked.connect(self._on_exportar_resultados_2d)
+        limitar_ancho_boton(btn_exportar_2d)
+        h_exp.addWidget(btn_exportar_2d)
+        h_exp.addStretch()
+        v_exp.addLayout(h_exp)
+        self.tabla_exportacion_2d = crear_tabla_parametros()
+        v_exp.addWidget(self.tabla_exportacion_2d)
+        v.addWidget(gb_exp)
+
+        self.resumen_final_2d = ResumenFinal(alto_minimo=120)
+        self.resumen_final_2d.setHtml(
+            "<i>El resumen final de la simulación 2D aparecerá aquí cuando ejecute el modelo.</i>")
+        v.addWidget(QLabel("<b>Cuadro resumen final — Simulación Hidráulica 2D</b>"))
+        v.addWidget(self.resumen_final_2d)
 
         v.addStretch()
-        self._agregar_pestaña_con_scroll(tab, "8. Modelamiento Hidráulico 2D")
-
-    def _on_comprobar_hydra2d(self):
-        estado = hydra2d_bridge.estado_hydra2d()
-        self.estado_hydra2d_ultimo = estado
-        listo = (estado["instalado"] and estado["activo"] and estado["motor_disponible"]
-                 and estado.get("banco_trabajo_disponible", False))
-
-        poblar_tabla_parametros(self.tabla_estado_hydra2d, [
-            ("Plugin instalado", "sí" if estado["instalado"] else "NO", "",
-             estado["ruta"] or "no se encontró la carpeta del plugin"),
-            ("Versión detectada", estado["version"] or "—", ""),
-            ("Activado en QGIS", "sí" if estado["activo"] else "NO", "",
-             "se activa en Complementos → Administrar e instalar complementos"),
-            ("Motor de cálculo CUDA (hydra_swe2d)",
-             "sí" if estado["motor_disponible"] else "NO", "",
-             estado["detalle_motor"] or "extensión compilada C++/CUDA: es la que resuelve las "
-                                         "ecuaciones de aguas someras"),
-            ("Banco de trabajo (swe2d)",
-             "sí" if estado.get("banco_trabajo_disponible") else "NO", "",
-             estado.get("detalle_banco_trabajo") or "paquete Python de la interfaz del modelo 2D"),
-        ], filas_visibles_max=7)
-
-        # Cada condición que falla tiene su propia solución, así que el
-        # cuadro nombra la primera que falta en vez de un "no disponible"
-        # genérico que no dice qué hacer.
-        if listo:
-            titulo_estado, tipo = "MOTOR 2D LISTO", "exito"
-        elif not estado["instalado"]:
-            titulo_estado, tipo = "FALTA INSTALAR EL PLUGIN", "alerta"
-        elif not estado["activo"]:
-            titulo_estado, tipo = "FALTA ACTIVAR EL PLUGIN", "atencion"
-        elif not estado["motor_disponible"]:
-            titulo_estado, tipo = "FALTA EL MOTOR CUDA", "atencion"
-        else:
-            titulo_estado, tipo = "FALTA EL BANCO DE TRABAJO", "atencion"
-
-        self.cuadro_estado_hydra2d.actualizar(
-            titulo="ESTADO DEL MOTOR DE CÁLCULO 2D",
-            valor_principal=titulo_estado,
-            subtitulo=f"HYDRA2DGPU v{estado['version']}" if estado["version"] else "HYDRA2DGPU",
-            metricas=[("Instalado", "sí" if estado["instalado"] else "no"),
-                       ("Activado", "sí" if estado["activo"] else "no"),
-                       ("Motor CUDA", "sí" if estado["motor_disponible"] else "no"),
-                       ("Banco de trabajo",
-                        "sí" if estado.get("banco_trabajo_disponible") else "no")],
-            leyenda=("Todo listo. El banco de trabajo se abre ACOPLADO dentro de la ventana de "
-                      "QGIS, no como ventana aparte: al pulsar «Abrir», esta ventana se minimiza "
-                      "sola para dejarlo a la vista." if listo else
-                      "Revise el detalle debajo: cada condición se corrige de una forma distinta."),
-            tipo=tipo)
-
-        self.texto_estado_hydra2d.setHtml(
-            hydra2d_bridge.mensaje_estado(estado).replace("\n\n", "<br><br>").replace("\n", "<br>"))
-
-    def _on_abrir_hydra2d(self):
-        try:
-            hydra2d_bridge.abrir_ventana_hydra2d()
-        except hydra2d_bridge.Hydra2DNoDisponible as e:
-            QMessageBox.warning(self, "HYDRA2DGPU no disponible", str(e))
-            return
-        except Exception as e:
-            QMessageBox.critical(self, "Error al abrir HYDRA2DGPU", str(e))
-            return
-
-        # El banco de trabajo de HYDRA2DGPU se ACOPLA como panel dentro de
-        # la ventana principal de QGIS; no abre una ventana propia. Este
-        # diálogo es una ventana de nivel superior, así que se quedaría
-        # delante tapándolo y daría la impresión de que el botón no hizo
-        # nada. Por eso se minimiza solo y se trae QGIS al frente.
-        #
-        # También importa para los errores: si el banco de trabajo falla
-        # al abrirse, HYDRA2DGPU lo informa en la BARRA DE MENSAJES de
-        # QGIS, que igualmente quedaría oculta detrás de este diálogo.
-        try:
-            self.showMinimized()
-            ventana_qgis = self.iface.mainWindow()
-            ventana_qgis.raise_()
-            ventana_qgis.activateWindow()
-            self.iface.messageBar().pushMessage(
-                "HydroAndina Pro",
-                "Banco de trabajo de HYDRA2DGPU abierto como panel acoplado. La ventana de "
-                "HydroAndina Pro se minimizó para dejarlo a la vista; recupérela desde la barra "
-                "de tareas cuando termine.",
-                level=0, duration=12)
-        except Exception:
-            # Traer ventanas al frente es una comodidad: si el gestor de
-            # ventanas no coopera, el banco de trabajo ya está abierto y
-            # no tiene sentido reportar un fallo por esto.
-            pass
-
-    def _on_revisar_insumos_hydra2d(self):
-        r = hydra2d_bridge.resumen_insumos_disponibles(
-            self.morfometria_resultados, self.cn_resultados,
-            self.hidrograma_resultado, self.dem_clip_path)
-        self.insumos_hydra2d_ultimo = r
-
-        filas = []
-        for clave, dato in r["insumos"].items():
-            filas.append((
-                clave.replace("_", " ").capitalize(),
-                dato["valor"] if dato["disponible"] else "FALTA",
-                "",
-                f"{dato['origen']} — {dato['uso']}"))
-        poblar_tabla_parametros(self.tabla_insumos_hydra2d, filas, filas_visibles_max=8)
-
-        self.cuadro_insumos_hydra2d.actualizar(
-            titulo="INSUMOS PARA EL MODELO 2D",
-            valor_principal=f"{r['n_disponibles']} de {r['n_total']} disponibles",
-            subtitulo=("Todos los insumos están calculados" if r["completo"] else
-                        "Faltan: " + ", ".join(k.replace("_", " ") for k in r["faltantes"])),
-            metricas=[("Disponibles", str(r["n_disponibles"])),
-                       ("Faltantes", str(len(r["faltantes"]))),
-                       ("Total", str(r["n_total"]))],
-            leyenda=("Puede pasar a HYDRA2DGPU con los insumos completos." if r["completo"] else
-                      "Complete los insumos que faltan en sus pestañas de origen antes de abrir "
-                      "la ventana del modelo 2D."),
-            tipo="exito" if r["completo"] else "atencion")
-
-    def _on_exportar_hidrograma_hydra2d(self):
-        if not self.hidrograma_resultado:
-            QMessageBox.warning(
-                self, "Sin hidrograma",
-                "Calcule primero el hidrograma de diseño en la Pestaña 6 (Caudales Máximos).")
-            return
-        ruta, _ = QFileDialog.getSaveFileName(
-            self, "Guardar hidrograma para HYDRA2DGPU", "hidrograma_2d.csv",
-            "Archivos CSV (*.csv)")
-        if not ruta:
-            return
-        try:
-            hydra2d_bridge.exportar_hidrograma_csv(self.hidrograma_resultado, ruta)
-            QMessageBox.information(
-                self, "Hidrograma exportado",
-                f"Hidrograma guardado en:\n{ruta}\n\nCárguelo en HYDRA2DGPU como condición de borde "
-                "de entrada tipo hidrograma (columnas: tiempo_h, caudal_m3s).")
-        except hydra2d_bridge.Hydra2DNoDisponible as e:
-            QMessageBox.warning(self, "No se pudo exportar", str(e))
-        except Exception as e:
-            QMessageBox.critical(self, "Error al exportar el hidrograma", str(e))
+        self._agregar_pestaña_con_scroll(tab, "8. Simulación Hidráulica 2D Estructuras")
 
     def _build_tab_modulos_avanzados(self):
         tab = QWidget()

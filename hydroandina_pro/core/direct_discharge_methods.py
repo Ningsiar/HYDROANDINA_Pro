@@ -552,30 +552,30 @@ def caudal_murphy(area_km2: float) -> dict:
     }
 
 
-def comparar_escuelas_regionales(area_km2: float, longitud_cauce_km: float, pendiente_pct: float,
+def comparar_escuelas_regionales(area_km2: float, pendiente_pct: float,
                                   p24_mm: float, coef_escorrentia_c: float, intensidad_mm_h: float,
-                                  tc_horas: float, area_montana_km2: float = None,
-                                  area_llana_km2: float = 0.0, coeficiente_santa_maria: float = 25.0,
+                                  tc_horas: float, coeficiente_santa_maria: float = 25.0,
                                   coeficiente_springall: float = 0.50, coeficiente_rocha: float = 2.5,
-                                  coeficiente_possenti: float = 90.0,
                                   coeficiente_lauterburg: float = 1.0) -> dict:
-    """Calcula las 8 fórmulas de escuelas regionales adicionales
+    """Calcula las 6 fórmulas de escuelas regionales adicionales
     (latinoamericana, europea clásica y norteamericana histórica) con los
-    mismos datos ya ingresados en la Pestaña 7.
+    mismos datos ya ingresados en la Pestaña 6.
 
-    area_montana_km2 por defecto (None) = TODA el área de la cuenca, que
-    es el supuesto razonable para una cuenca altoandina; el usuario puede
-    repartir explícitamente entre montaña y llanura para Possenti."""
-    if area_montana_km2 is None:
-        area_montana_km2 = max(area_km2 - area_llana_km2, 0.0)
+    Possenti y Kuichling se retiraron del cálculo (v0.3.x) a pedido
+    expreso: Possenti exige repartir el área entre zona montañosa y de
+    valle, un dato que rara vez se tiene con soltura en una cuenca
+    altoandina sin levantamiento de detalle, y Kuichling es una
+    envolvente FIJA calibrada contra crecidas históricas de Nueva York,
+    sin ningún coeficiente regional que la adapte a otro contexto -- fuera
+    de esa región es solo un techo ajeno, no una estimación transferible.
+    Las funciones caudal_possenti() y caudal_kuichling() se conservan en
+    este módulo por si se necesitan de forma puntual."""
     return {
         "santa_maria": caudal_santa_maria(area_km2, coeficiente_santa_maria),
         "springall": caudal_springall(area_km2, p24_mm, coeficiente_springall),
         "rocha": caudal_rocha(area_km2, pendiente_pct * 10.0, coeficiente_rocha),
-        "possenti": caudal_possenti(area_montana_km2, area_llana_km2, longitud_cauce_km, coeficiente_possenti),
         "lauterburg": caudal_lauterburg(area_km2, coeficiente_lauterburg),
         "turazza": caudal_turazza(coef_escorrentia_c, intensidad_mm_h, area_km2, tc_horas),
-        "kuichling": caudal_kuichling(area_km2),
         "murphy": caudal_murphy(area_km2),
     }
 
@@ -672,9 +672,17 @@ def caudal_alekseev(area_km2: float, tc_horas: float, hp_m: float, n_clima: floa
 
     Por eso este módulo NO fija un valor por defecto de mu: debe
     ingresarse explícitamente, y el llamador debería contrastar el
-    resultado con el resto de métodos antes de darlo por bueno. Como
-    referencia, valores de mu del orden de 0.05-0.15 suelen dejar el
-    resultado en el mismo rango que las demás fórmulas."""
+    resultado con el resto de métodos antes de darlo por bueno.
+
+    El exponente n INTERACTÚA fuerte con mu, porque ambos aparecen
+    multiplicando/dividiendo el mismo numerador: con n≈3 (valor de
+    referencia usado en la interfaz), (Tc+1) queda elevado a un exponente
+    alto y el divisor crece mucho más rápido con Tc, así que mu puede
+    tomar valores del orden del coeficiente de escorrentía de la cuenca
+    (0.3-0.6) sin disparar el resultado. Con un n mucho menor (p.ej. 0.6)
+    el divisor crece poco y hace falta un mu muy pequeño (0.05-0.15) para
+    no sobreestimar -- son dos calibraciones distintas de la misma
+    fórmula, no intercambiables entre sí."""
     if area_km2 <= 0:
         raise DirectDischargeError("El área debe ser mayor que 0.")
     if tc_horas < 0:

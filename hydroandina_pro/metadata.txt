@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.2.70
+version=0.3.1
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,112 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.3.1: correcciones de calculo y de tabla en las Pestañas 2, 3 y 6 (fase 1 de un pedido de 9
+      puntos; el resto -- graficos estadisticos de la Pestaña 5, catalogo de metodos de coeficiente
+      de escorrentia/rugosidad de la Pestaña 4, enlaces cruzados de la Pestaña 7, y los subsistemas
+      nuevos de simulacion 2D con lluvia/estructuras dibujables/vista 3D y de exportacion universal
+      a Excel/Word con plantilla docxtpl -- queda para siguientes versiones, por alcance).
+      (1) BUG DE CALCULO: la Pestaña 6 SIEMPRE calculaba las escuelas regionales y el metodo de
+      Alekseev con el P24 de Tr=1000 años -- el maximo de la lista estandar de periodos de retorno --
+      sin importar que Tr hubiera elegido el usuario para el resto del diseño en el desplegable de
+      esta misma pestaña. Ahora usan ese Tr elegido (nueva _tr_diseno_seleccionado()), con soporte
+      para un T-Diseño personalizado. Verificado: con Tr=25 elegido, el calculo ya NO usa el P24 de
+      Tr=1000.
+      (2) RETIRADOS del calculo de caudales: Possenti (Italia, exige repartir area entre zona
+      montañosa y de valle, dato que rara vez se tiene sin levantamiento de detalle), Kuichling
+      (Nueva York, envolvente fija sin coeficiente regional) y Pettis (USACE). Las funciones
+      caudal_possenti()/caudal_kuichling()/caudal_pettis() se conservan en el nucleo por si se
+      necesitan puntualmente.
+      (3) NUEVOS VALORES POR DEFECTO, todos editables: λ de Giandotti 0.05, duracion de Sokolovsky
+      2 h, exponente climatico n de Alekseev 3.0 (antes 0.6 -- con la calibracion vieja el resultado
+      dependia de un mu ~0.05-0.15 sin relacion con el resto del expediente; con n=3 y mu enlazado al
+      coeficiente de escorrentia de la Pestaña 4, el orden de magnitud queda mas cerca del resto de
+      metodos), Ct de Talbot 0.2, area mojada de Sección-Pendiente 3 m² y radio hidraulico 0.8 m,
+      C_D de Dicken 6, C_R de Ryves 6.8, C_K de Kresnik 0.5, K de Francou-Rodier 5.1, Ci de Iszkowski
+      10, b de Crippen 0.4, Kr de Crippen 7.
+      (4) NUEVOS ENLACES ENTRE PESTAÑAS (botones "Autocompletar"): μ de Alekseev = coeficiente de
+      escorrentia ya determinado en la Pestaña 4; m de Iszkowski = Ff (factor de forma A/Lb²) de la
+      Pestaña 2; C de la Verificacion cruzada = coeficiente de escorrentia de la Pestaña 4; I de la
+      Verificacion cruzada = la ecuacion IDF combinada de la Pestaña 5 evaluada en Tr elegido y t=Tc,
+      en vez del generico 40 mm/h fijo.
+      (5) Pestaña 2 (morfometria): la tabla numeraba TODAS las filas, incluidos los 6 titulos de
+      seccion ("1 — Parametros basicos", etc.), asi que el ultimo numero visible no coincidia con la
+      cantidad real de parametros. Ahora la cabecera vertical solo numera las filas de parametro
+      (verificado: con 46 parametros y 6 titulos en 52 filas totales, el maximo numerado es 46, no 52).
+      (6) Pestaña 3 (metodos de perdida): la tabla de uso de suelo/CN suma ahora, en una fila TOTAL al
+      pie, el "% cuenca" y el "Área (km²)" acumulados de todas las coberturas -- en vivo, mientras se
+      edita, sin necesidad de pulsar ningun boton --, coloreada en verde cuando el % queda dentro de
+      ±1 de 100 y en rojo si se aleja. Ademas, el hietograma de PRUEBA de esta pestaña (usado para
+      calibrar los modelos de infiltracion) se puede sincronizar con un boton a la misma forma y
+      DURACION que el hietograma de diseño real de la Pestaña 6, en vez de quedarse con el hietograma
+      de ejemplo de 12 intervalos que trae por defecto y que puede durar mucho mas o menos que la
+      tormenta real del proyecto.
+      Verificado con QGIS 3.40.1 real en modo headless (sin dobles): dialogo completo construido,
+      cada handler nuevo ejercitado con datos realistas, y las cifras contrastadas contra el calculo
+      manual esperado en cada caso.
+    - v0.3.0: NUEVA PESTAÑA 8 «Simulacion Hidraulica 2D Estructuras», con solver propio, y
+      retirada de la pestaña puente a HYDRA2DGPU.
+      QUE ES. Un solucionador bidimensional de aguas someras (Saint-Venant 2D) escrito para el
+      plugin, sobre la grilla del MDE, orientado a cauces y a estructuras hidraulicas. No depende de
+      ningun plugin externo, ni de GPU, ni de Numba: esta vectorizado con NumPy, que es lo unico que
+      QGIS garantiza. La pestaña 8 anterior, que solo hacia de puente hacia HYDRA2DGPU, se elimina
+      junto con core/hydra2d_bridge.py.
+      DOS ESQUEMAS. (a) INERCIA LOCAL (Bates, Horritt & Fewtrell 2010), el de LISFLOOD-FP, que
+      conserva la aceleracion local y solo desprecia la convectiva, con la friccion semi-implicita;
+      es el POR DEFECTO y el que corresponde para cauce y estructuras. (b) ONDA DIFUSIVA, que
+      desprecia toda la inercia. Se ofrecen los dos, pero conviene saber por que el primero es el
+      recomendado: al quitar la inercia la ecuacion deja de ser hiperbolica y pasa a ser PARABOLICA,
+      cuyo limite explicito es Dt <= Dx^2/(4D) con D = (1/n)h^(5/3)/sqrt(S). En un cauce con pendiente
+      0.002 y calado 0.9 m eso son ~0.02 s frente a ~0.85 s del esquema inercial: unas 40 veces mas
+      pasos. La onda difusiva resulta pues MAS SIMPLE PERO MAS CARA, y ademas subestima el pico donde
+      la inercia manda. Queda para expansion en llanura.
+      MALLA DESPLAZADA (Arakawa-C). Los caudales viven en las CARAS y el calado en el CENTRO. La
+      alternativa habitual -- velocidad en el centro y diferencias centradas de h*u -- desacopla las
+      celdas pares de las impares (patron de tablero de ajedrez) y NO conserva la masa. Aqui lo que
+      sale de una celda entra exactamente en su vecina, y el balance cierra con error del orden de
+      1e-14 %.
+      BIEN BALANCEADO. La profundidad de cara se toma como max(nivel) - max(fondo), lo que garantiza
+      la propiedad C: agua en reposo sobre fondo irregular se queda quieta. Verificado sobre un fondo
+      aleatorio: la superficie libre se mantiene horizontal a 1e-15 m y no aparece ni una velocidad
+      espuria. Un esquema que no cumple esto genera corrientes inventadas sobre topografia real, que
+      es justo lo que hay en un cauce andino.
+      ESTRUCTURAS HIDRAULICAS como enlaces internos entre dos celdas, igual que HEC-RAS 2D e Iber: la
+      obra es mas pequeña que la celda, asi que no se resuelve con la malla sino con su ley de
+      descarga. Vertedero (Q = C*L*H^1.5 con sumergencia de Villemonte), orificio/compuerta
+      (Cd*A*sqrt(2g*Dh)) y alcantarilla por el criterio HDS-5 de la FHWA, calculando el control de
+      entrada y el de salida y quedandose con el MENOR, que es el que realmente gobierna.
+      SALIDAS. Mapas de calado y velocidad maximos, peligrosidad h*v clasificada por los umbrales de
+      la guia FD2320 (Defra/Environment Agency) con el reparto de area por clase, hidrogramas de
+      entrada/salida/estructuras, perfil por cualquier fila, y el CIERRE DEL BALANCE DE MASA, que se
+      muestra siempre porque es lo que dice si el resto es utilizable. Exportacion a malla SMS 2DM +
+      datasets .dat que QGIS lee de forma nativa con MDAL (probado: MDAL carga malla y datos), mas
+      GeoTIFF de los maximos; la serie temporal se anima con el Controlador Temporal de QGIS.
+      La simulacion corre en un HILO SECUNDARIO con barra de progreso y cancelacion, para no dejar
+      QGIS congelado, y la pestaña estima el coste ANTES de lanzar.
+      TRES ERRORES PROPIOS CORREGIDOS DURANTE EL DESARROLLO, los tres detectados por verificacion y
+      no por inspeccion:
+        1. La velocidad se calculaba dividiendo el caudal de celda por su calado. En el frente de
+           avance, una celda con 1 mm de lamina que recibe caudal de una cara con 50 cm de
+           profundidad daba v = q/0.001: se informaban 27.4 m/s donde lo fisico eran 3.3 m/s. Ese
+           pico entraba directo en el mapa de peligrosidad h*v, que es un resultado de seguridad.
+           Ahora la velocidad se evalua en las CARAS, donde el cociente es consistente porque el
+           caudal se calculo con esa misma profundidad.
+        2. En el primer paso el dominio esta seco, no hay onda de gravedad y la condicion de Courant
+           no restringe nada: el paso salia igual al maximo permitido y una entrada de 40 m3/s en una
+           celda de 10x10 m inyectaba 4 METROS de lamina de golpe. Ese pico quedaba grabado en el
+           calado maximo -- el numero que se lee como calado de diseño. El h_max informado pasaba de
+           4.00 m a 1.02 m solo con cambiar el paso maximo. Ahora el paso tambien lo limitan las
+           fuentes, y el resultado ya no depende de esa eleccion (dispersion 0.4 % entre 0.5 s y
+           10 s, frente al 313 % de antes).
+        3. El esquema de onda difusiva usaba el Courant de onda de gravedad, que no es su limite de
+           estabilidad. Oscilaba (caudales saltando entre -29 y +84 m2/s) y devolvia calados 3.5
+           veces mayores que el tirante normal de Manning, sin abortar. Ahora usa el limite parabolico
+           de Hunter et al. (2005).
+      ADEMAS, DOS DEFECTOS PREEXISTENTES encontrados al auditar colisiones de nombres entre pestañas:
+      la Pestaña 4 (Tiempo de concentracion) y la Pestaña 6 (Caudales Maximos) creaban sendos campos
+      «Ct de Snyder» y «Lca» CON EL MISMO NOMBRE DE ATRIBUTO. Como la 6 se construye despues, pisaba
+      a la 4, y el calculo de Tc por Snyder leia en silencio los valores tecleados en la Pestaña 6:
+      los campos de la Pestaña 4 se mostraban pero no tenian ningun efecto. Corregido.
     - v0.2.70: CORRECCION de "no corre el HYDRA2D": el boton abria el modelo 2D pero no se veia.
       CAUSA PRINCIPAL: el banco de trabajo de HYDRA2DGPU NO abre una ventana propia -- se ACOPLA como
       panel dentro de la ventana principal de QGIS. La ventana de HydroAndina Pro es una ventana de
