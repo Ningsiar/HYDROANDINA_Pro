@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.3.8
+version=0.3.9
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,41 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.3.9: item 8 -- fase 2 de 4 (Pestaña 8, dibujar estructuras con el
+      mouse). En vez de reimplementar un rubber-band de digitalización
+      propio, se reutilizan las herramientas NATIVAS de QGIS: un botón
+      "Habilitar edición para dibujar" activa la edición sobre la MISMA
+      capa que ya acumula lo insertado por clic o importado de otra capa
+      (fase 1) y la pone como capa activa, para que el usuario dibuje con
+      "Añadir entidad de línea" de la barra de digitalización de QGIS --
+      varios clics para seguir un trazado curvo (un cauce, una vía), doble
+      clic para terminar. Un botón "Sincronizar" recorre todas las
+      geometrías de la capa, recalcula fila1/col1/fila2/col2 desde el
+      PRIMER y ÚLTIMO vértice de cada una (no un vértice intermedio) con
+      la geotransformación del dominio cargado, y reconstruye la tabla de
+      simulación ENTERA a partir de la capa -- así la capa es la única
+      fuente de verdad y no quedan filas huérfanas de estructuras que ya
+      se borraron dibujando. Un tercer botón guarda los cambios de la
+      capa (commitChanges).
+      Bug real encontrado y corregido por la propia prueba: un feature
+      dibujado a mano con el formulario nativo de QGIS deja los campos
+      vacíos como QVariant NULL, no como el None de Python -- el código
+      original comparaba con "is not None" y con "or", que NO detectan un
+      QVariant NULL, y terminaba pasándolo a un formato de texto que
+      revienta. Se agregó _valor_atributo_o_none() para normalizar ambos
+      casos antes de aplicar los valores por defecto (nombre autogenerado,
+      tipo del formulario, parámetro1 = 0).
+      Verificado con QGIS 3.40.1 real en modo headless (21 comprobaciones):
+      features agregados directo a la capa como haría la herramienta
+      nativa (incluida una línea de 3 vértices, para confirmar que se usa
+      el primero y el ÚLTIMO, no uno intermedio), sincronización con y sin
+      una edición ya abierta de antes, reconstrucción exacta de la tabla,
+      persistencia de las features tras guardar, y los casos sin dominio /
+      sin capa avisando en vez de reventar -- incluido el caso que
+      reveló el bug del QVariant NULL.
+      Pendiente: fase 3 (video embebido de la simulación), fase 4
+      (visualización 3D del terreno+estructuras con corte transversal
+      interactivo).
     - v0.3.8: item 8 -- fase 1 de 4 (Pestaña 8, Simulación Hidráulica 2D).
       Hasta ahora, cada estructura de la tabla del punto 4 exigía calcular
       a mano la fila/columna de la malla desde las coordenadas reales --

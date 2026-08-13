@@ -8555,6 +8555,19 @@ class HydroAndinaProDialog(QDialog):
         fila = int((dom["y_max"] - punto.y()) / dom["dy"])
         return fila, columna
 
+    def _valor_atributo_o_none(self, feature, nombre_campo):
+        """feature[nombre_campo] normalizado: None tanto si el atributo es
+        el None de Python como si es un QVariant NULL (lo que devuelve un
+        campo vacío de un feature dibujado a mano con las herramientas de
+        QGIS) -- sin esto, `valor or default` no dispara el default porque
+        un QVariant NULL no es "is None" en Python."""
+        valor = feature[nombre_campo]
+        if valor is None:
+            return None
+        if isinstance(valor, QVariant) and valor.isNull():
+            return None
+        return valor
+
     def _activar_map_tool_estructura_2d(self, checked):
         canvas = self.iface.mapCanvas()
         if checked:
@@ -8760,6 +8773,124 @@ class HydroAndinaProDialog(QDialog):
                 "Estructuras exportadas a:\n" + "\n".join(salidas.values()))
         except Exception as e:
             QMessageBox.critical(self, "Error exportando la capa", str(e))
+
+    # -- Dibujar estructuras con el mouse (item 8, fase 2): en vez de
+    # reimplementar un rubber-band de digitalización propio, se reutilizan
+    # las herramientas nativas de QGIS (edición + "Añadir entidad de
+    # línea") sobre la MISMA capa que ya acumula lo insertado por clic o
+    # importado de otra capa (self.capa_estructuras_2d) -- así hay una
+    # sola fuente de verdad, y "Sincronizar" recalcula fila/columna desde
+    # la geometría dibujada y reconstruye la tabla de simulación entera.
+    def _on_habilitar_dibujo_estructuras_2d(self):
+        if not getattr(self, "dominio_2d", None):
+            QMessageBox.warning(
+                self, "Falta el dominio",
+                "Cargue primero el dominio de cálculo (sección 1) -- se necesita su "
+                "geotransformación para poder sincronizar fila/columna después de dibujar.")
+            return
+        capa = self._obtener_capa_estructuras_2d()
+        if not capa.isEditable():
+            capa.startEditing()
+        try:
+            self.iface.setActiveLayer(capa)
+        except Exception:
+            pass
+        QMessageBox.information(
+            self, "Capa lista para dibujar",
+            "La capa «Estructuras 2D (HydroAndina Pro)» quedó activa y en modo edición.\n\n"
+            "Use la herramienta «Añadir entidad de línea» de la barra de digitalización de QGIS "
+            "para dibujar cada estructura (varios clics para seguir un trazado curvo; doble clic "
+            "o Enter para terminarla). En el formulario que aparece al terminar cada línea, "
+            "complete nombre/tipo/parametro1/param2_3 -- deje fila1/col1/fila2/col2 en 0, se "
+            "calculan solos al pulsar «Sincronizar» cuando termine de dibujar."
+        )
+
+    def _on_sincronizar_estructuras_2d_desde_capa(self):
+        if not getattr(self, "dominio_2d", None):
+            QMessageBox.warning(self, "Falta el dominio",
+                                 "Cargue primero el dominio de cálculo (sección 1).")
+            return
+        if not self._capa_sigue_en_proyecto(self.capa_estructuras_2d):
+            QMessageBox.warning(self, "Sin capa de estructuras",
+                                 "Todavía no hay ninguna estructura dibujada ni insertada.")
+            return
+
+        capa = self.capa_estructuras_2d
+        editando_ya = capa.isEditable()
+        if not editando_ya:
+            capa.startEditing()
+
+        idx_fila1 = capa.fields().indexOf("fila1")
+        idx_col1 = capa.fields().indexOf("col1")
+        idx_fila2 = capa.fields().indexOf("fila2")
+        idx_col2 = capa.fields().indexOf("col2")
+
+        filas_tabla = []
+        for feature in capa.getFeatures():
+            geom = feature.geometry()
+            if geom is None or geom.isEmpty():
+                continue
+            vertices = [v for v in geom.vertices()]
+            if len(vertices) < 2:
+                continue
+            punto_inicio = QgsPointXY(vertices[0])
+            punto_fin = QgsPointXY(vertices[-1])
+            fila1, col1 = self._fila_columna_desde_punto_2d(punto_inicio)
+            fila2, col2 = self._fila_columna_desde_punto_2d(punto_fin)
+            capa.changeAttributeValue(feature.id(), idx_fila1, fila1)
+            capa.changeAttributeValue(feature.id(), idx_col1, col1)
+            capa.changeAttributeValue(feature.id(), idx_fila2, fila2)
+            capa.changeAttributeValue(feature.id(), idx_col2, col2)
+
+            nombre = self._valor_atributo_o_none(feature, "nombre") or f"Estructura {len(filas_tabla) + 1}"
+            tipo = self._valor_atributo_o_none(feature, "tipo") or self.combo_insertar_tipo_2d.currentText()
+            param1_valor = self._valor_atributo_o_none(feature, "parametro1")
+            param1 = float(param1_valor) if param1_valor is not None else 0.0
+            param2_3 = self._valor_atributo_o_none(feature, "param2_3") or ""
+            filas_tabla.append((nombre, tipo, fila1, col1, fila2, col2, param1, param2_3))
+
+        if not editando_ya:
+            capa.commitChanges()
+
+        if not filas_tabla:
+            QMessageBox.warning(self, "Nada que sincronizar",
+                                 "La capa de estructuras no tiene ninguna geometría con al menos "
+                                 "2 vértices.")
+            return
+
+        # La tabla de simulación se reconstruye ENTERA desde la capa, para
+        # que sea la única fuente de verdad y no queden filas de
+        # estructuras que ya se borraron de la capa.
+        n_filas_tabla = max(len(filas_tabla), 4)
+        self.tabla_estructuras_2d.setRowCount(n_filas_tabla)
+        for fila_idx, (nombre, tipo, fila1, col1, fila2, col2, param1, param2_3) in enumerate(filas_tabla):
+            valores = [nombre, tipo, str(fila1), str(col1), str(fila2), str(col2),
+                       f"{param1:g}", param2_3]
+            for col, valor in enumerate(valores):
+                self.tabla_estructuras_2d.setItem(fila_idx, col, QTableWidgetItem(str(valor)))
+        for fila_idx in range(len(filas_tabla), n_filas_tabla):
+            for col in range(8):
+                self.tabla_estructuras_2d.setItem(fila_idx, col, None)
+        ajustar_alto_tabla(self.tabla_estructuras_2d, filas_visibles_max=8)
+
+        self.lbl_estado_estructuras_2d.setText(
+            f"Estado: {len(filas_tabla)} estructura(s) sincronizada(s) desde la capa -- la tabla "
+            "de simulación se reconstruyó completa a partir de la capa.")
+
+    def _on_guardar_edicion_estructuras_2d(self):
+        if not self._capa_sigue_en_proyecto(self.capa_estructuras_2d):
+            QMessageBox.warning(self, "Sin capa de estructuras", "Todavía no hay ninguna capa de estructuras.")
+            return
+        capa = self.capa_estructuras_2d
+        if not capa.isEditable():
+            QMessageBox.information(self, "Nada que guardar", "La capa no está en modo edición.")
+            return
+        if capa.commitChanges():
+            QMessageBox.information(self, "Cambios guardados",
+                                     "Se guardaron los cambios de la capa de estructuras.")
+        else:
+            QMessageBox.warning(self, "No se pudo guardar",
+                                 "Revise los errores de edición de la capa (panel de mensajes de QGIS).")
 
     def _on_ejecutar_simulacion_2d(self):
         if not getattr(self, "dominio_2d", None):
@@ -9361,6 +9492,30 @@ class HydroAndinaProDialog(QDialog):
         h_export_est.addWidget(btn_exportar_capa_estructuras_2d)
         h_export_est.addStretch()
         v_ins.addLayout(h_export_est)
+
+        lbl_dibujar = QLabel(
+            "<b>O dibujar libremente con el mouse</b> -- para trazar una estructura curva "
+            "siguiendo un cauce o una vía, en vez de solo el inicio y el fin: habilite la edición "
+            "aquí, dibuje con la herramienta «Añadir entidad de línea» de la barra de "
+            "digitalización de QGIS (varios clics para seguir el trazado; doble clic o Enter para "
+            "terminar la línea), y sincronice para que la fila/columna se calculen solas y la tabla "
+            "de arriba se reconstruya con lo que haya dibujado."
+        )
+        lbl_dibujar.setWordWrap(True)
+        v_ins.addWidget(lbl_dibujar)
+
+        h_dibujar = QHBoxLayout()
+        btn_habilitar_dibujo_2d = QPushButton("🖊 Habilitar edición para dibujar")
+        btn_habilitar_dibujo_2d.clicked.connect(self._on_habilitar_dibujo_estructuras_2d)
+        h_dibujar.addWidget(btn_habilitar_dibujo_2d)
+        btn_sincronizar_estructuras_2d = QPushButton(
+            "🔄 Sincronizar fila/columna y la tabla desde lo dibujado")
+        btn_sincronizar_estructuras_2d.clicked.connect(self._on_sincronizar_estructuras_2d_desde_capa)
+        h_dibujar.addWidget(btn_sincronizar_estructuras_2d)
+        btn_guardar_edicion_2d = QPushButton("Guardar cambios de la capa")
+        btn_guardar_edicion_2d.clicked.connect(self._on_guardar_edicion_estructuras_2d)
+        h_dibujar.addWidget(btn_guardar_edicion_2d)
+        v_ins.addLayout(h_dibujar)
 
         self.lbl_estado_estructuras_2d = QLabel("Estado: ninguna estructura insertada desde el mapa todavía.")
         self.lbl_estado_estructuras_2d.setWordWrap(True)
