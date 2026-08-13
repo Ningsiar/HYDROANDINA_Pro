@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.3.12
+version=0.3.13
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,46 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.3.13: límite de 10 usos gratuitos con validación remota y clave
+      de licencia. Cada apertura del plugin (plugin.py::run(), ANTES de
+      construir el diálogo principal -- para no pagar el costo de cargar
+      PyQt/matplotlib si va a quedar bloqueado) registra 1 uso contra un
+      backend propio (una hoja de cálculo de Google con un Apps Script
+      delante, ver scripts/licencia_backend_apps_script.gs -- el backend
+      es la fuente de verdad, no un archivo local editable). Si no hay
+      conexión, se cae a un caché local (~/.hydroandina_pro_licencia/)
+      con la misma regla de límite, para no castigar a un usuario
+      legítimo sin internet en ese momento -- pero también cuenta y
+      también bloquea si se agota estando offline.
+      Al superar el límite se muestra un diálogo bloqueante
+      (ui/dialogo_licencia.py) con una casilla para ingresar la clave de
+      licencia; la clave se envía al backend para verificarla (nunca al
+      revés): el plugin NUNCA conoce el secreto con el que se generan las
+      claves válidas, así que no se puede extraer del código fuente
+      distribuido. El secreto solo vive en el Apps Script desplegado
+      (privado del desarrollador) y en scripts/generar_clave_licencia.py,
+      que lo lee de una variable de entorno -- nunca hardcodeado, así que
+      ese script se puede versionar sin exponer nada.
+      URL_BACKEND_LICENCIA queda vacía a propósito hasta desplegar el
+      Apps Script: mientras esté vacía, el plugin NO aplica ningún
+      límite (evita dejarlo inutilizable en desarrollo/pruebas).
+      Verificado con QGIS 3.40.1 real en modo headless (30
+      comprobaciones): id de instalación estable, caché local, los 10
+      usos exactos antes de bloquear con un backend forzado a
+      inalcanzable, una instalación licenciada que nunca se bloquea ni
+      sigue sumando usos, los mensajes de error de activar_licencia() en
+      cada caso (sin backend, backend inalcanzable, clave vacía), el
+      diálogo en sus 3 variantes (bloqueado, activación voluntaria,
+      offline), la integración completa en plugin.py (deja pasar sin
+      backend, bloquea y decide según la respuesta del diálogo, y un
+      fallo interno del propio mecanismo nunca deja el plugin
+      inutilizable), y un vector de prueba HMAC para verificar de forma
+      independiente que el generador de claves y el Apps Script (una vez
+      desplegado) calculan la misma clave para el mismo id.
+      PENDIENTE DE USTED (no es código, es configuración de su cuenta):
+      desplegar scripts/licencia_backend_apps_script.gs como aplicación
+      web de Google y pegar la URL resultante en
+      hydroandina_pro/core/licencia.py::URL_BACKEND_LICENCIA.
     - v0.3.12: item 5 -- la ÚLTIMA fase pendiente de las 9 del pedido
       original (Pestaña 5, autocompletar el método IDF IILA-SENAMHI-UNI
       por ubicación). Con esto quedan completas las 9 fases.

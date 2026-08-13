@@ -36,6 +36,12 @@ class HydroAndinaProPlugin:
             self.dialog = None
 
     def run(self):
+        # Licencia PRIMERO, antes de cargar nada pesado: si está
+        # bloqueado no tiene sentido pagar el costo de importar
+        # PyQt/matplotlib ni de construir el diálogo principal.
+        if not self._verificar_licencia():
+            return
+
         # Import diferido: evita cargar PyQt/matplotlib hasta que el
         # usuario realmente abre el plugin (arranque de QGIS más rápido).
         from .plugin_dialog import HydroAndinaProDialog
@@ -45,6 +51,30 @@ class HydroAndinaProPlugin:
         self.dialog.show()
         self.dialog.raise_()
         self.dialog.activateWindow()
+
+    def _verificar_licencia(self) -> bool:
+        """Registra 1 uso (item de licencia: cada apertura del plugin
+        cuenta como uno) y, si ya se agotaron los gratuitos y no hay una
+        licencia activada, muestra el diálogo de licencia en vez de abrir
+        el plugin. Devuelve True si se debe continuar y abrir el plugin."""
+        from .core import licencia
+        try:
+            estado = licencia.consultar_y_registrar_uso()
+        except Exception:
+            # Un fallo inesperado del propio mecanismo de licencia NUNCA
+            # debe dejar el plugin inutilizable -- se deja pasar.
+            return True
+
+        if not estado.get("bloqueado"):
+            return True
+
+        from .ui.dialogo_licencia import DialogoLicenciaAgotada
+        dialogo = DialogoLicenciaAgotada(estado, parent=self.iface.mainWindow())
+        try:
+            dialogo.exec_()
+        except AttributeError:
+            dialogo.exec()  # PyQt6/Qt6 (QGIS 4.0+)
+        return dialogo.licencia_quedo_activada()
 
     def _mostrar_splash_si_es_posible(self):
         """Pantalla de introducción (reproduce resources/splash.gif vía
