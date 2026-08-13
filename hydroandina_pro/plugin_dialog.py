@@ -39,7 +39,7 @@ from .core import (delineation, morphometry, curve_number, tc_methods, dem_downl
                     exporters, raster_stats, unit_hydrographs, frequency_analysis,
                     design_storm, precip_source, scs_storm_patterns, pour_point_snap,
                     main_channel, landcover_soils, dem_download_asf, hydraulic_structures,
-                    cn_generator_bridge, report_generator, project_export,
+                    cn_generator_bridge, report_generator, report_generator_docxtpl, project_export,
                     quality_control, pmp_hershfield, direct_discharge_methods, flood_routing, baseflow, infiltration,
                     data_completion, areal_precipitation, water_yield, scour, soil_loss,
                     sediment_transport, debris_flow, climate_change, mean_flow_models, etp_methods,
@@ -13303,6 +13303,32 @@ class HydroAndinaProDialog(QDialog):
         v_i.addLayout(h4)
         v.addWidget(gb_individual)
 
+        gb_plantilla = QGroupBox(
+            "Reporte Word con plantilla — elija qué secciones incluir (docxtpl)"
+        )
+        v_p = QVBoxLayout(gb_plantilla)
+        v_p.addWidget(QLabel(
+            "A diferencia del botón de arriba (que siempre arma las 7 secciones, con una nota si "
+            "alguna aún no se calculó), aquí puede elegir cuáles incluir: las que no marque no "
+            "aparecen en el documento. Usa la misma información y una plantilla Word editable "
+            "(hydroandina_pro/resources/plantilla_reporte.docx) en vez de un documento armado desde "
+            "cero, para poder ajustar membrete/estilos corporativos sin tocar el código del plugin."
+        ))
+        self.checks_secciones_reporte = {}
+        grid_secciones = QGridLayout()
+        for i, (clave, titulo, _funcion) in enumerate(report_generator.SECCIONES_REPORTE):
+            check = QCheckBox(titulo)
+            check.setChecked(True)
+            self.checks_secciones_reporte[clave] = check
+            grid_secciones.addWidget(check, i // 2, i % 2)
+        v_p.addLayout(grid_secciones)
+        self.btn_generar_reporte_word_plantilla = QPushButton(
+            "Generar reporte Word con plantilla (secciones marcadas)"
+        )
+        self.btn_generar_reporte_word_plantilla.clicked.connect(self._on_generar_reporte_word_plantilla)
+        v_p.addWidget(self.btn_generar_reporte_word_plantilla)
+        v.addWidget(gb_plantilla)
+
         v.addStretch()
         self._agregar_pestaña_con_scroll(tab, "21. Exportar / Reportes")
 
@@ -13399,8 +13425,20 @@ class HydroAndinaProDialog(QDialog):
             "p24_disenio": self.p24_disenio,
             "hidrograma_resultado": self.hidrograma_resultado,
             "resultados_hidraulica_drenaje": self.resultados_hidraulica_drenaje,
+            "recomendacion_hidraulica_texto": self._texto_plano_desde_html(
+                self.lbl_recomendacion_hidraulica.text()
+            ) if hasattr(self, "lbl_recomendacion_hidraulica") else None,
             "rutas_imagenes": rutas_imagenes,
         }
+
+    def _texto_plano_desde_html(self, html: str) -> str:
+        """Convierte el HTML simple (negritas, <br>) de un QLabel a texto
+        plano con saltos de línea, para insertarlo como párrafos en el
+        reporte Word (Word no debe mostrar etiquetas HTML literales)."""
+        import re
+        texto = re.sub(r"<br\s*/?>", "\n", html)
+        texto = re.sub(r"<[^>]+>", "", texto)
+        return texto.strip()
 
     def _on_generar_reporte_word(self):
         ruta, _ = QFileDialog.getSaveFileName(self, "Guardar reporte Word", "reporte_hydroandes.docx",
@@ -13414,6 +13452,27 @@ class HydroAndinaProDialog(QDialog):
             QMessageBox.information(self, "Reporte generado", f"Reporte Word guardado en:\n{ruta}")
         except report_generator.ReportGeneratorError as e:
             QMessageBox.warning(self, "python-docx no disponible", str(e))
+        except Exception as e:
+            QMessageBox.critical(self, "Error generando el reporte Word", str(e))
+
+    def _on_generar_reporte_word_plantilla(self):
+        secciones_incluidas = [clave for clave, check in self.checks_secciones_reporte.items()
+                                if check.isChecked()]
+        if not secciones_incluidas:
+            QMessageBox.warning(self, "Ninguna sección marcada",
+                                 "Marque al menos una sección para incluir en el reporte.")
+            return
+        ruta, _ = QFileDialog.getSaveFileName(self, "Guardar reporte Word (con plantilla)",
+                                               "reporte_hydroandina_pro.docx", "Documento Word (*.docx)")
+        if not ruta:
+            return
+        try:
+            carpeta_tmp = tempfile.mkdtemp(prefix="hydroandina_reporte_")
+            contexto = self._construir_contexto_reporte(carpeta_tmp)
+            report_generator_docxtpl.generar_reporte_word_plantilla(ruta, contexto, secciones_incluidas)
+            QMessageBox.information(self, "Reporte generado", f"Reporte Word guardado en:\n{ruta}")
+        except report_generator.ReportGeneratorError as e:
+            QMessageBox.warning(self, "No se pudo generar el reporte", str(e))
         except Exception as e:
             QMessageBox.critical(self, "Error generando el reporte Word", str(e))
 

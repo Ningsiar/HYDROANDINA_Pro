@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.3.6
+version=0.3.7
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,42 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.3.7: item 9 completo -- fase 2 de 2 (reporte Word con PLANTILLA
+      docxtpl, tal como se pidió originalmente). Nuevo
+      core/report_generator_docxtpl.py: usa docxtpl sobre una plantilla
+      real en hydroandina_pro/resources/plantilla_reporte.docx (fuente
+      versionada en scripts/build_report_template.py, con bloques
+      condicionales Jinja2 {% if incluir_x %}...{% endif %} por sección),
+      con el mecanismo de subdoc de docxtpl (doc.new_subdoc().docx expone
+      la misma API de python-docx que un Document normal) para insertar
+      tablas/imágenes solo en las secciones que el usuario elija. Nueva
+      dependencia: docxcompose (la necesita new_subdoc()), instalada en
+      el Python de QGIS.
+      En la Pestaña 21 se agregó un nuevo cuadro "Reporte Word con
+      plantilla" con 7 casillas (una por sección) y un botón propio --
+      independiente del botón existente "Generar reporte Word completo",
+      que se mantiene sin cambios de comportamiento para quien lo prefiera
+      (arma las 7 secciones siempre, con una nota si falta el cálculo, sin
+      plantilla externa).
+      Para no duplicar la lógica de cada sección entre los dos mecanismos,
+      se refactorizó core/report_generator.py: cada sección (DEM,
+      morfometría, CN, Tc, frecuencia, caudales, hidráulica) quedó en su
+      propia función en SECCIONES_REPORTE, que ambos generadores llaman
+      igual -- el directo antepone su propio encabezado, el de plantilla
+      ya lo trae fijo en el documento antes del marcador {{ subdoc_x }}.
+      La sección de Hidráulica y Drenaje ahora incluye también el cuadro
+      comparativo y la recomendación automática del item 7 (antes no
+      estaba en ningún reporte).
+      Verificado con QGIS 3.40.1 real en modo headless (20 comprobaciones):
+      el refactor NO cambió el reporte completo original (mismas 7
+      secciones + Nota, mismo orden, mismos datos, verificado también
+      dentro de las tablas); el reporte con plantilla y las 7 secciones
+      marcadas no deja tags Jinja2 sin resolver; con solo 3 secciones
+      marcadas, las 4 no marcadas NO aparecen en absoluto (ni título ni
+      contenido) a diferencia del reporte completo; el botón de la UI
+      respeta las casillas marcadas; sin ninguna marcada avisa antes de
+      abrir el diálogo de guardar; y una plantilla faltante da un error
+      claro en vez de un traceback.
     - v0.3.6: item 9 completo -- fase 1 de 2 (botón de descarga universal).
       Se agregó un botón flotante (⬇, esquina superior derecha) a TODAS
       las tablas, gráficos y cuadros de resumen final del plugin, sin
