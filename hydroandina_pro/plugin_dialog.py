@@ -14,6 +14,11 @@ import math
 
 import numpy as np
 
+try:
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as _FigureCanvasQTAgg
+except ImportError:
+    from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as _FigureCanvasQTAgg
+
 from qgis.core import (
     QgsProject, QgsMapLayerProxyModel, QgsCoordinateReferenceSystem,
     QgsCoordinateTransform, QgsPointXY, QgsGeometry, QgsWkbTypes,
@@ -68,6 +73,7 @@ from .ui.swe2d_canvas import (MapaCalado2DCanvas, MapaPeligrosidadCanvas,
 from .ui.swe2d_runner import SimulacionSwe2DWorker, estimar_coste
 from .ui.table_utils import (ajustar_alto_tabla, aplicar_columna_elastica, limitar_ancho_tabla,
                               limitar_ancho_boton, crear_tabla_parametros, poblar_tabla_parametros)
+from .ui import export_overlay
 
 
 def utm_epsg_for_lonlat(lon: float, lat: float) -> int:
@@ -431,6 +437,30 @@ class HydroAndinaProDialog(QDialog):
         self._build_tab_hidraulica_pozos()
         self._build_tab_exportacion()
         self._build_tab6()
+
+        # Item 9 del pedido: "todas las tablas, gráficos y cuadros de
+        # resumen final deben tener un botón de descarga". En vez de
+        # tocar cada uno de los ~21 métodos _build_tab*() de arriba, se
+        # recorre el diálogo YA CONSTRUIDO una sola vez y se le agrega el
+        # botón flotante a cada tabla/gráfico/resumen encontrado (ver
+        # _habilitar_descargas_universales).
+        self._habilitar_descargas_universales()
+
+    def _habilitar_descargas_universales(self):
+        """Agrega el botón flotante de descarga (Excel/CSV/copiar en
+        tablas; PNG/JPG en gráficos; copiar/TXT/HTML en cuadros de
+        resumen) a TODO lo que ya esté construido en el diálogo. Cubre
+        las ~21 pestañas de una sola vez -- y cualquier tabla/gráfico que
+        se agregue después, con solo llamar esto de nuevo."""
+        for tabla in self.findChildren(QTableWidget):
+            nombre = tabla.objectName() or "tabla"
+            export_overlay.agregar_boton_descarga_tabla(tabla, nombre_base=nombre)
+        for canvas in self.findChildren(_FigureCanvasQTAgg):
+            export_overlay.agregar_boton_descarga_grafico(canvas, nombre_base="grafico")
+        for texto in self.findChildren(ResumenFinal):
+            export_overlay.agregar_boton_descarga_texto(texto, nombre_base="resumen")
+        for cuadro in self.findChildren(CuadroResumenImpacto):
+            export_overlay.agregar_boton_descarga_texto(cuadro, nombre_base="resumen_impacto")
 
     # ------------------------------------------------------------------
     # TAB 1: DEM Acquisition & Delineation

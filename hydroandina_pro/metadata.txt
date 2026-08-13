@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.3.5
+version=0.3.6
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,39 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.3.6: item 9 completo -- fase 1 de 2 (botón de descarga universal).
+      Se agregó un botón flotante (⬇, esquina superior derecha) a TODAS
+      las tablas, gráficos y cuadros de resumen final del plugin, sin
+      tocar el layout de ninguna de las ~21 pestañas una por una: en vez
+      de eso, un único barrido (_habilitar_descargas_universales, al
+      final de HydroAndinaProDialog.__init__) recorre el diálogo YA
+      CONSTRUIDO con self.findChildren(...) y le agrega el botón a cada
+      QTableWidget (exportar a Excel/CSV, copiar en formato TSV pegable
+      en Excel/Sheets), cada gráfico de matplotlib (guardar como PNG o
+      JPG), y cada cuadro de resumen -- ResumenFinal y CuadroResumenImpacto,
+      este último con un texto_plano() nuevo ya que no es un QTextBrowser
+      (copiar todo, guardar como TXT, y HTML cuando aplica). El botón se
+      reposiciona solo con un event filter cuando la tabla/gráfico cambia
+      de tamaño, así que sigue pegado a la esquina aunque una tabla crezca
+      al calcular. Nuevo core/table_export.py (CSV con ';' como separador
+      -- lo que Excel en español espera --, XLSX vía openpyxl con encabezado
+      en negrita y ancho de columna automático, y texto TSV para copiar).
+      El "pegar" (paste) ya existía de antes en las tablas de INPUT
+      (TablaPegable); no se agrega a las tablas de resultado porque no
+      tiene sentido pegar sobre un cálculo ya hecho.
+      Verificado con QGIS 3.40.1 real en modo headless: cobertura 100% en
+      85 tablas, 76 gráficos y 31 cuadros de resumen construidos en la
+      sesión de prueba; sin duplicar el botón al llamar el barrido dos
+      veces; exportación CSV/XLSX contra una tabla real verificada
+      celda por celda contra el archivo generado; tabla vacía exporta
+      solo el encabezado sin reventar; sanitización de nombres de hoja
+      Excel (caracteres prohibidos y límite de 31 caracteres).
+      Pendiente para una fase 2: centralizar en la Pestaña 21 la
+      exportación a Word con una PLANTILLA (docxtpl/Jinja2, como se pidió
+      originalmente) en vez del documento armado a mano con python-docx
+      que ya existe (core/report_generator.py, cubre hoy solo las
+      pestañas 1-7 de las ~21 del plugin), con selección de qué pestañas
+      incluir.
     - v0.3.5: item 7 completo -- fase 2 de 2 (Pestaña 7, Diseño de
       Estructuras Hidráulicas). El "cuadro resumen final" era solo texto;
       ahora es una TABLA comparativa real (una fila por estructura

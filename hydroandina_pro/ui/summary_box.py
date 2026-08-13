@@ -154,6 +154,25 @@ class CuadroResumenImpacto(QFrame):
         self._contenedor_metricas.setVisible(bool(metricas))
         self._linea_inf.setVisible(bool(metricas))
 
+    def texto_plano(self) -> str:
+        """Todo el contenido del cuadro como texto plano (título, cifra
+        principal, métricas secundarias y leyenda), para el botón de
+        descarga flotante (ui/export_overlay.py) -- este widget no es un
+        QTextBrowser, así que no tiene toPlainText() propio."""
+        partes = [self.lbl_titulo.text()]
+        if self.lbl_subtitulo.text():
+            partes.append(self.lbl_subtitulo.text())
+        partes.append(self.lbl_valor.text())
+        columnas = self._grid.columnCount()
+        for columna in range(columnas):
+            item_desc = self._grid.itemAtPosition(0, columna)
+            item_val = self._grid.itemAtPosition(1, columna)
+            if item_desc and item_desc.widget() and item_val and item_val.widget():
+                partes.append(f"{item_desc.widget().text()}: {item_val.widget().text()}")
+        if self.lbl_leyenda.text():
+            partes.append(self.lbl_leyenda.text())
+        return "\n".join(partes)
+
 
 class ResumenFinal(QTextBrowser):
     """
