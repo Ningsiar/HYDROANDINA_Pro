@@ -2,7 +2,7 @@
 name=HydroAndes Pro
 qgisMinimumVersion=3.28
 description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.3.1
+version=0.3.2
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -21,6 +21,34 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.3.2: item 1 completo (diagnostico grafico de distribuciones + alto de la tabla de Tc) y las
+      correcciones de tabla del item 5 (fase 2 de 9; quedan item 4 completo, el mapa IILA-SENAMHI
+      clicable del item 5, item 7, y los subsistemas nuevos de los items 8 y 9).
+      (1) NUEVO PANEL DE DIAGNOSTICO GRAFICO en la Pestaña 5: densidad de probabilidad f(x),
+      funcion de distribucion F(x), supervivencia S(x)=1-F(x), riesgo instantaneo h(x)=f(x)/S(x),
+      riesgo acumulado H(x)=-ln S(x), y P-P/Q-Q superpuestos -- el juego estandar de graficos de un
+      analisis de frecuencia (misma composicion que fitdistrplus::plotdist/gofstat en R). f(x) se
+      deriva de cdf() por diferencias finitas centradas en vez de pedir una formula analitica por
+      cada una de las 9 distribuciones: funciona igual para las 9 sin codigo especifico. Verificado
+      contra la formula cerrada de Normal y Gumbel (error relativo < 0.002%), la identidad
+      F(x)+S(x)=1, que la densidad integra a 1, que H(x) es monotona creciente, y que el Q-Q se aleja
+      mas de la diagonal cuando el ajuste es deliberadamente malo (Normal sobre datos exponenciales)
+      que cuando es bueno.
+      (2) Alto de la tabla de metodos de Tc (Pestaña 4): tenia un limite FIJO de 260 px que ya era
+      insuficiente para los 14+ metodos mas la fila de Promedio (260 px / 24 px por fila ~ 11 filas
+      visibles de 15+ necesarias). Ahora usa el mismo ajustar_alto_tabla() dinamico del resto de
+      tablas del plugin, calculado sobre el conteo real de filas.
+      (3) Item 5, tablas de la Pestaña 5: la tabla de bandas de confianza y la de sensibilidad no
+      estacionaria (estacionario vs. primer año / ultimo año / +20 años extrapolado) tenian un tope
+      de ANCHO fijo (760 y 820 px) pensado para tablas que crecen sin limite de columnas, cuando en
+      realidad las dos tienen siempre 6 y 5 columnas fijas -- el tope solo las recortaba sin
+      necesidad y obligaba a scroll horizontal interno, justo para ver la ultima columna (la de la
+      extrapolacion). Se quito el tope en ambas, y su alto ahora se calcula sobre el numero real de
+      periodos de retorno en vez de un limite fijo de 12 filas. Ademas, la tabla de bondad de ajuste
+      ya tenia columnas identificadas por simbolo (D=KS, A²=AD, χ²=Chi-cuadrado); se agregaron
+      tooltips con el nombre completo de cada prueba (Kolmogorov-Smirnov, Anderson-Darling,
+      Chi-cuadrado) sin gastar ancho de columna en texto que el simbolo ya resuelve.
+      Verificado con QGIS 3.40.1 real en modo headless.
     - v0.3.1: correcciones de calculo y de tabla en las Pestañas 2, 3 y 6 (fase 1 de un pedido de 9
       puntos; el resto -- graficos estadisticos de la Pestaña 5, catalogo de metodos de coeficiente
       de escorrentia/rugosidad de la Pestaña 4, enlaces cruzados de la Pestaña 7, y los subsistemas

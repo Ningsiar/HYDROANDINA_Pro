@@ -8,6 +8,8 @@ contra las distribuciones ajustadas (Pestaña de Precipitación Máx 24h).
 NOTA DE COMPATIBILIDAD: ver ui/hypsometric_canvas.py — backend_qtagg
 genérico, compatible con QGIS 3.x (Qt5) y 4.x (Qt6).
 """
+import numpy as np
+
 try:
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 except ImportError:
@@ -16,7 +18,7 @@ from matplotlib.figure import Figure
 
 # Estilo comun de leyendas y ejes (ui/chart_style.py). Es idempotente,
 # asi que cada lienzo puede invocarlo sin coordinarse con los demas.
-from .chart_style import aplicar_estilo_graficos
+from .chart_style import aplicar_estilo_graficos, leyenda_impacto
 
 aplicar_estilo_graficos()
 
@@ -238,3 +240,113 @@ class FrequencyCanvas(FigureCanvas):
         self.ax.grid(True, which="both", linestyle=":", linewidth=0.5)
         self.fig.tight_layout()
         self.draw()
+
+
+class DiagnosticoDistribucionCanvas(FigureCanvas):
+    """
+    Panel de 6 gráficos de diagnóstico para UNA distribución ajustada:
+    densidad, distribución, supervivencia, riesgo, riesgo acumulado, y
+    los diagnósticos P-P / Q-Q -- el juego de gráficos estándar de un
+    informe de análisis de frecuencia (misma composición que
+    `fitdistrplus::plotdist`/`gofstat` en R, una referencia habitual en
+    hidrología estadística).
+
+    Se agrupan en UN panel de 2×3 en vez de 6 lienzos sueltos: es como
+    se presentan convencionalmente (para compararlos de un vistazo) y
+    evita saturar la pestaña con seis widgets independientes.
+    """
+
+    def __init__(self, parent=None, width=10.5, height=6.6, dpi=100):
+        self.fig = Figure(figsize=(width, height), dpi=dpi)
+        super().__init__(self.fig)
+        self.setParent(parent)
+        self.setMinimumSize(int(width * dpi), int(height * dpi))
+
+    def plot_diagnosticos(self, diagnostico: dict, nombre_distribucion: str, unidad: str = "mm"):
+        """
+        diagnostico: dict devuelto por
+            core.frequency_analysis.diagnostico_distribucion().
+        """
+        self.fig.clear()
+        ejes = self.fig.subplots(2, 3)
+        (ax_dens, ax_cdf, ax_surv), (ax_riesgo, ax_riesgo_acum, ax_qqpp) = ejes
+
+        x = np.array(diagnostico["malla_x"])
+        datos = np.array(diagnostico["datos_ordenados"])
+        color_curva = "#1F3864"
+        color_datos = "#B3261E"
+
+        # ---- 1) Densidad de probabilidad f(x) ----
+        ax_dens.plot(x, diagnostico["densidad"], "-", linewidth=2.0, color=color_curva,
+                     label=nombre_distribucion)
+        ax_dens.hist(datos, bins=min(12, max(5, len(datos) // 3)), density=True,
+                     color=color_datos, alpha=0.25, edgecolor=color_datos, linewidth=0.6,
+                     label="Histograma de los datos")
+        ax_dens.set_title("Densidad de probabilidad f(x)", pad=8)
+        ax_dens.set_xlabel(f"P24h ({unidad})")
+        ax_dens.set_ylabel("Densidad")
+        leyenda_impacto(ax_dens, loc="best")
+
+        # ---- 2) Función de distribución F(x) ----
+        n = len(datos)
+        p_empirica = [(i + 1) / (n + 1) for i in range(n)]
+        ax_cdf.plot(x, diagnostico["distribucion_acumulada"], "-", linewidth=2.0, color=color_curva,
+                    label="F(x) ajustada")
+        ax_cdf.scatter(datos, p_empirica, s=16, color=color_datos, zorder=3,
+                       label="Empírica (Weibull)")
+        ax_cdf.set_title("Función de distribución F(x)", pad=8)
+        ax_cdf.set_xlabel(f"P24h ({unidad})")
+        ax_cdf.set_ylabel("P(X ≤ x)")
+        leyenda_impacto(ax_cdf, loc="best")
+
+        # ---- 3) Supervivencia S(x) = 1 - F(x) ----
+        ax_surv.plot(x, diagnostico["supervivencia"], "-", linewidth=2.0, color="#2E7D32")
+        ax_surv.set_title("Supervivencia S(x) = P(X > x)", pad=8)
+        ax_surv.set_xlabel(f"P24h ({unidad})")
+        ax_surv.set_ylabel("Probabilidad de excedencia")
+        ax_surv.grid(True, linestyle=":", linewidth=0.5)
+
+        # ---- 4) Riesgo instantáneo h(x) = f(x)/S(x) ----
+        riesgo = np.array(diagnostico["riesgo"])
+        valido = np.isfinite(riesgo)
+        ax_riesgo.plot(x[valido], riesgo[valido], "-", linewidth=2.0, color="#8B5CF6")
+        ax_riesgo.set_title("Riesgo instantáneo h(x) = f(x)/S(x)", pad=8)
+        ax_riesgo.set_xlabel(f"P24h ({unidad})")
+        ax_riesgo.set_ylabel("Tasa de riesgo")
+        ax_riesgo.grid(True, linestyle=":", linewidth=0.5)
+
+        # ---- 5) Riesgo acumulado H(x) = -ln(S(x)) ----
+        ax_riesgo_acum.plot(x, diagnostico["riesgo_acumulado"], "-", linewidth=2.0, color="#EF9F27")
+        ax_riesgo_acum.set_title("Riesgo acumulado H(x) = −ln S(x)", pad=8)
+        ax_riesgo_acum.set_xlabel(f"P24h ({unidad})")
+        ax_riesgo_acum.set_ylabel("Riesgo acumulado")
+        ax_riesgo_acum.grid(True, linestyle=":", linewidth=0.5)
+
+        # ---- 6) P-P y Q-Q superpuestos (ambos en [0,1] tras normalizar Q-Q) ----
+        p_teorica = np.array(diagnostico["p_teorica"])
+        q_teorica = np.array(diagnostico["q_teorica"])
+        rango_datos = datos.max() - datos.min() or 1.0
+        q_emp_norm = (datos - datos.min()) / rango_datos
+        q_teo_norm = (q_teorica - datos.min()) / rango_datos
+
+        ax_qqpp.plot([0, 1], [0, 1], "--", linewidth=1.4, color="#666666", label="Diagonal 1:1")
+        ax_qqpp.scatter(p_empirica, p_teorica, s=20, marker="o", color=color_curva,
+                        label="P-P (probabilidad)", zorder=3)
+        ax_qqpp.scatter(q_emp_norm, q_teo_norm, s=20, marker="^", color=color_datos,
+                        label="Q-Q (cuantil, normalizado)", zorder=3)
+        ax_qqpp.set_title("Diagnóstico P-P y Q-Q", pad=8)
+        ax_qqpp.set_xlabel("Empírico")
+        ax_qqpp.set_ylabel("Teórico")
+        ax_qqpp.set_xlim(-0.02, 1.02)
+        ax_qqpp.set_ylim(-0.02, 1.02)
+        leyenda_impacto(ax_qqpp, loc="lower right")
+
+        for ax in (ax_dens, ax_cdf, ax_surv, ax_riesgo, ax_riesgo_acum, ax_qqpp):
+            ax.grid(True, linestyle=":", linewidth=0.4)
+
+        self.fig.suptitle(f"Diagnóstico gráfico — {nombre_distribucion}", fontsize=12, fontweight="bold")
+        self.fig.tight_layout(rect=[0, 0, 1, 0.96])
+        self.draw()
+
+    def guardar_figura(self, ruta_png: str):
+        self.fig.savefig(ruta_png, dpi=300, bbox_inches="tight")

@@ -43,7 +43,7 @@ from .core import (delineation, morphometry, curve_number, tc_methods, dem_downl
 from .core.qgis_layer_utils import obtener_capa
 from .ui.hypsometric_canvas import HypsometricCanvas
 from .ui.hydrograph_canvas import HydrographCanvas
-from .ui.frequency_canvas import FrequencyCanvas
+from .ui.frequency_canvas import FrequencyCanvas, DiagnosticoDistribucionCanvas
 from .ui.idf_canvas import IdfCanvas
 from .ui.infiltration_canvas import InfiltrationCanvas
 from .ui.summary_box import CuadroResumenImpacto, ResumenFinal, centrar_en_layout
@@ -2951,9 +2951,14 @@ class HydroAndinaProDialog(QDialog):
         self.tabla_tc.setColumnWidth(5, 95)
         # Antes la tabla quedaba con la altura por defecto de Qt (~5-6 filas
         # visibles) y había que hacer scroll DENTRO de la tabla además del
-        # scroll de la pestaña, para ver los 14 métodos. Se fija una altura
-        # que alcanza para mostrarlos todos de una vez.
-        self.tabla_tc.setMinimumHeight(260)
+        # scroll de la pestaña, para ver los 14-16 métodos. Un
+        # setMinimumHeight(260) fijo tampoco alcanzaba (260 px / 24 px por
+        # fila ≈ 11 filas visibles, menos que los 14 métodos + fila de
+        # Promedio). Se usa ajustar_alto_tabla() -- el mismo helper que ya
+        # dimensiona el resto de tablas de resultados del plugin -- llamado
+        # en _on_calcular_tc() DESPUÉS de insertar las filas, para que se
+        # ajuste al conteo real de métodos y no a un número fijo que puede
+        # quedarse corto si se agregan más adelante.
         self.tabla_tc.verticalHeader().setDefaultSectionSize(24)
         v.addWidget(self.tabla_tc)
         self.grupo_radio_metodo = QButtonGroup(self)
@@ -3171,6 +3176,11 @@ class HydroAndinaProDialog(QDialog):
                 self.tabla_tc.setItem(row, 4, QTableWidgetItem(f"{prom_tc_min:.1f}"))
                 self.tabla_tc.setItem(row, 5, QTableWidgetItem(f"{prom_tlag_min:.1f}"))
 
+            # +2 de margen sobre el conteo real de filas: sin él, la última
+            # fila (el Promedio) queda justo al borde y algunos estilos de
+            # QGIS recortan un par de píxeles del borde inferior.
+            ajustar_alto_tabla(self.tabla_tc, filas_visibles_max=self.tabla_tc.rowCount() + 2)
+
         except Exception as e:
             QMessageBox.critical(self, "Error calculando Tc", str(e))
 
@@ -3349,6 +3359,21 @@ class HydroAndinaProDialog(QDialog):
             ["Distribución", "Parámetros", "D (KS)", "D crít.", "A² (AD)", "A² crít.",
              "χ² (p-valor)", "Pruebas que pasa"]
         )
+        # Los símbolos ya identifican la prueba a quien conoce las siglas
+        # (D=Kolmogorov-Smirnov, A²=Anderson-Darling, χ²=Chi-cuadrado),
+        # pero no a simple vista -- se deja el nombre completo en el
+        # tooltip de cada encabezado, sin gastar ancho de columna en
+        # texto largo que ya está resuelto por el símbolo.
+        for _col, _tip in ((2, "Prueba de Kolmogorov-Smirnov: estadístico D (máxima distancia entre "
+                              "la distribución empírica y la ajustada)."),
+                            (3, "Kolmogorov-Smirnov: valor D crítico al nivel de significancia elegido. "
+                              "Pasa la prueba si D < D crítico."),
+                            (4, "Prueba de Anderson-Darling: estadístico A² (da más peso a las colas "
+                              "que Kolmogorov-Smirnov)."),
+                            (5, "Anderson-Darling: valor A² crítico. Pasa la prueba si A² < A² crítico."),
+                            (6, "Prueba de Chi-cuadrado (χ²): p-valor de la bondad de ajuste por clases "
+                              "de frecuencia. Pasa la prueba si p-valor ≥ 0.05.")):
+            self.tabla_distribuciones.horizontalHeaderItem(_col).setToolTip(_tip)
         # Antes las 5 columnas estaban en modo Stretch parejo, lo que
         # dejaba D(KS)/D crítico/¿Pasa KS? (textos cortos) demasiado
         # anchas y obligaba a usar scroll horizontal para ver "Parámetros"
@@ -3366,6 +3391,42 @@ class HydroAndinaProDialog(QDialog):
 
         self.canvas_frecuencia = FrequencyCanvas(self, width=6.5, height=4.8)
         v.addWidget(self.canvas_frecuencia)
+
+        # ---------- Diagnóstico gráfico de la distribución ----------
+        gb_diag = QGroupBox(
+            "Diagnóstico gráfico de la distribución — densidad, distribución, supervivencia, "
+            "riesgo, riesgo acumulado, P-P y Q-Q"
+        )
+        v_diag = QVBoxLayout(gb_diag)
+        lbl_diag = QLabel(
+            "El gráfico de arriba compara los CUANTILES de cada distribución; este panel diagnostica "
+            "UNA distribución elegida con las seis funciones estándar de un análisis de frecuencia: "
+            "<b>densidad</b> f(x) contra el histograma de los datos; <b>distribución</b> F(x) contra la "
+            "probabilidad empírica; <b>supervivencia</b> S(x)=1−F(x), la probabilidad de EXCEDENCIA; "
+            "<b>riesgo</b> instantáneo h(x)=f(x)/S(x) y <b>riesgo acumulado</b> H(x)=−ln S(x), del "
+            "análisis de supervivencia (una cola pesada se ve como h(x) creciente en vez de plano); y "
+            "<b>P-P/Q-Q</b>, que separan dónde falla el ajuste: el P-P se aleja de la diagonal si falla "
+            "en el CUERPO de los datos, el Q-Q si falla en las COLAS — la zona que más importa para "
+            "periodos de retorno grandes."
+        )
+        lbl_diag.setWordWrap(True)
+        v_diag.addWidget(lbl_diag)
+
+        h_diag = QHBoxLayout()
+        h_diag.addWidget(QLabel("Distribución a diagnosticar:"))
+        self.combo_dist_diagnostico = QComboBox()
+        self.combo_dist_diagnostico.addItem("(la de mejor ajuste)", None)
+        h_diag.addWidget(self.combo_dist_diagnostico)
+        btn_diag = QPushButton("Generar diagnóstico gráfico")
+        btn_diag.clicked.connect(self._on_generar_diagnostico_distribucion)
+        limitar_ancho_boton(btn_diag)
+        h_diag.addWidget(btn_diag)
+        h_diag.addStretch()
+        v_diag.addLayout(h_diag)
+
+        self.canvas_diagnostico_distribucion = DiagnosticoDistribucionCanvas(self)
+        v_diag.addWidget(self.canvas_diagnostico_distribucion)
+        v.addWidget(gb_diag)
 
         self.tabla_p24_tr = QTableWidget(1, len(frequency_analysis.PERIODOS_RETORNO_DEFAULT))
         self.tabla_p24_tr.setVerticalHeaderLabels(["P24 diseño (mm)"])
@@ -3461,7 +3522,12 @@ class HydroAndinaProDialog(QDialog):
         for _c in range(5):
             self.tabla_sensibilidad_no_est.horizontalHeader().setSectionResizeMode(
                 _c, QHeaderView.ResizeToContents)
-        limitar_ancho_tabla(self.tabla_sensibilidad_no_est, ancho_maximo=820)
+        # SIN limitar_ancho_tabla: a diferencia de tabla_comparacion_distribuciones
+        # (que gana una columna por cada T-Diseño que el usuario agregue, sin
+        # tope), esta tiene siempre 5 columnas fijas -- no hay riesgo de que
+        # crezca sin control, así que capar su ancho solo la recortaba sin
+        # necesidad y obligaba a un scroll horizontal interno para ver la
+        # última columna (justo la de la extrapolación, la más importante).
         h_tabla_ne = QHBoxLayout()
         h_tabla_ne.addWidget(self.tabla_sensibilidad_no_est)
         h_tabla_ne.addStretch()
@@ -3522,7 +3588,12 @@ class HydroAndinaProDialog(QDialog):
              "Amplitud (mm)", "Amplitud (% del central)"])
         for _c in range(6):
             self.tabla_bandas_confianza.horizontalHeader().setSectionResizeMode(_c, QHeaderView.ResizeToContents)
-        limitar_ancho_tabla(self.tabla_bandas_confianza, ancho_maximo=760)
+        # SIN limitar_ancho_tabla: son siempre 6 columnas fijas (no crece
+        # con la acción del usuario como sí lo hace tabla_comparacion_
+        # distribuciones), así que el tope de 760 px solo la recortaba sin
+        # necesidad -- con encabezados como "Amplitud (% del central)" el
+        # ancho natural ya supera eso, y obligaba a scroll horizontal
+        # interno para ver las últimas columnas.
         h_tabla_bandas = QHBoxLayout()
         h_tabla_bandas.addWidget(self.tabla_bandas_confianza)
         h_tabla_bandas.addStretch()
@@ -3804,7 +3875,7 @@ class HydroAndinaProDialog(QDialog):
                             "Año posterior al último observado: la tendencia se está EXTRAPOLANDO. "
                             "Nada garantiza que siga siendo lineal ni que persista.")
                     self.tabla_sensibilidad_no_est.setItem(fila, col, item)
-            ajustar_alto_tabla(self.tabla_sensibilidad_no_est, filas_visibles_max=12)
+            ajustar_alto_tabla(self.tabla_sensibilidad_no_est, filas_visibles_max=self.tabla_sensibilidad_no_est.rowCount() + 2)
 
             # Cuadro de impacto: la conclusión es lo que debe verse primero,
             # y el color comunica si hay o no evidencia para abandonar el
@@ -3934,6 +4005,27 @@ class HydroAndinaProDialog(QDialog):
         except Exception as e:
             QMessageBox.critical(self, "Error generando las curvas IDF", str(e))
 
+    def _on_generar_diagnostico_distribucion(self):
+        if not self.resultados_frecuencia:
+            QMessageBox.warning(
+                self, "Falta el análisis de frecuencia",
+                "Ajuste primero las distribuciones (sección 2 de esta pestaña).")
+            return
+        clave = self.combo_dist_diagnostico.currentData() or self.mejor_ajuste_clave
+        if not clave or self.resultados_frecuencia.get(clave, {}).get("error"):
+            QMessageBox.warning(self, "Sin distribución",
+                                 "No hay una distribución válida seleccionada.")
+            return
+        try:
+            resultado = self.resultados_frecuencia[clave]
+            diagnostico = frequency_analysis.diagnostico_distribucion(
+                self.serie_precip_anual.valores_mm, resultado["distribucion"], n_puntos=300)
+            self.canvas_diagnostico_distribucion.plot_diagnosticos(diagnostico, resultado["nombre"])
+        except ValueError as e:
+            QMessageBox.warning(self, "No se pudo generar el diagnóstico", str(e))
+        except Exception as e:
+            QMessageBox.critical(self, "Error generando el diagnóstico gráfico", str(e))
+
     def _on_calcular_bandas_confianza(self):
         if not self.resultados_frecuencia:
             QMessageBox.warning(
@@ -3972,7 +4064,7 @@ class HydroAndinaProDialog(QDialog):
                                 (3, f"{lim['superior']:.2f}"), (4, f"{lim['amplitud']:.2f}"),
                                 (5, f"{lim['amplitud_relativa_pct']:.1f}%")):
                     self.tabla_bandas_confianza.setItem(fila, _c, QTableWidgetItem(_t))
-            ajustar_alto_tabla(self.tabla_bandas_confianza, filas_visibles_max=12)
+            ajustar_alto_tabla(self.tabla_bandas_confianza, filas_visibles_max=self.tabla_bandas_confianza.rowCount() + 2)
 
             self.canvas_bandas_confianza.plot_bandas_confianza(
                 bandas, datos_observados=self.serie_precip_anual.valores_mm, escala_log=True)
@@ -4926,6 +5018,15 @@ class HydroAndinaProDialog(QDialog):
                 if not datos_ok.get("error"):
                     self.combo_dist_bandas.addItem(datos_ok["nombre"], clave_ok)
             self.combo_dist_bandas.blockSignals(False)
+
+            # Mismo repoblado para el selector del diagnóstico gráfico.
+            self.combo_dist_diagnostico.blockSignals(True)
+            self.combo_dist_diagnostico.clear()
+            self.combo_dist_diagnostico.addItem("(la de mejor ajuste)", None)
+            for clave_ok, datos_ok in resultados.items():
+                if not datos_ok.get("error"):
+                    self.combo_dist_diagnostico.addItem(datos_ok["nombre"], clave_ok)
+            self.combo_dist_diagnostico.blockSignals(False)
 
             if mejor is None:
                 QMessageBox.warning(self, "Sin ajuste válido",

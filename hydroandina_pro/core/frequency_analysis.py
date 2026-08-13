@@ -1452,6 +1452,99 @@ def precipitaciones_diseño(distribucion: DistribucionAjustada,
     return resultado
 
 
+def diagnostico_distribucion(datos: List[float], distribucion: "DistribucionAjustada",
+                             n_puntos: int = 200) -> dict:
+    """
+    Las seis funciones de diagnóstico gráfico que suele pedir un informe
+    de análisis de frecuencia serio, además del ajuste cuantil-vs-Tr que
+    ya se grafica en `plot_ajuste`: densidad, distribución, supervivencia,
+    riesgo, riesgo acumulado, y los diagnósticos P-P / Q-Q.
+
+    POR QUÉ SE DERIVA TODO DE cdf() Y NO SE PIDE UN pdf() POR
+    DISTRIBUCIÓN: cada una de las 9 distribuciones de este módulo expone
+    cuantil() y cdf() (ver DistribucionAjustada), pero no una densidad
+    analítica propia -- añadirla exigiría derivar y verificar 9 fórmulas
+    distintas. La densidad f(x) se obtiene en cambio por DIFERENCIAS
+    FINITAS CENTRADAS de cdf(), que es exacto para cualquier distribución
+    con cdf diferenciable y funciona igual para las 9 sin código
+    específico por distribución. El paso h se escala con el rango de los
+    datos (no un valor absoluto fijo), para que la derivada numérica sea
+    igual de fina en una serie de decenas de mm que en una de miles.
+
+        f(x)   = [F(x+h) − F(x−h)] / (2h)                      (densidad)
+        F(x)   = cdf(x)                                        (distribución)
+        S(x)   = 1 − F(x)                                      (supervivencia)
+        h(x)   = f(x) / S(x)                                   (riesgo instantáneo)
+        H(x)   = −ln(S(x))                                     (riesgo acumulado)
+
+    S(x) es la probabilidad de que la próxima P24h observada SUPERE x --
+    en el lenguaje de diseño hidrológico, la probabilidad de excedencia,
+    justo lo complementario del cuantil de diseño. h(x) e H(x) vienen del
+    análisis de supervivencia (fiabilidad/tiempo-hasta-el-evento): aquí
+    "el evento" es que la precipitación supere el umbral x, así que h(x)
+    alto en la cola derecha señala una distribución con cola pesada, más
+    propensa a extremos que sus vecinas con h(x) plano.
+
+    P-P y Q-Q comparan el ajuste EN LA ESCALA DE LA PROBABILIDAD y EN LA
+    ESCALA DE LA VARIABLE respectivamente, usando la posición de
+    graficación de Weibull p_i = i/(n+1) (Cunnane, 1978), coherente con
+    la que ya usa plot_ajuste():
+        P-P: probabilidad empírica p_i  vs.  F(x_i) teórica en cada dato
+             ordenado x_i -- se aleja de la diagonal donde la
+             distribución falla en el CUERPO de los datos.
+        Q-Q: cuantil empírico x_i  vs.  cuantil teórico G(p_i) -- se
+             aleja de la diagonal donde falla en las COLAS, que es
+             justamente la zona que más importa para Tr grandes.
+    """
+    datos_ordenados = sorted(datos)
+    n = len(datos_ordenados)
+    if n < 2:
+        raise ValueError("Se necesitan al menos 2 datos para el diagnóstico gráfico.")
+
+    x_min, x_max = datos_ordenados[0], datos_ordenados[-1]
+    rango = x_max - x_min
+    margen = 0.25 * rango if rango > 0 else max(abs(x_min), 1.0) * 0.25
+    x_min_malla = x_min - margen
+    x_max_malla = x_max + margen
+    # h relativo al rango de los datos: una fracción fija (no un mm o m
+    # absolutos) para que la derivada numérica sea igualmente fina sea
+    # cual sea la escala de la variable analizada.
+    paso_derivada = max(rango, 1.0) * 1.0e-4
+
+    malla_x, densidad, dist_acum, supervivencia = [], [], [], []
+    riesgo, riesgo_acumulado = [], []
+    for i in range(n_puntos):
+        x = x_min_malla + (x_max_malla - x_min_malla) * i / (n_puntos - 1)
+        try:
+            f_mas = distribucion.cdf(x + paso_derivada)
+            f_menos = distribucion.cdf(x - paso_derivada)
+            f_x = distribucion.cdf(x)
+        except (ValueError, ArithmeticError):
+            continue  # fuera del soporte de la distribución (p.ej. x<=0 en Log-Normal)
+        f_x = min(max(f_x, 1e-12), 1.0 - 1e-12)  # evita log(0) / división por 0 en los extremos
+        s_x = 1.0 - f_x
+        dens = (f_mas - f_menos) / (2.0 * paso_derivada)
+        malla_x.append(x)
+        densidad.append(max(dens, 0.0))  # el ruido numérico puede dar un negativo ínfimo
+        dist_acum.append(f_x)
+        supervivencia.append(s_x)
+        riesgo.append(densidad[-1] / s_x if s_x > 0 else float("nan"))
+        riesgo_acumulado.append(-math.log(s_x))
+
+    # P-P y Q-Q: un punto por cada dato observado, en la posición de
+    # graficación de Weibull, igual que en plot_ajuste().
+    p_empirica = [(i + 1) / (n + 1) for i in range(n)]
+    p_teorica = [min(max(distribucion.cdf(x), 0.0), 1.0) for x in datos_ordenados]
+    q_teorica = [distribucion.cuantil(p) for p in p_empirica]
+
+    return {
+        "malla_x": malla_x, "densidad": densidad, "distribucion_acumulada": dist_acum,
+        "supervivencia": supervivencia, "riesgo": riesgo, "riesgo_acumulado": riesgo_acumulado,
+        "datos_ordenados": datos_ordenados, "p_empirica": p_empirica,
+        "p_teorica": p_teorica, "q_teorica": q_teorica,
+    }
+
+
 def tabla_comparacion_tr(resultados_analisis: Dict[str, dict],
                           periodos_retorno: List[int] = None) -> Dict[str, Dict[int, float]]:
     """
