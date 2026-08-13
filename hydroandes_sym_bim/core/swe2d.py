@@ -2,7 +2,7 @@
 """
 core/swe2d.py
 
-Solver hidrodinámico bidimensional propio de HydroAndina Pro, sobre la
+Solver hidrodinámico bidimensional propio de HydroAndes SYM BIM, sobre la
 grilla regular del MDE ya recortado a la cuenca (Pestaña 1).
 
 ECUACIONES. Se integran verticalmente las de Navier-Stokes para obtener

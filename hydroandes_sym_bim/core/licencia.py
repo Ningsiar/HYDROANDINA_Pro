@@ -81,8 +81,8 @@ def _machine_guid_windows() -> Optional[str]:
 def _ruta_cache_licencia() -> str:
     """Fuera de la carpeta del plugin a propósito: debe sobrevivir a
     desinstalar/reinstalar o actualizar el plugin, que borra y vuelve a
-    copiar todo hydroandina_pro/."""
-    base = os.path.join(os.path.expanduser("~"), ".hydroandina_pro_licencia")
+    copiar toda la carpeta del paquete (hydroandes_sym_bim/)."""
+    base = os.path.join(os.path.expanduser("~"), ".hydroandes_sym_bim_licencia")
     os.makedirs(base, exist_ok=True)
     return os.path.join(base, "estado.json")
 

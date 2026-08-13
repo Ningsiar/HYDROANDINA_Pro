@@ -30,14 +30,14 @@ class DialogoLicenciaAgotada(QDialog):
 
     def __init__(self, estado: dict, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("HydroAndina Pro — Licencia")
+        self.setWindowTitle("HydroAndes SYM BIM — Licencia")
         self.setMinimumWidth(440)
         self._licencia_activada = bool(estado.get("licencia_activada", False))
 
         v = QVBoxLayout(self)
 
         if estado.get("bloqueado"):
-            titulo = "Se agotaron los usos gratuitos de HydroAndina Pro"
+            titulo = "Se agotaron los usos gratuitos de HydroAndes SYM BIM"
             cuerpo = (
                 f"Este plugin incluye {estado.get('limite', licencia.LIMITE_USOS_GRATIS)} usos "
                 f"gratuitos. Ya se registraron {estado.get('usos', '?')}.<br><br>"
@@ -45,7 +45,7 @@ class DialogoLicenciaAgotada(QDialog):
                 f"<b>{CONTACTO_LICENCIA}</b> para adquirir una."
             )
         else:
-            titulo = "Activar licencia de HydroAndina Pro"
+            titulo = "Activar licencia de HydroAndes SYM BIM"
             cuerpo = (
                 f"Usos registrados: {estado.get('usos', '?')} de "
                 f"{estado.get('limite', licencia.LIMITE_USOS_GRATIS)} gratuitos.<br><br>"

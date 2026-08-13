@@ -1,5 +1,5 @@
 // ============================================================
-// HydroAndina Pro -- backend de licencia (Google Apps Script)
+// HydroAndes SYM BIM -- backend de licencia (Google Apps Script)
 // ============================================================
 // PLANTILLA -- copie TODO este archivo dentro del editor de Apps Script
 // de una hoja de cálculo de Google nueva y AJUSTE CLAVE_SECRETA antes de
@@ -7,9 +7,11 @@
 // personalizada (con el secreto real) en este repositorio.
 //
 // PASO 1 -- Hoja de cálculo:
-//   Cree una hoja de cálculo de Google nueva. Cree una pestaña llamada
-//   exactamente "Instalaciones" con esta fila de encabezados en la fila 1:
-//     id | primer_uso | ultimo_uso | usos | licencia | notas
+//   Use la hoja "HydroAndes SYM BIM - Licencias" (Claude ya la creó con los
+//   encabezados en la fila 1: id | primer_uso | ultimo_uso | usos |
+//   licencia | notas), o cree una propia con esos mismos encabezados.
+//   El script usa la PRIMERA pestaña de la hoja, sea cual sea su nombre
+//   -- no hace falta que se llame "Instalaciones".
 //
 // PASO 2 -- Apps Script:
 //   Extensiones > Apps Script. Borre el contenido de Code.gs y pegue
@@ -22,13 +24,13 @@
 //     Ejecutar como: Yo (su cuenta)
 //     Quién tiene acceso: Cualquier usuario
 //   Autorice los permisos que pida. Copie la URL resultante (termina en
-//   /exec) y péguela en hydroandina_pro/core/licencia.py, en la
+//   /exec) y péguela en hydroandes_sym_bim/core/licencia.py, en la
 //   constante URL_BACKEND_LICENCIA.
 //
 // PASO 4 -- Generar claves de licencia para un cliente:
 //   Necesita el "id de instalación" de esa persona (se lo puede pedir --
 //   aparece en el diálogo de licencia, o en
-//   ~/.hydroandina_pro_licencia/estado.json de su equipo). Con ese id,
+//   ~/.hydroandes_sym_bim_licencia/estado.json de su equipo). Con ese id,
 //   corra scripts/generar_clave_licencia.py (fuera de este repo,
 //   con la MISMA CLAVE_SECRETA que puso aquí) para obtener la clave que
 //   le entrega al cliente.
@@ -48,7 +50,7 @@ function doPost(e) {
     return _json({ok: false, mensaje: "Falta el id de instalación."});
   }
 
-  var hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Instalaciones");
+  var hoja = SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];
   var fila = _buscarOCrearFila(hoja, id);
 
   if (accion === "registrar_uso") {

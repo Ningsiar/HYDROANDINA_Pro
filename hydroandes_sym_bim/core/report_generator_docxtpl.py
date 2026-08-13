@@ -4,7 +4,7 @@ core/report_generator_docxtpl.py
 
 Reporte Word "con plantilla y selección de secciones" (item 9 del
 pedido): usa docxtpl/Jinja2 sobre la plantilla
-hydroandina_pro/resources/plantilla_reporte.docx (ver
+hydroandes_sym_bim/resources/plantilla_reporte.docx (ver
 scripts/build_report_template.py para su origen versionado), en vez de
 armar el documento completo a mano como hace
 core/report_generator.py::generar_reporte_word().
@@ -64,7 +64,7 @@ def generar_reporte_word_plantilla(ruta_docx: str, contexto: dict, secciones_inc
     if not os.path.exists(ruta_plantilla or RUTA_PLANTILLA_DEFECTO):
         raise ReportGeneratorError(
             f"No se encontró la plantilla del reporte en:\n{ruta_plantilla or RUTA_PLANTILLA_DEFECTO}\n"
-            "Genérela una vez con 'python-qgis.bat hydroandina_pro/scripts/build_report_template.py'."
+            "Genérela una vez con 'python-qgis.bat hydroandes_sym_bim/scripts/build_report_template.py'."
         )
 
     doc = docxtpl.DocxTemplate(ruta_plantilla or RUTA_PLANTILLA_DEFECTO)

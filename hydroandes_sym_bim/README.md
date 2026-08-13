@@ -1,4 +1,4 @@
-# HydroAndina Pro - Plugin QGIS
+# HydroAndes SYM BIM - Plugin QGIS
 
 ## v0.2.66: control de calidad, completación y regionalización ampliados; validación de grillas (CHIRPS/IMERG) vs. estación (núcleo, aún sin pestaña propia en la interfaz)
 
@@ -437,7 +437,7 @@ fuentes independientes (no se completaron de memoria):
 
 ## Instalación
 
-Copie la carpeta `hydroandina_pro/` al directorio de plugins de QGIS (ver
+Copie la carpeta `hydroandes_sym_bim/` al directorio de plugins de QGIS (ver
 rutas típicas en el README del plugin anterior de este mismo proyecto) y
 habilite "complementos experimentales" antes de activarlo.
 

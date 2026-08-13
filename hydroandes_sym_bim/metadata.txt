@@ -1,12 +1,14 @@
 [general]
-name=HydroAndes Pro
+name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
-description=Análisis hidrológico e hidráulico integral para cuencas andinas: delineación desde MDE (OpenTopography o ASF Vertex/Copernicus GLO-30), morfometría avanzada con extracción automática del perfil del cauce principal, número de curva SCS (matriz manual o LULC+HSG automático vía ESA WorldCover/HYSOGs250m), análisis de frecuencia con 9 distribuciones de probabilidad, 14 métodos de tiempo de concentración, generación de tormentas de diseño (IDF o SCS I/IA/II/III), estimación de caudales (SCS/Snyder/Clark), dimensionamiento de estructuras hidráulicas y de drenaje, y exportación multi-formato.
-version=0.3.13
+description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
+version=0.3.14
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
 about=Plugin de análisis hidrológico e hidráulico integral orientado a cuencas de fuerte pendiente de los Andes peruanos, desarrollado por el Msc. Ing. Ningsiar Braulio Lima Usnayo, M.Sc. Hydrology and Water Research Management, Mg (C). Ing. Civil con mención en Hidráulica y Medio Ambiente, Ph.D. (c) Computational Hydraulics, para CORPORATIVO CONSTRUCTIVO LIMA BERLIN SRL.
+
+    Anteriormente publicado como "HydroAndes Pro" -- HydroAndes SYM BIM es el mismo motor de cálculo bajo un nuevo nombre.
 
     Funcionalidades:
     - Delineación de cuencas desde un MDE, con selección interactiva del punto de quiebre (break point) en el lienzo, ajuste automático al cauce y reproyección a la zona UTM local. Descarga del MDE desde OpenTopography (API Key) o desde ASF Vertex/Copernicus GLO-30 (token de NASA Earthdata Login), como fuentes alternativas.
@@ -21,6 +23,24 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.3.14: renombrado del plugin -- "HydroAndes Pro" pasa a llamarse
+      "HydroAndes SYM BIM" (nombre visible en el buscador de plugins de
+      QGIS, título de la ventana, menú, splash, créditos, reportes
+      generados, y en la capa de estructuras 2D del item 8). Es un cambio
+      de marca, no de motor: ningún cálculo ni resultado cambia. También
+      se movió la carpeta interna del paquete de hydroandina_pro/ a
+      hydroandes_sym_bim/ (es la carpeta que QGIS usa para cargar el
+      plugin) -- los imports relativos internos (from .core import ...)
+      no dependen del nombre de la carpeta, así que no hizo falta tocar
+      ninguno. Se actualizaron description= y about= para reflejar el
+      alcance real actual del plugin (curvas IDF con IILA-SENAMHI, la
+      simulación 2D con video/3D, y la exportación con plantilla Word),
+      que se habían quedado desactualizados desde antes de esta sesión.
+      IMPORTANTE para quien lo instale: como QGIS identifica un plugin
+      por el nombre de su carpeta, este cambio lo hace ver como un
+      plugin "nuevo" -- hay que desinstalar/quitar la versión anterior
+      (carpeta hydroandina_pro) del Administrador de Complementos antes
+      de instalar esta, para no terminar con dos entradas.
     - v0.3.13: límite de 10 usos gratuitos con validación remota y clave
       de licencia. Cada apertura del plugin (plugin.py::run(), ANTES de
       construir el diálogo principal -- para no pagar el costo de cargar
@@ -28,7 +48,7 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
       backend propio (una hoja de cálculo de Google con un Apps Script
       delante, ver scripts/licencia_backend_apps_script.gs -- el backend
       es la fuente de verdad, no un archivo local editable). Si no hay
-      conexión, se cae a un caché local (~/.hydroandina_pro_licencia/)
+      conexión, se cae a un caché local (~/.hydroandes_sym_bim_licencia/)
       con la misma regla de límite, para no castigar a un usuario
       legítimo sin internet en ese momento -- pero también cuenta y
       también bloquea si se agota estando offline.
@@ -60,7 +80,7 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
       PENDIENTE DE USTED (no es código, es configuración de su cuenta):
       desplegar scripts/licencia_backend_apps_script.gs como aplicación
       web de Google y pegar la URL resultante en
-      hydroandina_pro/core/licencia.py::URL_BACKEND_LICENCIA.
+      hydroandes_sym_bim/core/licencia.py::URL_BACKEND_LICENCIA.
     - v0.3.12: item 5 -- la ÚLTIMA fase pendiente de las 9 del pedido
       original (Pestaña 5, autocompletar el método IDF IILA-SENAMHI-UNI
       por ubicación). Con esto quedan completas las 9 fases.
@@ -258,7 +278,7 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - v0.3.7: item 9 completo -- fase 2 de 2 (reporte Word con PLANTILLA
       docxtpl, tal como se pidió originalmente). Nuevo
       core/report_generator_docxtpl.py: usa docxtpl sobre una plantilla
-      real en hydroandina_pro/resources/plantilla_reporte.docx (fuente
+      real en hydroandes_sym_bim/resources/plantilla_reporte.docx (fuente
       versionada en scripts/build_report_template.py, con bloques
       condicionales Jinja2 {% if incluir_x %}...{% endif %} por sección),
       con el mecanismo de subdoc de docxtpl (doc.new_subdoc().docx expone
@@ -564,11 +584,11 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
       los campos de la Pestaña 4 se mostraban pero no tenian ningun efecto. Corregido.
     - v0.2.70: CORRECCION de "no corre el HYDRA2D": el boton abria el modelo 2D pero no se veia.
       CAUSA PRINCIPAL: el banco de trabajo de HYDRA2DGPU NO abre una ventana propia -- se ACOPLA como
-      panel dentro de la ventana principal de QGIS. La ventana de HydroAndina Pro es una ventana de
+      panel dentro de la ventana principal de QGIS. La ventana de HydroAndes SYM BIM es una ventana de
       nivel superior, asi que se quedaba delante tapandolo por completo, y el boton parecia no hacer
       nada. Peor aun: si el banco de trabajo fallaba al abrirse, HYDRA2DGPU lo informa en la BARRA DE
       MENSAJES de QGIS, que quedaba igualmente oculta detras. Ahora, al pulsar «Abrir ventana de
-      HYDRA2DGPU», la ventana de HydroAndina Pro se minimiza sola, se trae QGIS al frente y se deja un
+      HYDRA2DGPU», la ventana de HydroAndes SYM BIM se minimiza sola, se trae QGIS al frente y se deja un
       mensaje en su barra explicando donde quedo el panel y como recuperar la ventana. El cuadro de
       estado y el texto explicativo lo advierten tambien de antemano.
       SEGUNDO ERROR, PROPIO: el diagnostico comprobaba el modulo equivocado. Daba "MOTOR CUDA: si" si
@@ -747,7 +767,7 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
       usa con curve_number_generator. HYDRA2DGPU (Aaron Sprague, licencia MIT) se mantiene como
       dependencia externa instalada por el usuario: asi no se duplica un solucionador de decenas de
       miles de lineas que habria que mantener sincronizado, las mejoras de su autor llegan solas, y no
-      se asumen obligaciones de redistribucion. HydroAndina Pro aporta la integracion.
+      se asumen obligaciones de redistribucion. HydroAndes SYM BIM aporta la integracion.
       HALLAZGO QUE DEFINE EL DISEÑO: a diferencia de curve_number_generator, HYDRA2DGPU NO registra
       algoritmos en el marco de Processing -- no hay un processing.run() que invocar. Es un plugin de
       DIALOGO: su clase HydraQgisPlugin expone run(), que abre su propia ventana de trabajo
@@ -759,7 +779,7 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
       estar instalado y activo y aun asi no simular nada, porque su solucionador es una extension
       compilada C++/CUDA que se instala como paquete aparte la primera vez que se abre su ventana. Cada
       estado devuelve un mensaje con la accion concreta que toca.
-      Se agrega tambien un inventario de insumos que revisa que ya calculo HydroAndina Pro para el
+      Se agrega tambien un inventario de insumos que revisa que ya calculo HydroAndes SYM BIM para el
       modelo 2D (MDE de la Pestaña 1, area y pendiente de la 2, numero de curva de la 3 e hidrograma de
       la 6) y avisa de lo que falta ANTES de abrir la ventana externa, en vez de que el usuario lo
       descubra alli dentro; y la exportacion del hidrograma de diseño a CSV de dos columnas, que es el
@@ -1739,10 +1759,10 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - v0.2.13: control de calidad y homogeneidad de series (Pettitt, Mann-Kendall + pendiente de Sen, curva de doble masa) en la pestaña 5, antes del análisis de frecuencia; Precipitación Máxima Probable (PMP 24h) por el método de Hershfield; curva Cota-Área-Volumen (C-A-V) en la pestaña 4, útil para estudios de embalses/presas; fórmulas de caudal máximo directo Témez, Mac Math y Creager en la pestaña 6, como verificación cruzada del caudal SCS/Snyder/Clark.
     - v0.2.12: nueva pestaña única "8. Exportar / Reportes" (penúltima, justo antes de Créditos) que centraliza TODAS las exportaciones antes dispersas entre pestañas: reporte Word completo, exportación de archivos nativos/editables (SHP/KML/GeoJSON/TIF/XLSX/CSV), proyecto portable, y exportación de la curva hipsométrica a PNG.
     - v0.2.11: reporte técnico completo en Word (.docx, requiere python-docx) cubriendo las 7 pestañas con texto descriptivo, tablas y los gráficos ya generados; "Guardar proyecto portable" que copia todas las capas con rutas relativas, guarda el proyecto QGIS (.qgz), el reporte Word, un Excel completo y un JSON con todos los resultados de la sesión, listo para copiar a otra máquina y abrirse sin romper enlaces; botones de minimizar y maximizar habilitados en la ventana del plugin (antes solo tenía botón de cerrar, como todo QDialog de Qt por defecto).
-    - v0.2.10: pestaña 5, tablas de distribuciones y de comparación Tr ajustadas al contenido (antes demasiado anchas/con scroll horizontal innecesario) y nuevo gráfico Pmax24h vs Tr en escala cartesiana (además del de escala logarítmica); pestaña 6, el parseo del hietograma ahora acepta coma, punto y coma, espacios o saltos de línea como separador (antes exigía coma estricta y fallaba con "Hietograma inválido" ante cualquier otro formato); splash de introducción corregido para reproducir recién en showEvent (no antes de que la ventana esté visible) y con registro de diagnóstico en el panel de mensajes de QGIS (categoría "HydroAndes Pro") si algo falla.
+    - v0.2.10: pestaña 5, tablas de distribuciones y de comparación Tr ajustadas al contenido (antes demasiado anchas/con scroll horizontal innecesario) y nuevo gráfico Pmax24h vs Tr en escala cartesiana (además del de escala logarítmica); pestaña 6, el parseo del hietograma ahora acepta coma, punto y coma, espacios o saltos de línea como separador (antes exigía coma estricta y fallaba con "Hietograma inválido" ante cualquier otro formato); splash de introducción corregido para reproducir recién en showEvent (no antes de que la ventana esté visible) y con registro de diagnóstico en el panel de mensajes de QGIS (categoría "HydroAndes SYM BIM") si algo falla.
     - v0.2.9: integración con el plugin de terceros "Curve Number Generator" (ESA & ORNL) como método recomendado para automatizar el CN en la pestaña 3 (descubrimiento dinámico del algoritmo, sin asumir nombres de parámetros no verificados); pestaña 4 renombrada a "Tiempo de concentración y Lag Time" y su tabla de resultados ahora se ve completa sin scroll interno; tabla de datos manuales de la pestaña 5 (1b) con más alto para ver las 30 filas; hidrograma de la pestaña 6 suavizado (interpolación PCHIP a paso de tiempo fino); nuevo gráfico de la sección transversal (con relación de escala 1:1 y etiquetas de dimensiones) para canales y alcantarillas en la pestaña 7; todos los gráficos de todas las pestañas con una proporción más equilibrada (antes muy alargados en X).
     - v0.2.8: pantalla de introducción al abrir el plugin: reproduce un video de portada de 10 s (con su propio audio), con la marca de agua original de la esquina inferior derecha cubierta; se puede omitir con un clic o cualquier tecla; diseñada para nunca bloquear la apertura del plugin si el video/QtMultimedia no está disponible en la instalación de QGIS.
-    - v0.2.7: nueva pestaña "Hidráulica y Drenaje" (canales por máxima eficiencia hidráulica, alcantarillas, enrocado/RipRap, sumideros, cunetas de coronación, vados/badenes, y verificación de borde libre de pontones/puentes/defensas ribereñas); descarga de MDE alternativa desde ASF Vertex/Copernicus GLO-30; cálculo automático de CN a partir de LULC (ESA WorldCover) y Grupos Hidrológicos de Suelo; extracción automática del perfil longitudinal real del cauce principal para el cálculo de Tc (corrige un bug de signo que producía "0"/errores de dominio matemático en varios métodos); 4 distribuciones de probabilidad adicionales (Log-Normal 3P, Log-Gumbel, Gamma 2P, Gamma 3P/Pearson III) con tabla y gráfico comparativo Pmax24h vs. Tr y periodo de retorno personalizado ("T-Diseño"); curva hipsométrica con eje de altitud real (m s.n.m.), suavizado, marcas cada 10% de área acumulada, tabla resumen y exportación a PNG; pestañas 1-5 ahora con desplazamiento (scroll) para no comprimir gráficos ni tablas; columnas Símbolo/Valor/Unidad angostadas e Interpretación ampliada en la tabla de morfometría; unidades e interpretación ampliada para todos los parámetros morfométricos; renombrado del plugin a "HydroAndes Pro".
+    - v0.2.7: nueva pestaña "Hidráulica y Drenaje" (canales por máxima eficiencia hidráulica, alcantarillas, enrocado/RipRap, sumideros, cunetas de coronación, vados/badenes, y verificación de borde libre de pontones/puentes/defensas ribereñas); descarga de MDE alternativa desde ASF Vertex/Copernicus GLO-30; cálculo automático de CN a partir de LULC (ESA WorldCover) y Grupos Hidrológicos de Suelo; extracción automática del perfil longitudinal real del cauce principal para el cálculo de Tc (corrige un bug de signo que producía "0"/errores de dominio matemático en varios métodos); 4 distribuciones de probabilidad adicionales (Log-Normal 3P, Log-Gumbel, Gamma 2P, Gamma 3P/Pearson III) con tabla y gráfico comparativo Pmax24h vs. Tr y periodo de retorno personalizado ("T-Diseño"); curva hipsométrica con eje de altitud real (m s.n.m.), suavizado, marcas cada 10% de área acumulada, tabla resumen y exportación a PNG; pestañas 1-5 ahora con desplazamiento (scroll) para no comprimir gráficos ni tablas; columnas Símbolo/Valor/Unidad angostadas e Interpretación ampliada en la tabla de morfometría; unidades e interpretación ampliada para todos los parámetros morfométricos; renombrado del plugin a "HydroAndes SYM BIM".
     - v0.2.6: Pestaña 5 (Precipitación Máx 24h) ahora permite también ingresar o pegar directamente los datos de P24 (mm) en una tabla editable, con soporte de copiar/pegar estilo Excel (Ctrl+C/Ctrl+V de un rango de dos columnas: año y P24), como alternativa a cargar un CSV o extraer de PISCOp.
     - v0.2.5: corregida la columna "Parámetro" de la tabla de morfometría (Pestaña 2), que mostraba el símbolo abreviado repetido (p. ej. "A", "P", "Lb") en vez del nombre descriptivo completo (p. ej. "Área de la cuenca", "Perímetro de la cuenca"); también se eliminó una fila duplicada del índice de Melton.
     - v0.2.4: la ventana del plugin ahora se oculta automáticamente al activar la selección del punto de salida en el lienzo (para no tapar el mapa), y reaparece sola al hacer clic o al cancelar la selección (Escape, cambio de herramienta).

@@ -32,7 +32,7 @@ IMPORTANTE — ESTO ES PURAMENTE COSMÉTICO: quien llame a este módulo
 roto nunca debe impedir usar el plugin.
 
 DIAGNÓSTICO: cualquier problema se registra en el panel "Registro de
-mensajes" de QGIS, categoría "HydroAndes Pro".
+mensajes" de QGIS, categoría "HydroAndes SYM BIM".
 """
 import os
 
@@ -42,7 +42,7 @@ from qgis.PyQt.QtGui import QMovie
 from qgis.PyQt.QtWidgets import QDialog, QLabel, QVBoxLayout
 
 DURACION_MAXIMA_MS = 20000  # límite de seguridad por si el GIF no reporta su fin
-CATEGORIA_LOG = "HydroAndes Pro"
+CATEGORIA_LOG = "HydroAndes SYM BIM"
 
 
 def _log(mensaje, nivel=Qgis.Info):

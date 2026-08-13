@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-HydroAndina Pro - clase principal del plugin.
+HydroAndes SYM BIM - clase principal del plugin.
 Responsable únicamente del ciclo de vida QGIS (registro de menú/toolbar
 y apertura del diálogo). Toda la lógica de negocio vive en core/ y toda
 la interfaz en plugin_dialog.py.
@@ -16,12 +16,12 @@ class HydroAndinaProPlugin:
         self.iface = iface
         self.plugin_dir = os.path.dirname(__file__)
         self.actions = []
-        self.menu = "&HydroAndina Pro"
+        self.menu = "&HydroAndes SYM BIM"
         self.dialog = None
 
     def initGui(self):
         icon_path = os.path.join(self.plugin_dir, "icon.png")
-        action = QAction(QIcon(icon_path), "HydroAndina Pro - Análisis Hidrológico", self.iface.mainWindow())
+        action = QAction(QIcon(icon_path), "HydroAndes SYM BIM - Análisis Hidrológico", self.iface.mainWindow())
         action.triggered.connect(self.run)
         self.iface.addPluginToMenu(self.menu, action)
         self.iface.addToolBarIcon(action)
@@ -84,7 +84,7 @@ class HydroAndinaProPlugin:
         continúa abriendo el diálogo principal con normalidad — un
         splash roto nunca debe impedir usar el plugin), pero SÍ se deja
         registrado en el panel "Registro de mensajes" de QGIS (categoría
-        "HydroAndes Pro") para poder diagnosticar sin adivinar si algo
+        "HydroAndes SYM BIM") para poder diagnosticar sin adivinar si algo
         no funciona."""
         from qgis.core import Qgis, QgsMessageLog
         try:
@@ -94,7 +94,7 @@ class HydroAndinaProPlugin:
             if not os.path.exists(ruta_gif):
                 QgsMessageLog.logMessage(
                     f"No se encontró el GIF del splash en: {ruta_gif}",
-                    "HydroAndes Pro", level=Qgis.Warning
+                    "HydroAndes SYM BIM", level=Qgis.Warning
                 )
                 return
 
@@ -108,5 +108,5 @@ class HydroAndinaProPlugin:
             QgsMessageLog.logMessage(
                 f"El splash de introducción no pudo mostrarse (se omite y se abre el plugin "
                 f"normalmente): {type(e).__name__}: {e}",
-                "HydroAndes Pro", level=Qgis.Warning
+                "HydroAndes SYM BIM", level=Qgis.Warning
             )

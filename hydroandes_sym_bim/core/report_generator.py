@@ -279,13 +279,13 @@ def generar_reporte_word(ruta_docx: str, contexto: dict) -> str:
     doc = Document()
 
     # --- Portada ---
-    titulo = doc.add_heading("HydroAndes Pro — Reporte Técnico de Análisis Hidrológico e Hidráulico", level=0)
+    titulo = doc.add_heading("HydroAndes SYM BIM — Reporte Técnico de Análisis Hidrológico e Hidráulico", level=0)
     titulo.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p.add_run(f"Cuenca: {contexto.get('nombre_cuenca', '(sin nombre)')}\n").bold = True
     p.add_run(f"Generado: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n")
-    p.add_run("Plugin HydroAndes Pro — motor hidrológico/hidráulico para cuencas andinas del Perú")
+    p.add_run("Plugin HydroAndes SYM BIM — motor hidrológico/hidráulico para cuencas andinas del Perú")
     doc.add_page_break()
 
     # Las 7 secciones (mismo contenido, mismo orden que antes) ahora se
@@ -300,7 +300,7 @@ def generar_reporte_word(ruta_docx: str, contexto: dict) -> str:
     doc.add_page_break()
     doc.add_heading("Nota", level=1)
     doc.add_paragraph(
-        "Este reporte fue generado automáticamente por el plugin HydroAndes Pro a partir de los "
+        "Este reporte fue generado automáticamente por el plugin HydroAndes SYM BIM a partir de los "
         "valores calculados en la sesión de trabajo. Los métodos, coeficientes por defecto y "
         "supuestos empleados están documentados en el propio plugin; se recomienda verificar los "
         "resultados contra las fuentes normativas locales vigentes antes de un diseño definitivo."

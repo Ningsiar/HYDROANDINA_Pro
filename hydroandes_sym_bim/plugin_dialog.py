@@ -2,7 +2,7 @@
 """
 plugin_dialog.py
 
-Interfaz principal de HydroAndina Pro: QDialog con un QTabWidget de 4
+Interfaz principal de HydroAndes SYM BIM: QDialog con un QTabWidget de 4
 pestañas, tal como lo especifica el encargo. Cada pestaña delega el
 trabajo pesado a los módulos de core/; este archivo se limita a
 recolectar inputs de los widgets, llamar al core, y volcar resultados
@@ -301,7 +301,7 @@ class HydroAndinaProDialog(QDialog):
     def __init__(self, iface, parent=None):
         super().__init__(parent)
         self.iface = iface
-        self.setWindowTitle("HydroAndes Pro - Análisis Hidrológico Integral")
+        self.setWindowTitle("HydroAndes SYM BIM - Análisis Hidrológico Integral")
         # Por defecto, un QDialog de Qt solo trae el botón de cerrar (sin
         # minimizar/maximizar), a diferencia de una ventana normal. Se
         # habilitan explícitamente esos botones para poder minimizar la
@@ -8828,7 +8828,7 @@ class HydroAndinaProDialog(QDialog):
         if not self._capa_sigue_en_proyecto(self.capa_estructuras_2d):
             crs = QgsProject.instance().crs()
             capa = QgsVectorLayer(f"LineString?crs={crs.authid()}",
-                                   "Estructuras 2D (HydroAndina Pro)", "memory")
+                                   "Estructuras 2D (HydroAndes SYM BIM)", "memory")
             proveedor = capa.dataProvider()
             proveedor.addAttributes([
                 QgsField("nombre", QVariant.String),
@@ -8948,7 +8948,7 @@ class HydroAndinaProDialog(QDialog):
             pass
         QMessageBox.information(
             self, "Capa lista para dibujar",
-            "La capa «Estructuras 2D (HydroAndina Pro)» quedó activa y en modo edición.\n\n"
+            "La capa «Estructuras 2D (HydroAndes SYM BIM)» quedó activa y en modo edición.\n\n"
             "Use la herramienta «Añadir entidad de línea» de la barra de digitalización de QGIS "
             "para dibujar cada estructura (varios clics para seguir un trazado curvo; doble clic "
             "o Enter para terminarla). En el formulario que aparece al terminar cada línea, "
@@ -14240,7 +14240,7 @@ class HydroAndinaProDialog(QDialog):
             "A diferencia del botón de arriba (que siempre arma las 7 secciones, con una nota si "
             "alguna aún no se calculó), aquí puede elegir cuáles incluir: las que no marque no "
             "aparecen en el documento. Usa la misma información y una plantilla Word editable "
-            "(hydroandina_pro/resources/plantilla_reporte.docx) en vez de un documento armado desde "
+            "(hydroandes_sym_bim/resources/plantilla_reporte.docx) en vez de un documento armado desde "
             "cero, para poder ajustar membrete/estilos corporativos sin tocar el código del plugin."
         ))
         self.checks_secciones_reporte = {}
@@ -14274,10 +14274,10 @@ class HydroAndinaProDialog(QDialog):
         texto.setHtml(
             """
             <div style="text-align:center; font-family: sans-serif;">
-                <h2 style="color:#1F3864;">HydroAndes Pro</h2>
+                <h2 style="color:#1F3864;">HydroAndes SYM BIM</h2>
                 <p style="font-size:11pt;">Plugin de análisis hidrológico integral de caudales máximos
                 para cuencas andinas del Perú.</p>
-                <p style="font-size:9pt; color:#888;">Versión 0.2.6</p>
+                <p style="font-size:9pt; color:#888;">Versión 0.3.14</p>
                 <hr>
                 <p style="font-size:12pt; margin-top:20px;"><b>Ningsiar Braulio Lima Usnayo</b></p>
                 <p style="font-size:10pt; color:#444;">
@@ -14392,7 +14392,7 @@ class HydroAndinaProDialog(QDialog):
                                  "Marque al menos una sección para incluir en el reporte.")
             return
         ruta, _ = QFileDialog.getSaveFileName(self, "Guardar reporte Word (con plantilla)",
-                                               "reporte_hydroandina_pro.docx", "Documento Word (*.docx)")
+                                               "reporte_hydroandes_sym_bim.docx", "Documento Word (*.docx)")
         if not ruta:
             return
         try:
