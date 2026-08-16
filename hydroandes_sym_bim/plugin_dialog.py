@@ -50,7 +50,7 @@ from .core import (delineation, morphometry, curve_number, tc_methods, dem_downl
                     runoff_coefficient, roughness_methods, roughness_materials,
                     iila_senamhi_zones, bim_metrados, bim_ifc, bim_refuerzo, bim_geometry,
                     lateral_pressures, reinforced_concrete_e060, presupuesto, formula_polinomica,
-                    apu_referencia, cronograma)
+                    apu_referencia, cronograma, geotecnia_e050, estabilidad_muros)
 from .core.qgis_layer_utils import obtener_capa
 from .ui.hypsometric_canvas import HypsometricCanvas
 from .ui.hydrograph_canvas import HydrographCanvas
@@ -81,6 +81,7 @@ from .ui import swe2d_animation
 from .ui.bim_canvas import Estructura3DCanvas, GeometriaNoDisponibleError, LONGITUD_POR_DEFECTO_M
 from .ui.presupuesto_canvas import PresupuestoCanvas
 from .ui.cronograma_canvas import CronogramaCanvas
+from .ui.estabilidad_muros_canvas import EstabilidadMurosCanvas
 from .ui.table_utils import (ajustar_alto_tabla, aplicar_columna_elastica, limitar_ancho_tabla,
                               limitar_ancho_boton, crear_tabla_parametros, poblar_tabla_parametros)
 from .ui import export_overlay
@@ -10403,6 +10404,149 @@ class HydroAndinaProDialog(QDialog):
         v.addWidget(self.tabla_metrados_bim)
 
         # ------------------------------------------------------------
+        # Estabilidad de muros de contención en voladizo -- volteo,
+        # deslizamiento, excentricidad y capacidad portante. Verifica
+        # la ESTABILIDAD GLOBAL del muro, complementando el diseño por
+        # FLEXIÓN de la sección de arriba (un muro puede salir bien
+        # armado y aun así fallar por volteo si la zapata es angosta).
+        # Calculadora INDEPENDIENTE (geometría propia de zapata corrida
+        # -- puntera/pantalla/talón), no ligada a los canales/
+        # alcantarillas de este módulo. Ver core/estabilidad_muros.py.
+        # ------------------------------------------------------------
+        v.addWidget(QLabel(
+            "<hr><b>Estabilidad de Muros de Contención en Voladizo</b> — verifica volteo, "
+            "deslizamiento, excentricidad y capacidad portante de un muro con zapata corrida "
+            "(puntera + pantalla + talón), independiente de las estructuras de arriba. Método de "
+            "equilibrio límite clásico (FS globales, el más usado en la práctica peruana) + "
+            "capacidad portante Terzaghi-Bowles (E.050 Art. 20-21). Cálculo PRELIMINAR -- no "
+            "reemplaza el Estudio de Mecánica de Suelos ni el criterio de un ingeniero estructural/"
+            "geotécnico colegiado. Verifique especialmente el DRENAJE real del muro (un lloradero "
+            "tapado duplica el empuje de diseño -- causa #1 de fallas reales)."))
+
+        f_geo_muro = QFormLayout()
+        f_geo_muro.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.spin_em_altura_relleno = QDoubleSpinBox()
+        self.spin_em_altura_relleno.setRange(0.3, 20.0)
+        self.spin_em_altura_relleno.setDecimals(2)
+        self.spin_em_altura_relleno.setValue(3.0)
+        self.spin_em_altura_relleno.setSuffix(" m")
+        f_geo_muro.addRow("Altura de relleno (pantalla expuesta):", self.spin_em_altura_relleno)
+        self.spin_em_espesor_pantalla = QDoubleSpinBox()
+        self.spin_em_espesor_pantalla.setRange(0.15, 3.0)
+        self.spin_em_espesor_pantalla.setDecimals(2)
+        self.spin_em_espesor_pantalla.setValue(0.30)
+        self.spin_em_espesor_pantalla.setSuffix(" m")
+        f_geo_muro.addRow("Espesor de la pantalla:", self.spin_em_espesor_pantalla)
+        self.spin_em_b_puntera = QDoubleSpinBox()
+        self.spin_em_b_puntera.setRange(0.0, 10.0)
+        self.spin_em_b_puntera.setDecimals(2)
+        self.spin_em_b_puntera.setValue(0.50)
+        self.spin_em_b_puntera.setSuffix(" m")
+        f_geo_muro.addRow("Ancho de la puntera:", self.spin_em_b_puntera)
+        self.spin_em_b_talon = QDoubleSpinBox()
+        self.spin_em_b_talon.setRange(0.1, 15.0)
+        self.spin_em_b_talon.setDecimals(2)
+        self.spin_em_b_talon.setValue(1.50)
+        self.spin_em_b_talon.setSuffix(" m")
+        f_geo_muro.addRow("Ancho del talón:", self.spin_em_b_talon)
+        self.spin_em_espesor_zapata = QDoubleSpinBox()
+        self.spin_em_espesor_zapata.setRange(0.20, 3.0)
+        self.spin_em_espesor_zapata.setDecimals(2)
+        self.spin_em_espesor_zapata.setValue(0.40)
+        self.spin_em_espesor_zapata.setSuffix(" m")
+        f_geo_muro.addRow("Espesor de la zapata:", self.spin_em_espesor_zapata)
+        self.spin_em_df = QDoubleSpinBox()
+        self.spin_em_df.setRange(0.0, 6.0)
+        self.spin_em_df.setDecimals(2)
+        self.spin_em_df.setValue(0.40)
+        self.spin_em_df.setSuffix(" m")
+        f_geo_muro.addRow("Profundidad de desplante Df:", self.spin_em_df)
+        self.spin_em_gamma_concreto = QDoubleSpinBox()
+        self.spin_em_gamma_concreto.setRange(20.0, 26.0)
+        self.spin_em_gamma_concreto.setDecimals(1)
+        self.spin_em_gamma_concreto.setValue(24.0)
+        self.spin_em_gamma_concreto.setSuffix(" kN/m³")
+        f_geo_muro.addRow("Peso específico del concreto:", self.spin_em_gamma_concreto)
+        v.addLayout(f_geo_muro)
+
+        v.addWidget(QLabel("<i>Suelo de relleno / cimentación:</i>"))
+        f_suelo_muro = QFormLayout()
+        f_suelo_muro.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.spin_em_gamma_suelo = QDoubleSpinBox()
+        self.spin_em_gamma_suelo.setRange(12.0, 25.0)
+        self.spin_em_gamma_suelo.setDecimals(1)
+        self.spin_em_gamma_suelo.setValue(18.0)
+        self.spin_em_gamma_suelo.setSuffix(" kN/m³")
+        f_suelo_muro.addRow("Peso específico:", self.spin_em_gamma_suelo)
+        self.spin_em_phi_suelo = QDoubleSpinBox()
+        self.spin_em_phi_suelo.setRange(15.0, 45.0)
+        self.spin_em_phi_suelo.setDecimals(0)
+        self.spin_em_phi_suelo.setValue(30.0)
+        self.spin_em_phi_suelo.setSuffix(" °")
+        f_suelo_muro.addRow("Ángulo de fricción interna (φ):", self.spin_em_phi_suelo)
+        self.spin_em_c_suelo = QDoubleSpinBox()
+        self.spin_em_c_suelo.setRange(0.0, 200.0)
+        self.spin_em_c_suelo.setDecimals(1)
+        self.spin_em_c_suelo.setValue(0.0)
+        self.spin_em_c_suelo.setSuffix(" kPa")
+        f_suelo_muro.addRow("Cohesión (c):", self.spin_em_c_suelo)
+        self.combo_em_metodo_empuje = QComboBox()
+        self.combo_em_metodo_empuje.addItems([
+            "Rankine (plano vertical en el talón, δ=0 -- Recomendado)",
+            "Coulomb (permite δ, β, i -- avanzado)",
+        ])
+        f_suelo_muro.addRow("Método de empuje activo:", self.combo_em_metodo_empuje)
+        self.spin_em_delta_muro = QDoubleSpinBox()
+        self.spin_em_delta_muro.setRange(0.0, 40.0)
+        self.spin_em_delta_muro.setDecimals(0)
+        self.spin_em_delta_muro.setValue(0.0)
+        self.spin_em_delta_muro.setSuffix(" °")
+        f_suelo_muro.addRow("Coulomb -- fricción muro-suelo (δ):", self.spin_em_delta_muro)
+        self.spin_em_i_relleno = QDoubleSpinBox()
+        self.spin_em_i_relleno.setRange(-20.0, 20.0)
+        self.spin_em_i_relleno.setDecimals(0)
+        self.spin_em_i_relleno.setValue(0.0)
+        self.spin_em_i_relleno.setSuffix(" °")
+        f_suelo_muro.addRow("Coulomb -- inclinación del relleno (i):", self.spin_em_i_relleno)
+        self.spin_em_sobrecarga = QDoubleSpinBox()
+        self.spin_em_sobrecarga.setRange(0.0, 50.0)
+        self.spin_em_sobrecarga.setDecimals(1)
+        self.spin_em_sobrecarga.setValue(0.0)
+        self.spin_em_sobrecarga.setSuffix(" kN/m²")
+        self.spin_em_sobrecarga.setSpecialValueText("(sin sobrecarga)")
+        f_suelo_muro.addRow("Sobrecarga viva en superficie:", self.spin_em_sobrecarga)
+        self.check_em_empuje_pasivo = QCheckBox("Considerar empuje pasivo en la puntera")
+        self.check_em_empuje_pasivo.setChecked(False)
+        f_suelo_muro.addRow("", self.check_em_empuje_pasivo)
+        self.spin_em_factor_pasivo = QDoubleSpinBox()
+        self.spin_em_factor_pasivo.setRange(0.0, 1.0)
+        self.spin_em_factor_pasivo.setDecimals(2)
+        self.spin_em_factor_pasivo.setValue(0.50)
+        f_suelo_muro.addRow("Factor de reducción del empuje pasivo:", self.spin_em_factor_pasivo)
+        self.spin_em_factor_delta_desliz = QDoubleSpinBox()
+        self.spin_em_factor_delta_desliz.setRange(0.5, 1.0)
+        self.spin_em_factor_delta_desliz.setDecimals(2)
+        self.spin_em_factor_delta_desliz.setValue(2.0 / 3.0)
+        f_suelo_muro.addRow("Factor δ/φ para deslizamiento (⅔ a 1):", self.spin_em_factor_delta_desliz)
+        self.combo_em_zona_sismica = QComboBox()
+        self.combo_em_zona_sismica.addItems(
+            ["(sin verificación sísmica)"] + list(lateral_pressures.ZONAS_SISMICAS_E030.keys()))
+        f_suelo_muro.addRow("Zona sísmica (E.030, opcional):", self.combo_em_zona_sismica)
+        v.addLayout(f_suelo_muro)
+
+        btn_verificar_muro = QPushButton("🏗 Verificar estabilidad del muro")
+        btn_verificar_muro.clicked.connect(self._on_verificar_estabilidad_muro)
+        v.addWidget(btn_verificar_muro)
+        self.lbl_estado_estabilidad_muro = QLabel("Estado: sin calcular.")
+        self.lbl_estado_estabilidad_muro.setWordWrap(True)
+        v.addWidget(self.lbl_estado_estabilidad_muro)
+        self.tabla_estabilidad_muro = crear_tabla_parametros()
+        v.addWidget(self.tabla_estabilidad_muro)
+        self.canvas_estabilidad_muro = EstabilidadMurosCanvas(width=7.6, height=6.2)
+        v.addWidget(self.canvas_estabilidad_muro)
+        self._ultima_estabilidad_muro = None
+
+        # ------------------------------------------------------------
         # Exportación IFC (fase 3 del módulo BIM) -- modelo federado
         # real para Revit/Navisworks/ArchiCAD/Tekla. Ver
         # core/bim_ifc.py para el alcance exacto.
@@ -10764,6 +10908,75 @@ class HydroAndinaProDialog(QDialog):
             pass  # el render base ya informó el motivo en lbl_estado_bim -- no duplicar el error
         except Exception:
             pass  # el overlay de refuerzo es un plus visual -- nunca debe romper el cálculo ya hecho
+
+    def _on_verificar_estabilidad_muro(self):
+        metodo_empuje = "coulomb" if self.combo_em_metodo_empuje.currentIndex() == 1 else "rankine"
+        zona = self.combo_em_zona_sismica.currentText()
+        try:
+            resultado = estabilidad_muros.verificar_muro_contencion(
+                altura_relleno_m=self.spin_em_altura_relleno.value(),
+                espesor_pantalla_m=self.spin_em_espesor_pantalla.value(),
+                b_puntera_m=self.spin_em_b_puntera.value(), b_talon_m=self.spin_em_b_talon.value(),
+                espesor_zapata_m=self.spin_em_espesor_zapata.value(), df_m=self.spin_em_df.value(),
+                gamma_suelo_kn_m3=self.spin_em_gamma_suelo.value(), phi_suelo_deg=self.spin_em_phi_suelo.value(),
+                c_suelo_kpa=self.spin_em_c_suelo.value(), gamma_concreto_kn_m3=self.spin_em_gamma_concreto.value(),
+                metodo_empuje=metodo_empuje, delta_muro_deg=self.spin_em_delta_muro.value(),
+                i_relleno_deg=self.spin_em_i_relleno.value(), sobrecarga_kn_m2=self.spin_em_sobrecarga.value(),
+                considerar_empuje_pasivo=self.check_em_empuje_pasivo.isChecked(),
+                factor_reduccion_pasivo=self.spin_em_factor_pasivo.value(),
+                factor_delta_deslizamiento=self.spin_em_factor_delta_desliz.value(),
+                zona_sismica=None if zona.startswith("(sin") else zona)
+        except estabilidad_muros.EstabilidadMurosError as e:
+            self.tabla_estabilidad_muro.setRowCount(0)
+            self.lbl_estado_estabilidad_muro.setText(f"Estado: no se pudo calcular -- {e}")
+            return
+        except Exception as e:
+            self.tabla_estabilidad_muro.setRowCount(0)
+            self.lbl_estado_estabilidad_muro.setText(f"Estado: ERROR inesperado -- {e}")
+            return
+
+        def _filas_de(datos, etiqueta):
+            exc = datos["excentricidad"]
+            return [
+                (f"[{etiqueta}] FS volteo", datos["fs_volteo"], "",
+                 f"mínimo {datos['fs_volteo_minimo']} -- {'cumple' if datos['cumple_volteo'] else 'NO CUMPLE'}"),
+                (f"[{etiqueta}] FS deslizamiento", datos["fs_deslizamiento"], "",
+                 f"mínimo {datos['fs_deslizamiento_minimo']} (δ={datos['delta_deslizamiento_deg']:.1f}°) -- "
+                 f"{'cumple' if datos['cumple_deslizamiento'] else 'NO CUMPLE'}"),
+                (f"[{etiqueta}] Excentricidad e", exc["excentricidad_m"], "m",
+                 f"B/6={resultado['geometria']['b_total_m'] / 6.0:.3f} m -- "
+                 f"{'cumple' if exc['cumple_e_b6'] else 'excede (usa ancho efectivo de Meyerhof)'}"),
+                (f"[{etiqueta}] Presión máxima q_max", exc["q_max_kpa"], "kPa",
+                 f"admisible {datos['presion_admisible_kpa']:.1f} kPa -- "
+                 f"{'cumple' if datos['cumple_capacidad_portante'] else 'NO CUMPLE'}"),
+                (f"[{etiqueta}] Presión mínima q_min", exc["q_min_kpa"], "kPa", ""),
+            ]
+
+        filas = [
+            ("Ancho total de zapata B", resultado["geometria"]["b_total_m"], "m", ""),
+            ("Altura total (relleno+zapata) H", resultado["geometria"]["h_total_m"], "m", ""),
+            ("Ka (empuje activo)", resultado["empuje_activo"]["ka"], "",
+             resultado["empuje_activo"]["metodo"]),
+            ("N (carga vertical total)", resultado["cargas_verticales_kn_m"]["n_total"], "kN/m", ""),
+        ]
+        filas += _filas_de(resultado["estatico"], "ESTÁTICO")
+        if resultado["sismico"] is not None:
+            filas += _filas_de(resultado["sismico"], "SÍSMICO")
+        poblar_tabla_parametros(self.tabla_estabilidad_muro, filas)
+
+        try:
+            self.canvas_estabilidad_muro.graficar(resultado, condicion="estatico")
+        except Exception:
+            pass  # el gráfico es un plus visual -- nunca debe romper el cálculo ya hecho
+
+        self._ultima_estabilidad_muro = resultado
+        est = resultado["estatico"]
+        todo_ok = est["cumple_volteo"] and est["cumple_deslizamiento"] and est["cumple_capacidad_portante"]
+        if resultado["sismico"] is not None:
+            sis = resultado["sismico"]
+            todo_ok = todo_ok and sis["cumple_volteo"] and sis["cumple_deslizamiento"] and sis["cumple_capacidad_portante"]
+        self.lbl_estado_estabilidad_muro.setText(
+            f"Estado: verificación completa -- {'CUMPLE todas las verificaciones' if todo_ok else 'NO CUMPLE alguna verificación (revise la tabla)'}.")
 
     # ==================================================================
     # Módulo "Presupuesto, APU e Insumos" -- fase 2 (interfaz). Ver

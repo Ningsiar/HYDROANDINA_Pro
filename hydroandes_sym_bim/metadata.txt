@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.3.33
+version=0.3.34
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,61 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.3.34: NUEVO -- Estabilidad de Muros de Contención en voladizo
+      (volteo, deslizamiento, excentricidad, capacidad portante), a
+      pedido explícito del usuario tras pedir sugerencias de mejora
+      "como ingeniero civil": el Módulo BIM calculaba el refuerzo por
+      FLEXIÓN de un muro pero no verificaba su ESTABILIDAD GLOBAL -- un
+      muro puede salir bien armado y aun así fallar por volteo si la
+      zapata es angosta. Primera de una lista de 6 mejoras priorizadas
+      por el usuario (1, 6, 4, 5, 3, 2).
+      Nuevo core/lateral_pressures.py: coeficiente de empuje activo de
+      COULOMB (1776, con fricción muro-suelo δ, paramento inclinado β,
+      relleno inclinado i -- se reduce EXACTO a Rankine con δ=0,β=90°,
+      i=0, verificado) y Kp de Rankine (empuje pasivo).
+      Nuevo core/geotecnia_e050.py: capacidad portante última
+      Terzaghi-Bowles (E.050 Art. 20 -- Nc/Nq/Nγ, factores de forma y
+      de inclinación de carga), presión admisible (Art. 21, FS
+      3.0 estático/2.5 sísmico), y verificación de distorsión angular
+      (Tabla 8) -- motor compartido con el futuro diseño de zapatas.
+      Nuevo core/estabilidad_muros.py: verificación COMPLETA por
+      equilibrio límite clásico (el método más usado en la práctica
+      peruana) -- FS volteo (≥1.5 estático/1.25 sísmico) respecto al
+      pie, FS deslizamiento (≥1.5/1.25, δ=⅔φ por defecto, empuje
+      pasivo opcional reducido) en la base, excentricidad (e≤B/6,
+      ancho efectivo de Meyerhof B'=B-2e si se excede) y capacidad
+      portante sobre ese ancho efectivo, en condición estática y,
+      opcionalmente, sísmica (incremento de Mononobe-Okabe ya
+      existente). Documenta explícitamente los métodos NO
+      implementados y por qué (LRFD/AASHTO -- obras viales, no
+      edificaciones; Eurocódigo -- no es normativa peruana; diseño por
+      desplazamiento Richards-Elms/Newmark; métodos numéricos MEF;
+      estabilidad global Bishop/Janbu/Spencer -- un módulo aparte).
+      Nueva sección "Estabilidad de Muros de Contención en Voladizo"
+      en la Pestaña 8b (calculadora independiente, geometría propia de
+      zapata corrida) con gráfico de alto impacto nuevo
+      (ui/estabilidad_muros_canvas.py): diagrama de cuerpo libre con
+      la geometría acotada, el empuje activo Pa y el peso N como
+      vectores, el diagrama de presiones de contacto bajo la zapata, y
+      un cuadro de estado con cada verificación (✓/✗) en verde/rojo.
+      Verificado con QGIS 3.40.1 real en modo headless (74
+      comprobaciones: 29 Coulomb/capacidad portante + 30 estabilidad +
+      15 interfaz): Nq/Nc/Nγ para φ=30° coinciden con las tablas
+      estándar de la bibliografía geotécnica; un caso completo de
+      muro en voladizo calculado a mano (B=2.3 m, H=3.4 m) verificado
+      valor por valor -- pesos, Pa, momentos, FS_volteo=4.198,
+      FS_deslizamiento=1.309 (caso intencionalmente ajustado para NO
+      cumplir, confirmando que el verificador detecta problemas
+      reales, no solo casos que pasan), excentricidad, q_max/q_min, y
+      capacidad portante; con empuje pasivo el FS de deslizamiento
+      mejora; con más talón (más peso estabilizador) todo mejora; con
+      sismo el FS baja (más exigente); Coulomb con δ=0 coincide con
+      Rankine exacto; y el flujo completo a través de los controles
+      reales de la interfaz.
+      PENDIENTE (ya acordado, orden 1-6-4-5-3-2): diseño de zapatas
+      E.050/E.060/E.030 (reutiliza core/geotecnia_e050.py), guardar/
+      cargar proyecto completo, exportación S10/Delphin Xpress,
+      calendario laboral en el Cronograma, y curva S.
     - v0.3.33: dos complementos a pedido del usuario -- "complementar
       con el cronograma de adquisiciones, también fórmula polinómica".
       1) FÓRMULA POLINÓMICA -- interfaz nueva (el núcleo ya existía

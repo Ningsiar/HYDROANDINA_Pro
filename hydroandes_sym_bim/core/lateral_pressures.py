@@ -4,16 +4,31 @@ core/lateral_pressures.py
 
 Empujes laterales sobre un muro/losa vertical (agua + suelo, estático
 y sísmico) para el diseño simplificado de refuerzo del Módulo BIM (ver
-core/bim_refuerzo.py). Métodos: Rankine (empuje activo Ka) y Jaky
-(empuje en reposo Ko) para la parte estática; Mononobe-Okabe (1929)
-para el incremento sísmico dinámico, con el punto de aplicación de
-Seed & Whitman (1970) para ese incremento (0.6H en vez de H/3).
+core/bim_refuerzo.py) y para la verificación de estabilidad de muros de
+contención (ver core/estabilidad_muros.py). Métodos: Rankine (1857,
+empuje activo Ka) y Jaky (empuje en reposo Ko) para el caso simple
+(muro vertical liso, relleno horizontal); Coulomb (1776, empuje activo
+Ka con fricción muro-suelo δ, paramento inclinado β y relleno
+inclinado i) para el caso general; Mononobe-Okabe (1929) para el
+incremento sísmico dinámico, con el punto de aplicación de Seed &
+Whitman (1970) para ese incremento (0.6H en vez de H/3).
+
+MÉTODOS CONSIDERADOS PERO NO IMPLEMENTADOS (fuera de alcance, documentados
+para que quede explícito por qué):
+  - Culmann (cuñas gráfico): método gráfico manual, no se presta a un
+    cálculo cerrado programable sin perder su naturaleza gráfica.
+  - Terzaghi-Peck (cartas empíricas): requerirían digitalizar las
+    cartas originales del texto -- no se reproducen sin la fuente
+    exacta (mismo criterio de este plugin frente a cualquier tabla de
+    una publicación de terceros, ver core/presupuesto.py).
+  - Boussinesq/Spangler (incremento por cargas puntuales/lineales/de
+    faja): válido para una fase posterior si hace falta modelar cargas
+    de superficie distintas a la sobrecarga uniforme ya cubierta aquí.
 
 ALCANCE Y LIMITACIONES -- léase antes de usar en un expediente técnico:
-  - Muro vertical (β=0), relleno horizontal (i=0), fricción muro-suelo
-    despreciada (δ=0) -- simplificaciones conservadoras estándar para
-    un cálculo PRELIMINAR; un análisis definitivo debe considerar la
-    geometría e interacción suelo-estructura reales.
+  - Con δ=0, β=90°, i=0, Coulomb se reduce EXACTAMENTE a Rankine
+    (verificado en las pruebas de este módulo) -- son el mismo caso
+    límite, no dos resultados distintos.
   - kh = 0.5·Z (coeficiente sísmico horizontal pseudo-estático, kv=0) --
     una regla simplificada de uso común en la práctica peruana para el
     diseño pseudo-estático de muros de contención, NO un análisis
@@ -53,6 +68,43 @@ def coeficiente_empuje_activo_rankine(phi_suelo_deg: float) -> float:
     """Ka de Rankine (muro vertical, relleno horizontal, sin fricción
     muro-suelo): Ka = tan²(45° - phi/2)."""
     return math.tan(math.radians(45.0 - phi_suelo_deg / 2.0)) ** 2
+
+
+def coeficiente_empuje_pasivo_rankine(phi_suelo_deg: float) -> float:
+    """Kp de Rankine: Kp = tan²(45° + phi/2) -- inverso de Ka. Se usa
+    como resistencia pasiva simplificada (sin fricción muro-suelo) en
+    la verificación de deslizamiento de core/estabilidad_muros.py --
+    Coulomb sobreestima Kp para δ grande y no se implementa para el
+    caso pasivo (limitación conocida del método, ver Das/Bowles)."""
+    return math.tan(math.radians(45.0 + phi_suelo_deg / 2.0)) ** 2
+
+
+def coeficiente_empuje_activo_coulomb(phi_suelo_deg: float, delta_deg: float = 0.0,
+                                       beta_deg: float = 90.0, i_deg: float = 0.0) -> float:
+    """Ka de Coulomb (1776) -- generaliza Rankine incluyendo fricción
+    muro-suelo (delta_deg), paramento posterior inclinado (beta_deg,
+    medido desde la horizontal -- 90° = vertical) y relleno inclinado
+    (i_deg, medido desde la horizontal, positivo hacia arriba). Con
+    delta=0°, beta=90°, i=0° se reduce EXACTAMENTE a Rankine
+    (tan²(45-phi/2)) -- verificado en las pruebas de este módulo.
+
+    Ka = sin²(β+φ) / [sin²β · sin(β-δ) · (1 + √(sin(φ+δ)·sin(φ-i) /
+         (sin(β-δ)·sin(β+i))))²]
+
+    Levanta ValueError si la combinación de ángulos queda fuera de
+    rango físico (el término bajo la raíz resulta negativo)."""
+    phi = math.radians(phi_suelo_deg)
+    delta = math.radians(delta_deg)
+    beta = math.radians(beta_deg)
+    i = math.radians(i_deg)
+    numerador = math.sin(beta + phi) ** 2
+    interior = (math.sin(phi + delta) * math.sin(phi - i)) / (math.sin(beta - delta) * math.sin(beta + i))
+    if interior < 0:
+        raise ValueError(
+            "combinación de φ, δ, β, i fuera de rango físico para Coulomb -- el término bajo la "
+            "raíz resultó negativo; revise los ángulos ingresados.")
+    denominador = (math.sin(beta) ** 2) * math.sin(beta - delta) * (1.0 + math.sqrt(interior)) ** 2
+    return numerador / denominador
 
 
 def presion_suelo_resultante(gamma_suelo_kn_m3: float, altura_m: float, k: float):
