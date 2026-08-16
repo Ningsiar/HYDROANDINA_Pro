@@ -5,3 +5,7 @@ __pycache__/
 *.egg-info/
 .vscode/
 .idea/
+
+# Archivos personales con el secreto real de licencia -- NUNCA versionar.
+*_PRIVADO.bat
+*_PRIVADO.ps1

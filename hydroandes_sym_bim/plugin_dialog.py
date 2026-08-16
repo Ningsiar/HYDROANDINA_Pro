@@ -75,6 +75,7 @@ from .ui.swe2d_canvas import (MapaCalado2DCanvas, MapaPeligrosidadCanvas,
                                TerrenoCalado3DCanvas)
 from .ui.swe2d_runner import SimulacionSwe2DWorker, estimar_coste
 from .ui import swe2d_animation
+from .ui.bim_canvas import Estructura3DCanvas, GeometriaNoDisponibleError, LONGITUD_POR_DEFECTO_M
 from .ui.table_utils import (ajustar_alto_tabla, aplicar_columna_elastica, limitar_ancho_tabla,
                               limitar_ancho_boton, crear_tabla_parametros, poblar_tabla_parametros)
 from .ui import export_overlay
@@ -429,6 +430,7 @@ class HydroAndinaProDialog(QDialog):
         self._build_tab5()
         self._build_tab_hidraulica_drenaje()
         self._build_tab_simulacion_2d()
+        self._build_tab_bim()
         self._build_tab_modulos_avanzados()
         self._build_tab_socavacion()
         self._build_tab_perdida_suelos()
@@ -8183,9 +8185,19 @@ class HydroAndinaProDialog(QDialog):
                 ("Velocidad", r["velocidad_m_s"], "m/s"),
                 *fila_verificacion,
             ])
+            # diametro_m/ancho_m/alto_m: las dimensiones de ENTRADA (no
+            # resultados hidráulicos) -- se guardan aquí porque el
+            # módulo BIM (Pestaña 8b) las necesita para el render 3D y
+            # ningún otro campo de este dict las tenía hasta v0.3.19.
+            dimensiones_entrada = (
+                {"diametro_m": self.spin_alcant_diametro.value()}
+                if self.combo_alcant_tipo.currentText().startswith("Circular") else
+                {"ancho_m": self.spin_alcant_ancho.value(), "alto_m": self.spin_alcant_alto.value()}
+            )
             self.resultados_hidraulica_drenaje[f"Alcantarilla - {self.combo_alcant_tipo.currentText()}"] = {
                 "tipo": "Alcantarilla", "subtipo": self.combo_alcant_tipo.currentText(),
                 "n": n, "S": s, "tirante_m": y,
+                **dimensiones_entrada,
                 **{k: v for k, v in r.items() if k != "advertencia"},
                 **({"Qp_objetivo_m3s": qp_obj, "cumple": cumple_qp} if qp_obj > 0 else {}),
             }
@@ -10165,6 +10177,127 @@ class HydroAndinaProDialog(QDialog):
 
         v.addStretch()
         self._agregar_pestaña_con_scroll(tab, "8. Simulación Hidráulica 2D Estructuras")
+
+    # ------------------------------------------------------------------
+    # TAB 8b: Módulo BIM (fase 1 -- render 3D acotado). Ver
+    # ui/bim_canvas.py para el detalle de qué tipos están soportados y
+    # por qué. Fases futuras (avisadas al usuario, no implementadas
+    # todavía): metrados (cantidades) y exportación IFC.
+    # ------------------------------------------------------------------
+    _TIPOS_ESTRUCTURALES_BIM_P7 = {
+        "Canal", "Alcantarilla", "Enrocado (RipRap)", "Sumidero", "Pontón", "Puente", "Defensa Ribereña",
+    }
+
+    def _build_tab_bim(self):
+        tab = QWidget()
+        v = QVBoxLayout(tab)
+        _lbl_intro_bim = QLabel(
+            "<b>Módulo BIM</b> — render 3D acotado de UNA estructura ya calculada en la Pestaña 7 "
+            "(Diseño de Estructuras Hidráulicas) o insertada en la Pestaña 8 (Simulación 2D). No es "
+            "diseño estructural ni geotécnico: representa las dimensiones ya calculadas/ingresadas "
+            "en esas pestañas. Pontón, Puente y Defensa Ribereña solo registran verificación de "
+            "borde libre (sin luz/ancho real) -- se muestran como esquema, claramente rotulado. "
+            "Próximas fases de este módulo: cuadro de metrados (cantidades) y exportación a IFC "
+            "(modelo federado para Revit, Navisworks, ArchiCAD, Tekla, etc.)."
+        )
+        _lbl_intro_bim.setWordWrap(True)
+        v.addWidget(_lbl_intro_bim)
+
+        f = QFormLayout()
+        f.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.combo_bim_fuente = QComboBox()
+        self.combo_bim_fuente.addItems([
+            "Pestaña 7 — Diseño de Estructuras Hidráulicas",
+            "Pestaña 8 — Simulación 2D (estructuras insertadas)",
+        ])
+        self.combo_bim_fuente.currentIndexChanged.connect(self._on_actualizar_lista_bim)
+        f.addRow("Fuente de datos:", self.combo_bim_fuente)
+
+        self.combo_bim_estructura = QComboBox()
+        f.addRow("Estructura:", self.combo_bim_estructura)
+
+        self.spin_bim_longitud = QDoubleSpinBox()
+        self.spin_bim_longitud.setRange(0.5, 500.0)
+        self.spin_bim_longitud.setDecimals(1)
+        self.spin_bim_longitud.setValue(LONGITUD_POR_DEFECTO_M)
+        self.spin_bim_longitud.setSuffix(" m")
+        f.addRow("Longitud a modelar (extrusión):", self.spin_bim_longitud)
+        v.addLayout(f)
+
+        h_botones = QHBoxLayout()
+        btn_actualizar = QPushButton("🔄 Actualizar lista de estructuras")
+        btn_actualizar.clicked.connect(self._on_actualizar_lista_bim)
+        h_botones.addWidget(btn_actualizar)
+        btn_generar = QPushButton("Generar modelo 3D")
+        btn_generar.clicked.connect(self._on_generar_bim_3d)
+        h_botones.addWidget(btn_generar)
+        v.addLayout(h_botones)
+
+        self.lbl_estado_bim = QLabel(
+            "Estado: seleccione una fuente y presione «Actualizar lista de estructuras».")
+        self.lbl_estado_bim.setWordWrap(True)
+        v.addWidget(self.lbl_estado_bim)
+
+        self.canvas_bim_3d = Estructura3DCanvas(width=8.0, height=6.0)
+        v.addWidget(self.canvas_bim_3d)
+
+        self._estructuras_bim_p8 = []
+        v.addStretch()
+        self._agregar_pestaña_con_scroll(tab, "8b. Módulo BIM (3D)")
+        self._on_actualizar_lista_bim()
+
+    def _on_actualizar_lista_bim(self):
+        self.combo_bim_estructura.clear()
+        if self.combo_bim_fuente.currentIndex() == 0:
+            nombres = [nombre for nombre, datos in self.resultados_hidraulica_drenaje.items()
+                       if datos.get("tipo") in self._TIPOS_ESTRUCTURALES_BIM_P7]
+            self.combo_bim_estructura.addItems(nombres)
+            if not nombres:
+                self.lbl_estado_bim.setText(
+                    "Estado: no hay estructuras calculadas en la Pestaña 7 todavía. Calcule alguna "
+                    "(canal, alcantarilla, enrocado, sumidero, pontón, puente o defensa ribereña) "
+                    "y vuelva a actualizar la lista.")
+            else:
+                self.lbl_estado_bim.setText(f"Estado: {len(nombres)} estructura(s) de Pestaña 7 disponible(s).")
+            return
+        try:
+            estructuras = self._leer_estructuras_2d()
+        except Swe2DEntradaInvalida as e:
+            self._estructuras_bim_p8 = []
+            self.lbl_estado_bim.setText(f"Estado: ERROR al leer la Pestaña 8 -- {e}")
+            return
+        self._estructuras_bim_p8 = estructuras
+        self.combo_bim_estructura.addItems([est.nombre for est in estructuras])
+        if not estructuras:
+            self.lbl_estado_bim.setText("Estado: no hay estructuras en la tabla de la Pestaña 8 todavía.")
+        else:
+            self.lbl_estado_bim.setText(f"Estado: {len(estructuras)} estructura(s) de Pestaña 8 disponible(s).")
+
+    def _on_generar_bim_3d(self):
+        if self.combo_bim_estructura.count() == 0:
+            self.lbl_estado_bim.setText(
+                "Estado: no hay ninguna estructura para modelar -- actualice la lista primero.")
+            return
+        nombre = self.combo_bim_estructura.currentText()
+        try:
+            if self.combo_bim_fuente.currentIndex() == 0:
+                datos = self.resultados_hidraulica_drenaje.get(nombre)
+                if datos is None:
+                    raise GeometriaNoDisponibleError(
+                        f"no se encontró «{nombre}» en los resultados de la Pestaña 7 -- "
+                        f"actualice la lista de nuevo.")
+                self.canvas_bim_3d.graficar_desde_pestana7(nombre, datos, self.spin_bim_longitud.value())
+            else:
+                indice = self.combo_bim_estructura.currentIndex()
+                if indice < 0 or indice >= len(self._estructuras_bim_p8):
+                    raise GeometriaNoDisponibleError(
+                        "la tabla de la Pestaña 8 cambió -- actualice la lista de nuevo.")
+                self.canvas_bim_3d.graficar_desde_pestana8(self._estructuras_bim_p8[indice])
+            self.lbl_estado_bim.setText(f"Estado: modelo 3D generado para «{nombre}».")
+        except GeometriaNoDisponibleError as e:
+            self.lbl_estado_bim.setText(f"Estado: no se pudo generar el modelo -- {e}")
+        except Exception as e:
+            self.lbl_estado_bim.setText(f"Estado: ERROR inesperado -- {e}")
 
     def _build_tab_modulos_avanzados(self):
         tab = QWidget()

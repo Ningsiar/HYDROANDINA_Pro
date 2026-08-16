@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.3.18
+version=0.3.19
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,46 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.3.19: Módulo BIM -- fase 1 de 3 (nuevo, después de la Pestaña 8).
+      Nueva Pestaña "8b. Módulo BIM (3D)": render 3D acotado de UNA
+      estructura hidráulica ya calculada, elegida por el usuario desde
+      cualquiera de las dos fuentes de datos del plugin:
+        - Pestaña 7 (Diseño de Estructuras): geometría real de
+          ingeniería. Soporta canales (rectangular/triangular/
+          trapezoidal/parabólico), alcantarillas (circular/cajón),
+          enrocado (RipRap), sumideros, y pontón/puente/defensa
+          ribereña (estos 3 últimos solo registran verificación de
+          borde libre, sin luz/ancho real -- se muestran como esquema
+          con ancho nominal, claramente rotulado como tal). Canal
+          irregular y cuneta vial Gutter/HEC-22 quedan pendientes
+          (no guardan la geometría necesaria para 3D todavía).
+        - Pestaña 8 (Simulación 2D): geometría esquemática de las
+          estructuras insertadas (vertedero/orificio/alcantarilla),
+          reutilizando core/swe2d.py::Estructura tal cual, sin duplicar
+          el parseo de la tabla.
+      Nuevo ui/bim_canvas.py (clase Estructura3DCanvas, mismo patrón de
+      TerrenoCalado3DCanvas del item 8 fase 4a: Axes3D + Poly3DCollection
+      sobre el backend Agg, testeable en headless). Corrige además un
+      hueco real: _on_calcular_alcantarilla() no guardaba el diámetro
+      (circular) ni el ancho/alto (cajón) en
+      resultados_hidraulica_drenaje -- ahora sí, indispensables para el
+      render 3D (una alcantarilla calculada con una versión anterior
+      del plugin debe recalcularse una vez para que el módulo BIM pueda
+      modelarla).
+      Verificado con QGIS 3.40.1 real en modo headless (24
+      comprobaciones): render 3D sin excepción para los 11 casos de
+      Pestaña 7 soportados y los 3 tipos de Pestaña 8, mensajes de error
+      claros (no una excepción cruda) para datos faltantes o formas no
+      soportadas todavía, y construcción completa del diálogo principal
+      con la pestaña nueva integrada, incluida la lista de estructuras
+      poblándose correctamente (y filtrando entradas que no son
+      estructuras, como resultados de caudal) al calcular en Pestaña 7.
+      PENDIENTE (fases 2 y 3 de este mismo módulo, ya acordadas con el
+      usuario): cuadro de metrados/cantidades (concreto, excavación,
+      encofrado) exportable, y exportación a IFC (Industry Foundation
+      Classes -- el estándar abierto de "modelo federado" que Revit,
+      Navisworks, ArchiCAD y Tekla pueden abrir; no existe forma de
+      generar un .rvt nativo de Revit fuera del propio Revit).
     - v0.3.18: código de instalación visible + botón Copiar en el
       diálogo de licencia -- corrige un hueco real de usabilidad: antes
       el "id de instalación" que hace falta para generarle una clave a
