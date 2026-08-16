@@ -221,3 +221,49 @@ def perfil_solido_cascara(xs, zs, cerrado: bool, espesor: float):
     if not cerrado:
         return list(xs) + list(reversed(xs_ext)), list(zs) + list(reversed(zs_ext)), None, None
     return xs_ext, zs_ext, list(xs), list(zs)
+
+
+# ======================================================================
+# Contorno del muro/losa por fuente -- usado por el diseño de refuerzo
+# (core/bim_refuerzo.py), la exportación IFC (core/bim_ifc.py) y el
+# overlay 3D de acero (ui/bim_canvas.py / plugin_dialog.py) para que
+# las tres partes recorten EXACTAMENTE el mismo contorno de concreto.
+# ======================================================================
+def contorno_muro_pestana7(datos: dict):
+    """(xs, zs, cerrado) del contorno del muro/losa de concreto para
+    una estructura de Pestaña 7 -- solo Canal/Alcantarilla/Sumidero
+    tienen muro de concreto real (categoría "cascara"). Devuelve
+    (None, None, None) si el tipo no aplica (roca, o solo verificación
+    de borde libre sin geometría de material)."""
+    tipo = datos.get("tipo", "")
+    if tipo == "Canal":
+        xs, zs, _ = perfil_canal_desde_datos(datos)
+        return xs, zs, False
+    if tipo == "Alcantarilla":
+        xs, zs, _ = perfil_alcantarilla_desde_datos(datos)
+        return xs, zs, True
+    if tipo == "Sumidero":
+        xs, zs, _, _ = perfil_sumidero(datos.get("L_m"), datos.get("y_m"))
+        return xs, zs, True
+    return None, None, None
+
+
+def contorno_muro_pestana8(estructura):
+    """(xs, zs, cerrado) del contorno del muro nominal para una
+    estructura de Pestaña 8 (alcantarilla/vertedero/orificio -- las
+    únicas con muro esquemático). Devuelve (None, None, None) si el
+    tipo no es reconocido."""
+    tipo = estructura.tipo
+    p = estructura.parametros
+    if tipo == "alcantarilla":
+        xs, zs = perfil_circular(p.get("diametro"))
+        return xs, zs, True
+    if tipo == "vertedero":
+        xs, zs = perfil_muro_nominal()
+        return xs, zs, True
+    if tipo == "orificio":
+        area = p.get("area", 0.5)
+        lado = math.sqrt(max(area, 1e-6))
+        xs, zs = perfil_muro_nominal(alto=max(lado * 1.8, 1.5))
+        return xs, zs, True
+    return None, None, None

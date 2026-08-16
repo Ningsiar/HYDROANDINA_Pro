@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.3.23
+version=0.3.24
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,65 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.3.24: Módulo BIM -- fase 5 (nueva), el refuerzo de acero se VE
+      y se EXPORTA como geometría real, no solo como una cifra en una
+      tabla, a pedido del cliente ("incluir el gráfico de alto impacto
+      para ver el refuerzo... incluido también en el modelo federado...
+      metrados por diámetros y tipos de acero y su distribución").
+      1) Gráfico 3D de alto impacto: nuevo
+      ui/bim_canvas.py::Estructura3DCanvas.graficar_refuerzo() dibuja el
+      acero PRINCIPAL (de flexión, en rojo -- el contorno del muro
+      repetido cada espaciamiento a lo largo de la longitud, como
+      "costillas") y el de TEMPERATURA/repartición (en naranja
+      punteado -- corrido a lo largo de toda la longitud en varios
+      puntos del contorno) superpuesto sobre el render de concreto ya
+      existente, con leyenda. Se dispara automáticamente al presionar
+      "Calcular refuerzo".
+      2) Modelo federado con acero real: nuevo core/bim_ifc.py crea una
+      IfcReinforcingBar (geometría IfcSweptDiskSolid, no un cilindro
+      aproximado ni un texto) por cada barra física, con su diámetro,
+      longitud y área reales, más un segundo Pset_HydroAndesRefuerzo con
+      el diseño estructural completo (caso gobernante, momento, As,
+      barra/espaciamiento, pesos) -- visible en Revit/Navisworks/
+      ArchiCAD como acero real, no una propiedad de texto. Se incluye
+      automáticamente en la exportación IFC cuando ya se calculó el
+      refuerzo de esa misma estructura; si no, el IFC se genera igual
+      que antes (sin acero).
+      3) Metrados por diámetro y tipo, por separado: core/bim_refuerzo.py
+      ahora calcula y muestra DOS partidas de acero independientes, cada
+      una con su propio diámetro/espaciamiento/peso -- PRINCIPAL
+      (flexión, diámetro elegible, antes mezclado con temperatura en una
+      sola cifra "As adoptado") y TEMPERATURA/RETRACCIÓN (nuevo selector
+      de diámetro en la interfaz, antes fijo en 3/8" sin poder
+      cambiarlo). La tabla de refuerzo de la Pestaña 8b quedó reorganizada
+      en dos bloques (uno por partida) en vez de una fila combinada.
+      Refactor de apoyo: nuevas core/bim_geometry.py::
+      contorno_muro_pestana7/8() centralizan el contorno del muro por
+      tipo de estructura (antes duplicado inline en bim_ifc.py), ahora
+      reutilizado también por el overlay 3D y el cálculo de la geometría
+      de barras.
+      ALCANCE: sigue siendo una disposición ESQUEMÁTICA (barras
+      principales espaciadas a lo largo de la longitud, temperatura
+      muestreada en ~12 puntos del contorno) -- no un despiece de planos
+      real con empalmes, ganchos ni detallado de esquinas; ver el
+      docstring de core/bim_refuerzo.py::geometria_barras_refuerzo().
+      Verificado con QGIS 3.40.1 + ifcopenshell 0.8.5 reales en modo
+      headless (39 comprobaciones): contorno de muro correcto para
+      Canal (abierto) y None para Enrocado (no aplica refuerzo, como
+      antes), split principal/temperatura contra el caso ya verificado a
+      mano en v0.3.23 (As principal ≈3.71 cm²/m, peso total = principal +
+      temperatura exactamente), geometría de barras con costillas
+      cubriendo 0..longitud_m y diámetros correctos, IFC con acero:
+      IfcReinforcingBar presentes en la cantidad exacta esperada
+      (costillas + longitudinales), NominalDiameter correcto por partida
+      (12.7 mm / 9.5 mm), Pset_HydroAndesRefuerzo con el peso total,
+      unidades del archivo siguen en metros, exportación SIN refuerzo
+      calculado sigue sin generar ninguna barra (compatibilidad hacia
+      atrás), overlay 3D agrega colecciones al eje y se limpia
+      correctamente al regenerar el modelo base, y el flujo completo a
+      través de los controles reales de la interfaz (nuevo combo de
+      barra de temperatura, cálculo disparando el overlay 3D, y
+      exportación a IFC desde el botón real incluyendo el acero).
     - v0.3.23: Módulo BIM -- fase 4 (nueva), diseño de refuerzo de
       acero por Norma E.060 (concreto armado) + E.030 (sismorresistente,
       empuje de tierra dinámico Mononobe-Okabe). Reemplaza la "cuantía

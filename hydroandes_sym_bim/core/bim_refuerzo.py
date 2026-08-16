@@ -104,7 +104,8 @@ def calcular_refuerzo(nombre: str, altura_muro_m: float, altura_agua_m: float, e
                        fc_kg_cm2: float = 210.0, fy_kg_cm2: float = 4200.0, recubrimiento_cm: float = 4.0,
                        con_relleno_posterior: bool = True, gamma_suelo_kn_m3: float = 18.0,
                        phi_suelo_deg: float = 30.0, metodo_empuje: str = "Ko", sobrecarga_kn_m2: float = 0.0,
-                       zona_sismica=None, diametro_barra: str = "1/2\"") -> dict:
+                       zona_sismica=None, diametro_barra: str = "1/2\"",
+                       diametro_barra_temperatura: str = "3/8\"") -> dict:
     """Diseño de refuerzo por flexión de una franja de 1 m del muro/
     losa. Devuelve un dict con el caso gobernante, el momento de
     diseño, el acero requerido/mínimo/adoptado, la barra y
@@ -163,19 +164,27 @@ def calcular_refuerzo(nombre: str, altura_muro_m: float, altura_agua_m: float, e
             "indicado -- aumente el espesor de muro/losa y vuelva a calcular.")
     as_min_temp = rc.as_minimo_temperatura(b_cm, h_cm, fy_kg_cm2)
     as_min_flex = rc.as_minimo_flexion(b_cm, d_cm, fc_kg_cm2, fy_kg_cm2)
-    as_adoptado = max(as_flexion, as_min_temp, as_min_flex)
-    espaciamiento_cm, barra_usada = rc.espaciamiento_sugerido(as_adoptado, diametro_barra)
+    # Dos partidas de acero, con su propio diámetro/espaciamiento --
+    # PRINCIPAL (dirección de flexión, barras "verticales" según el
+    # modelo de la Fig. en core/bim_geometry.py::desplazar_contorno_normal,
+    # espaciadas a lo largo de la longitud L) y TEMPERATURA/RETRACCIÓN
+    # (dirección perpendicular, corridas a lo largo de L, espaciadas en
+    # altura) -- así el metrado ya no mezcla ambas en una sola cifra.
+    as_principal = max(as_flexion, as_min_flex)
+    espaciamiento_principal_cm, barra_principal = rc.espaciamiento_sugerido(as_principal, diametro_barra)
+    espaciamiento_temperatura_cm, barra_temperatura = rc.espaciamiento_sugerido(
+        as_min_temp, diametro_barra_temperatura)
+    as_adoptado = max(as_principal, as_min_temp)  # para compatibilidad -- el mayor de ambas partidas
     phi_vc_kg, corte_cumple = rc.verificar_corte(vu_kg, b_cm, d_cm, fc_kg_cm2)
 
-    # Peso de acero: refuerzo PRINCIPAL (el calculado arriba) en ambas
-    # caras -- la carga se invierte entre el caso A (agua, empuja hacia
-    # afuera) y el caso B (tierra, empuja hacia adentro), así que ambas
-    # caras necesitan refuerzo en la práctica -- MÁS el acero de
-    # temperatura/retracción (E.060) en la dirección perpendicular,
-    # también en ambas caras. Es un metrado preliminar de la cuantía
-    # total, no un despiece de planos.
+    # Peso de acero: PRINCIPAL en ambas caras -- la carga se invierte
+    # entre el caso A (agua, empuja hacia afuera) y el caso B (tierra,
+    # empuja hacia adentro), así que ambas caras necesitan refuerzo en
+    # la práctica -- MÁS el acero de TEMPERATURA en la dirección
+    # perpendicular, también en ambas caras. Es un metrado preliminar
+    # de la cuantía total, no un despiece de planos.
     area_muro_m2 = altura_muro_m * longitud_m
-    peso_principal_kg = 2 * (as_adoptado / 10000.0) * area_muro_m2 * DENSIDAD_ACERO_KG_M3
+    peso_principal_kg = 2 * (as_principal / 10000.0) * area_muro_m2 * DENSIDAD_ACERO_KG_M3
     peso_temperatura_kg = 2 * (as_min_temp / 10000.0) * area_muro_m2 * DENSIDAD_ACERO_KG_M3
     peso_acero_total_kg = peso_principal_kg + peso_temperatura_kg
 
@@ -192,7 +201,14 @@ def calcular_refuerzo(nombre: str, altura_muro_m: float, altura_agua_m: float, e
         "as_minimo_temperatura_cm2_m": round(as_min_temp, 3),
         "as_minimo_flexion_cm2_m": round(as_min_flex, 3),
         "as_adoptado_cm2_m": round(as_adoptado, 3),
-        "barra_sugerida": barra_usada, "espaciamiento_sugerido_cm": espaciamiento_cm,
+        # Partida PRINCIPAL (flexión) -- alias barra_sugerida/espaciamiento_sugerido_cm se
+        # mantienen por compatibilidad con la tabla de metrados (ver plugin_dialog.py).
+        "as_principal_cm2_m": round(as_principal, 3),
+        "barra_principal": barra_principal, "espaciamiento_principal_cm": espaciamiento_principal_cm,
+        "barra_sugerida": barra_principal, "espaciamiento_sugerido_cm": espaciamiento_principal_cm,
+        # Partida de TEMPERATURA/RETRACCIÓN (perpendicular a la principal)
+        "as_temperatura_cm2_m": round(as_min_temp, 3),
+        "barra_temperatura": barra_temperatura, "espaciamiento_temperatura_cm": espaciamiento_temperatura_cm,
         "phi_Vc_kg_por_m": round(phi_vc_kg, 1), "Vu_kg_por_m": round(vu_kg, 1),
         "cortante_cumple": corte_cumple,
         "peso_acero_principal_kg": round(peso_principal_kg, 1),
@@ -204,6 +220,59 @@ def calcular_refuerzo(nombre: str, altura_muro_m: float, altura_agua_m: float, e
                    "core/reinforced_concrete_e060.py. No reemplaza la revisión de un ingeniero "
                    "estructural/geotécnico colegiado."),
     }
+
+
+# ======================================================================
+# Geometría 3D de las barras -- usada por el render (ui/bim_canvas.py)
+# Y por la exportación IFC (core/bim_ifc.py), para que ambas muestren
+# EXACTAMENTE la misma disposición de refuerzo.
+# ======================================================================
+def geometria_barras_refuerzo(xs, zs, cerrado: bool, longitud_m: float, espesor_muro_m: float,
+                               espaciamiento_principal_cm: float, espaciamiento_temperatura_cm: float,
+                               n_longitudinales: int = 12, diametro_barra: str = "1/2\"",
+                               diametro_barra_temperatura: str = "3/8\"") -> dict:
+    """Posiciones 3D (x, y, z) de las barras de refuerzo, ubicadas a
+    media altura del espesor del muro (entre la cara mojada y la cara
+    exterior):
+      - "costillas": el contorno del muro (xs, zs) repetido cada
+        `espaciamiento_principal_cm` a lo largo de Y -- representa las
+        barras PRINCIPALES (de flexión).
+      - "longitudinales": líneas rectas de Y=0 a Y=longitud_m, en unos
+        `n_longitudinales` puntos representativos del contorno --
+        representan las barras de TEMPERATURA/retracción.
+    Incluye también el diámetro real (cm) de cada partida -- usado por
+    la exportación IFC (core/bim_ifc.py) para dar a cada barra su
+    espesor real (IfcSweptDiskSolid), no solo su trayectoria.
+    Es una disposición esquemática (no un despiece de planos real: no
+    considera empalmes, ganchos, ni el detallado de esquinas)."""
+    xs_mid, zs_mid = bg.desplazar_contorno_normal(xs, zs, espesor_muro_m / 2.0)
+    n = len(xs_mid)
+
+    paso_principal_m = max(espaciamiento_principal_cm / 100.0, 0.05)
+    costillas = []
+    y = 0.0
+    while True:
+        y_actual = min(y, longitud_m)
+        costillas.append([(xs_mid[i], y_actual, zs_mid[i]) for i in range(n)])
+        if y_actual >= longitud_m:
+            break
+        y += paso_principal_m
+
+    paso_muestra = max(1, n // max(n_longitudinales, 1))
+    indices = list(range(0, n, paso_muestra))
+    longitudinales = [
+        [(xs_mid[i], 0.0, zs_mid[i]), (xs_mid[i], longitud_m, zs_mid[i])] for i in indices
+    ]
+
+    diametro_principal_cm = next(
+        (d for n_, d, _ in rc.BARRAS_COMERCIALES if n_ == diametro_barra), 1.27)
+    diametro_temperatura_cm = next(
+        (d for n_, d, _ in rc.BARRAS_COMERCIALES if n_ == diametro_barra_temperatura), 0.95)
+
+    return {"costillas": costillas, "longitudinales": longitudinales, "cerrado": cerrado,
+            "espaciamiento_temperatura_cm": espaciamiento_temperatura_cm,
+            "barra_principal": diametro_barra, "diametro_principal_cm": diametro_principal_cm,
+            "barra_temperatura": diametro_barra_temperatura, "diametro_temperatura_cm": diametro_temperatura_cm}
 
 
 # ======================================================================

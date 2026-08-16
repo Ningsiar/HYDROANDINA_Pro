@@ -31,6 +31,7 @@ import math
 
 from . import bim_geometry as bg
 from . import bim_metrados as bmet
+from . import bim_refuerzo as bref
 
 
 def _requerir_ifcopenshell():
@@ -138,14 +139,130 @@ def _agregar_pset_metrados(ifc, ifcopenshell_mod, elemento, metrados: dict):
     ifcopenshell_mod.api.run("pset.edit_pset", ifc, pset=pset, properties=propiedades)
 
 
+# Metrados de refuerzo (claves de core/bim_refuerzo.py::calcular_refuerzo) ->
+# nombre de propiedad IFC, fase 5.
+_MAPA_PROPIEDADES_REFUERZO = {
+    "caso_gobernante": "CasoGobernante",
+    "momento_diseno_kN_m_por_m": "MomentoDiseno_kNm_por_m",
+    "barra_principal": "BarraPrincipal",
+    "espaciamiento_principal_cm": "EspaciamientoPrincipal_cm",
+    "as_principal_cm2_m": "AsPrincipal_cm2_por_m",
+    "barra_temperatura": "BarraTemperatura",
+    "espaciamiento_temperatura_cm": "EspaciamientoTemperatura_cm",
+    "as_temperatura_cm2_m": "AsTemperatura_cm2_por_m",
+    "peso_acero_principal_kg": "PesoAceroPrincipal_kg",
+    "peso_acero_temperatura_kg": "PesoAceroTemperatura_kg",
+    "peso_acero_total_kg": "PesoAceroTotal_kg",
+    "cortante_cumple": "CortanteCumple",
+}
+
+
+def _agregar_pset_refuerzo(ifc, ifcopenshell_mod, elemento, resultado_refuerzo: dict):
+    propiedades = {clave_ifc: resultado_refuerzo[clave_origen]
+                   for clave_origen, clave_ifc in _MAPA_PROPIEDADES_REFUERZO.items()
+                   if clave_origen in resultado_refuerzo}
+    propiedades["Metodo"] = resultado_refuerzo.get("metodo", "")
+    propiedades["Nota"] = (
+        "Diseño de refuerzo PRELIMINAR (E.060/E.030) generado por HydroAndes SYM BIM -- "
+        "no reemplaza la revisión de un ingeniero estructural/geotécnico colegiado."
+    )
+    pset = ifcopenshell_mod.api.run("pset.add_pset", ifc, product=elemento, name="Pset_HydroAndesRefuerzo")
+    ifcopenshell_mod.api.run("pset.edit_pset", ifc, pset=pset, properties=propiedades)
+
+
+def _longitud_polilinea(puntos):
+    total = 0.0
+    for a, b in zip(puntos, puntos[1:]):
+        total += math.dist(a, b)
+    return total
+
+
+def _crear_representacion_barra(ifc, subcontexto, puntos_3d, radio_m):
+    puntos_ifc = [ifc.create_entity("IfcCartesianPoint", Coordinates=(float(x), float(y), float(z)))
+                  for (x, y, z) in puntos_3d]
+    directriz = ifc.create_entity("IfcPolyline", Points=puntos_ifc)
+    solido = ifc.create_entity("IfcSweptDiskSolid", Directrix=directriz, Radius=float(radio_m))
+    return ifc.create_entity(
+        "IfcShapeRepresentation", ContextOfItems=subcontexto, RepresentationIdentifier="Body",
+        RepresentationType="AdvancedSweptSolid", Items=[solido])
+
+
+def _agregar_barra_refuerzo(ifc, ifcopenshell_mod, nivel, subcontexto, nombre, puntos_3d,
+                             radio_m, area_cm2, predefined_type="MAIN"):
+    """Crea UNA IfcReinforcingBar con geometría real (IfcSweptDiskSolid
+    barrida a lo largo de `puntos_3d`) -- radio_m constante, sin
+    empalmes ni ganchos (disposición esquemática, ver docstring de
+    core/bim_refuerzo.py::geometria_barras_refuerzo)."""
+    if len(puntos_3d) < 2 or radio_m <= 0:
+        return None
+    barra = ifcopenshell_mod.api.run(
+        "root.create_entity", ifc, ifc_class="IfcReinforcingBar", name=nombre)
+    longitud_m = _longitud_polilinea(puntos_3d)
+    try:
+        barra.NominalDiameter = round(radio_m * 2000.0, 1)  # radio (m) -> diámetro (mm)
+        barra.CrossSectionArea = round(area_cm2 / 10000.0, 6)  # cm² -> m²
+        barra.BarLength = round(longitud_m, 3)
+        barra.PredefinedType = predefined_type
+    except Exception:
+        pass  # atributos opcionales -- no crítico si el esquema de la versión difiere
+    ifcopenshell_mod.api.run("spatial.assign_container", ifc, relating_structure=nivel, products=[barra])
+    ifcopenshell_mod.api.run("geometry.edit_object_placement", ifc, product=barra)
+    representacion = _crear_representacion_barra(ifc, subcontexto, puntos_3d, radio_m)
+    ifcopenshell_mod.api.run("geometry.assign_representation", ifc, product=barra, representation=representacion)
+    return barra
+
+
+def _agregar_barras_refuerzo(ifc, ifcopenshell_mod, nivel, subcontexto, geometria: dict) -> int:
+    """Crea una IfcReinforcingBar real por cada barra física en
+    `geometria` (ver core/bim_refuerzo.py::geometria_barras_refuerzo)
+    -- así el modelo federado muestra el acero (costillas = barras
+    principales de flexión, longitudinales = temperatura/repartición),
+    no solo una propiedad de texto. Devuelve el número de barras
+    creadas."""
+    costillas = geometria.get("costillas") or []
+    longitudinales = geometria.get("longitudinales") or []
+    cerrado = bool(geometria.get("cerrado"))
+    diam_principal_cm = geometria.get("diametro_principal_cm", 1.27)
+    diam_temperatura_cm = geometria.get("diametro_temperatura_cm", 0.95)
+    radio_principal_m = diam_principal_cm / 200.0
+    radio_temperatura_m = diam_temperatura_cm / 200.0
+    area_principal_cm2 = math.pi * (diam_principal_cm / 2.0) ** 2
+    area_temperatura_cm2 = math.pi * (diam_temperatura_cm / 2.0) ** 2
+
+    n_creadas = 0
+    for i, costilla in enumerate(costillas):
+        puntos = list(costilla)
+        if cerrado and puntos and puntos[0] != puntos[-1]:
+            puntos = puntos + [puntos[0]]
+        barra = _agregar_barra_refuerzo(
+            ifc, ifcopenshell_mod, nivel, subcontexto, f"Refuerzo principal {i + 1}",
+            puntos, radio_principal_m, area_principal_cm2, predefined_type="MAIN")
+        if barra is not None:
+            n_creadas += 1
+    for i, linea in enumerate(longitudinales):
+        barra = _agregar_barra_refuerzo(
+            ifc, ifcopenshell_mod, nivel, subcontexto, f"Refuerzo temperatura {i + 1}",
+            list(linea), radio_temperatura_m, area_temperatura_cm2, predefined_type="USERDEFINED")
+        if barra is not None:
+            barra.ObjectType = "Acero de temperatura / repartición"
+            n_creadas += 1
+    return n_creadas
+
+
 def exportar_ifc_pestana7(ruta: str, nombre: str, datos: dict, longitud_m: float, espesor_muro_m: float,
                            margen_excavacion_m: float = 0.30, cuantia_acero_kg_m3=None,
-                           autor: str = "", organizacion: str = "") -> dict:
+                           autor: str = "", organizacion: str = "", resultado_refuerzo: dict = None) -> dict:
     """Genera un archivo IFC para UNA estructura de Pestaña 7. Levanta
     ImportError si falta ifcopenshell, bim_geometry.GeometriaNoDisponibleError
     si faltan datos, o bim_metrados.MetradoNoAplicaError si el tipo no
     tiene geometría de material (Pontón/Puente). Devuelve el dict de
-    metrados usado (mismo que ve el usuario en la tabla de la Pestaña 8b)."""
+    metrados usado (mismo que ve el usuario en la tabla de la Pestaña 8b).
+
+    Si se pasa `resultado_refuerzo` (dict de
+    core/bim_refuerzo.py::calcular_refuerzo, tipos Canal/Alcantarilla/
+    Sumidero solamente), se agregan además las barras de acero como
+    IfcReinforcingBar reales -- geometría, no solo texto -- más un
+    segundo Pset (Pset_HydroAndesRefuerzo) con el diseño estructural."""
     ifcopenshell_mod = _requerir_ifcopenshell()
     tipo = datos.get("tipo", "")
 
@@ -156,16 +273,21 @@ def exportar_ifc_pestana7(ruta: str, nombre: str, datos: dict, longitud_m: float
     metrados = bmet.metrados_desde_pestana7(nombre, datos, longitud_m, espesor_muro_m,
                                              margen_excavacion_m, cuantia_acero_kg_m3)
 
+    xs_muro = zs_muro = None
+    cerrado_muro = False
     if tipo == "Canal":
         xs, zs, _ = bg.perfil_canal_desde_datos(datos)
         xs_p, zs_p, xs_h, zs_h = bg.perfil_solido_cascara(xs, zs, cerrado=False, espesor=espesor_muro_m)
+        xs_muro, zs_muro, cerrado_muro = xs, zs, False
     elif tipo == "Alcantarilla":
         xs, zs, _ = bg.perfil_alcantarilla_desde_datos(datos)
         xs_p, zs_p, xs_h, zs_h = bg.perfil_solido_cascara(xs, zs, cerrado=True, espesor=espesor_muro_m)
+        xs_muro, zs_muro, cerrado_muro = xs, zs, True
     elif tipo == "Sumidero":
         xs, zs, _, _ = bg.perfil_sumidero(datos.get("L_m"), datos.get("y_m"))
         xs_p, zs_p, xs_h, zs_h = bg.perfil_solido_cascara(xs, zs, cerrado=True, espesor=espesor_muro_m)
         longitud_m = datos.get("L_m")
+        xs_muro, zs_muro, cerrado_muro = xs, zs, True
     else:  # "Enrocado (RipRap)" / "Defensa Ribereña" -- categoría area_solida
         xs_p, zs_p, _, _, _ = bg.perfil_talud_enrocado(datos.get("D50_m"))
         xs_h = zs_h = None
@@ -174,39 +296,66 @@ def exportar_ifc_pestana7(ruta: str, nombre: str, datos: dict, longitud_m: float
     elemento = _agregar_elemento(ifc, ifcopenshell_mod, nivel, subcontexto, nombre,
                                   xs_p, zs_p, xs_h, zs_h, longitud_m)
     _agregar_pset_metrados(ifc, ifcopenshell_mod, elemento, metrados)
+
+    if resultado_refuerzo is not None and xs_muro is not None:
+        geo = bref.geometria_barras_refuerzo(
+            xs_muro, zs_muro, cerrado=cerrado_muro, longitud_m=longitud_m, espesor_muro_m=espesor_muro_m,
+            espaciamiento_principal_cm=resultado_refuerzo["espaciamiento_principal_cm"],
+            espaciamiento_temperatura_cm=resultado_refuerzo["espaciamiento_temperatura_cm"],
+            diametro_barra=resultado_refuerzo.get("barra_principal", "1/2\""),
+            diametro_barra_temperatura=resultado_refuerzo.get("barra_temperatura", "3/8\""))
+        _agregar_barras_refuerzo(ifc, ifcopenshell_mod, nivel, subcontexto, geo)
+        _agregar_pset_refuerzo(ifc, ifcopenshell_mod, elemento, resultado_refuerzo)
+
     ifc.write(ruta)
     return metrados
 
 
 def exportar_ifc_pestana8(ruta: str, estructura, espesor_muro_m: float,
                            margen_excavacion_m: float = 0.30, cuantia_acero_kg_m3=None,
-                           autor: str = "", organizacion: str = "") -> dict:
+                           autor: str = "", organizacion: str = "", resultado_refuerzo: dict = None) -> dict:
     """Genera un archivo IFC para UNA estructura de Pestaña 8
     (core.swe2d.Estructura). Ver exportar_ifc_pestana7 para el
-    comportamiento de errores."""
+    comportamiento de errores y de `resultado_refuerzo`."""
     ifcopenshell_mod = _requerir_ifcopenshell()
     tipo = estructura.tipo
     p = estructura.parametros
 
     metrados = bmet.metrados_desde_pestana8(estructura, espesor_muro_m, margen_excavacion_m, cuantia_acero_kg_m3)
 
+    xs_muro = zs_muro = None
+    cerrado_muro = False
     if tipo == "alcantarilla":
         longitud_m = p.get("longitud", 10.0)
         xs, zs = bg.perfil_circular(p.get("diametro"))
         xs_p, zs_p, xs_h, zs_h = bg.perfil_solido_cascara(xs, zs, cerrado=True, espesor=espesor_muro_m)
+        xs_muro, zs_muro, cerrado_muro = xs, zs, True
     elif tipo == "vertedero":
         longitud_m = p.get("longitud", 5.0)
         xs_p, zs_p = bg.perfil_muro_nominal()
         xs_h = zs_h = None
+        xs_muro, zs_muro, cerrado_muro = xs_p, zs_p, True
     else:  # "orificio"
         area = p.get("area", 0.5)
         longitud_m = math.sqrt(max(area, 1e-6))
         xs_p, zs_p = bg.perfil_muro_nominal(alto=max(longitud_m * 1.8, 1.5))
         xs_h = zs_h = None
+        xs_muro, zs_muro, cerrado_muro = xs_p, zs_p, True
 
     ifc, nivel, subcontexto = _crear_archivo_base(ifcopenshell_mod, estructura.nombre, autor, organizacion)
     elemento = _agregar_elemento(ifc, ifcopenshell_mod, nivel, subcontexto, estructura.nombre,
                                   xs_p, zs_p, xs_h, zs_h, longitud_m)
     _agregar_pset_metrados(ifc, ifcopenshell_mod, elemento, metrados)
+
+    if resultado_refuerzo is not None and xs_muro is not None:
+        geo = bref.geometria_barras_refuerzo(
+            xs_muro, zs_muro, cerrado=cerrado_muro, longitud_m=longitud_m, espesor_muro_m=espesor_muro_m,
+            espaciamiento_principal_cm=resultado_refuerzo["espaciamiento_principal_cm"],
+            espaciamiento_temperatura_cm=resultado_refuerzo["espaciamiento_temperatura_cm"],
+            diametro_barra=resultado_refuerzo.get("barra_principal", "1/2\""),
+            diametro_barra_temperatura=resultado_refuerzo.get("barra_temperatura", "3/8\""))
+        _agregar_barras_refuerzo(ifc, ifcopenshell_mod, nivel, subcontexto, geo)
+        _agregar_pset_refuerzo(ifc, ifcopenshell_mod, elemento, resultado_refuerzo)
+
     ifc.write(ruta)
     return metrados

@@ -55,6 +55,8 @@ _COLOR_CONCRETO = "#B5B2AC"
 _COLOR_METAL = "#8C8C8C"
 _COLOR_ROCA = "#9C9C9C"
 _COLOR_AGUA = "#1F6FB2"
+_COLOR_ACERO_PRINCIPAL = "#D62728"   # rojo -- barras de flexión (costillas)
+_COLOR_ACERO_TEMPERATURA = "#FF8C00"  # naranja -- barras de temperatura/repartición (longitudinales)
 
 
 class Estructura3DCanvas(FigureCanvas):
@@ -68,6 +70,7 @@ class Estructura3DCanvas(FigureCanvas):
         super().__init__(self.fig)
         self.setParent(parent)
         self.setMinimumSize(int(width * dpi), int(height * dpi))
+        self._ultima_geometria_refuerzo = None  # dict de geometria_barras_refuerzo(), si se superpuso
 
     # ------------------------------------------------------------
     # Primitivas de dibujo
@@ -126,6 +129,7 @@ class Estructura3DCanvas(FigureCanvas):
     # ------------------------------------------------------------
     def graficar_desde_pestana7(self, nombre: str, datos: dict, longitud_m: float = LONGITUD_POR_DEFECTO_M):
         self.ax.clear()
+        self._ultima_geometria_refuerzo = None
         tipo = datos.get("tipo", "")
         if tipo == "Canal":
             self._graficar_canal(datos, longitud_m)
@@ -244,6 +248,7 @@ class Estructura3DCanvas(FigureCanvas):
         .tipo, .parametros, .nombre) -- se reutiliza tal cual la arma
         _leer_estructuras_2d(), sin volver a interpretar la tabla."""
         self.ax.clear()
+        self._ultima_geometria_refuerzo = None
         tipo = estructura.tipo
         p = estructura.parametros
         if tipo == "alcantarilla":
@@ -295,3 +300,49 @@ class Estructura3DCanvas(FigureCanvas):
                       f"⚠ Esquema: no representa la forma real del orificio ni el muro que lo contiene.",
                       fontsize=7.5, color="#8a5a00")
         self._ajustar_limites(xs, [0.0, lado], zs)
+
+    # ------------------------------------------------------------
+    # Refuerzo de acero (fase 5) -- superpuesto sobre el render de
+    # concreto YA dibujado por graficar_desde_pestana7/8 (no limpia el
+    # eje). `geometria`: dict devuelto por
+    # core/bim_refuerzo.py::geometria_barras_refuerzo().
+    # ------------------------------------------------------------
+    def graficar_refuerzo(self, geometria: dict):
+        """Dibuja las «costillas» (barras principales de flexión, una
+        por cada sección transversal repetida a lo largo de la
+        longitud) y las «longitudinales» (barras de temperatura/
+        repartición, corridas a lo largo de toda la longitud) como
+        líneas 3D de color distinto -- el gráfico de alto impacto
+        pedido para visualizar el refuerzo dentro de la estructura."""
+        from mpl_toolkits.mplot3d.art3d import Line3DCollection
+        self._ultima_geometria_refuerzo = geometria
+        cerrado = bool(geometria.get("cerrado"))
+        costillas = geometria.get("costillas") or []
+        longitudinales = geometria.get("longitudinales") or []
+        if costillas:
+            segmentos = []
+            for costilla in costillas:
+                n = len(costilla)
+                if n < 2:
+                    continue
+                rango = range(n) if cerrado else range(n - 1)
+                for i in rango:
+                    j = (i + 1) % n
+                    segmentos.append([costilla[i], costilla[j]])
+            if segmentos:
+                self.ax.add_collection3d(Line3DCollection(
+                    segmentos, colors=_COLOR_ACERO_PRINCIPAL, linewidths=1.4, alpha=0.95))
+        if longitudinales:
+            self.ax.add_collection3d(Line3DCollection(
+                longitudinales, colors=_COLOR_ACERO_TEMPERATURA, linewidths=1.1,
+                alpha=0.9, linestyles="dashed"))
+        if costillas or longitudinales:
+            # líneas "fantasma" solo para poblar la leyenda (los
+            # Line3DCollection no se registran solos en ax.legend())
+            self.ax.plot([], [], color=_COLOR_ACERO_PRINCIPAL, linewidth=1.6,
+                          label="Acero principal (flexión)")
+            self.ax.plot([], [], color=_COLOR_ACERO_TEMPERATURA, linewidth=1.2, linestyle="--",
+                          label="Acero de temperatura / repartición")
+            self.ax.legend(loc="upper left", fontsize=7.5, framealpha=0.85)
+        self.fig.tight_layout()
+        self.draw()

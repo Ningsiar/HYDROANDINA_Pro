@@ -47,7 +47,7 @@ from .core import (delineation, morphometry, curve_number, tc_methods, dem_downl
                     low_flows, phabsim, groundwater_flow, well_hydraulics, idf_curves,
                     regionalization, gridded_validation, swe2d, mesh_export,
                     runoff_coefficient, roughness_methods, roughness_materials,
-                    iila_senamhi_zones, bim_metrados, bim_ifc, bim_refuerzo,
+                    iila_senamhi_zones, bim_metrados, bim_ifc, bim_refuerzo, bim_geometry,
                     lateral_pressures, reinforced_concrete_e060)
 from .core.qgis_layer_utils import obtener_capa
 from .ui.hypsometric_canvas import HypsometricCanvas
@@ -10334,7 +10334,13 @@ class HydroAndinaProDialog(QDialog):
         self.combo_bim_barra = QComboBox()
         self.combo_bim_barra.addItems([n for n, _, _ in reinforced_concrete_e060.BARRAS_COMERCIALES])
         self.combo_bim_barra.setCurrentText("1/2\"")
-        f_refuerzo.addRow("Barra de refuerzo:", self.combo_bim_barra)
+        f_refuerzo.addRow("Barra principal (flexión):", self.combo_bim_barra)
+
+        self.combo_bim_barra_temperatura = QComboBox()
+        self.combo_bim_barra_temperatura.addItems(
+            [n for n, _, _ in reinforced_concrete_e060.BARRAS_COMERCIALES])
+        self.combo_bim_barra_temperatura.setCurrentText("3/8\"")
+        f_refuerzo.addRow("Barra de temperatura/repartición:", self.combo_bim_barra_temperatura)
 
         self.check_bim_relleno = QCheckBox("Muro con relleno de tierra en la cara posterior")
         self.check_bim_relleno.setChecked(True)
@@ -10398,9 +10404,12 @@ class HydroAndinaProDialog(QDialog):
         v.addWidget(QLabel(
             "<hr><b>Exportar a IFC</b> — genera un archivo .ifc (Industry Foundation Classes) con "
             "la geometría 3D real de arriba MÁS los metrados como propiedades del elemento "
-            "(Pset_HydroAndesMetrados). Ábralo directamente en Revit (Insertar → Vincular IFC), "
-            "Navisworks, ArchiCAD, Tekla o BIM Vision. No existe forma de generar un .rvt nativo "
-            "de Revit fuera del propio Revit -- IFC es el estándar abierto para esto."))
+            "(Pset_HydroAndesMetrados). Si ya calculó el «Diseño de refuerzo» de esta misma "
+            "estructura, el IFC incluye además el ACERO como barras reales (IfcReinforcingBar, "
+            "visibles en el modelo, no solo como texto) más sus cantidades (Pset_HydroAndesRefuerzo). "
+            "Ábralo directamente en Revit (Insertar → Vincular IFC), Navisworks, ArchiCAD, Tekla o "
+            "BIM Vision. No existe forma de generar un .rvt nativo de Revit fuera del propio Revit "
+            "-- IFC es el estándar abierto para esto."))
         btn_ifc = QPushButton("📦 Exportar a IFC...")
         btn_ifc.clicked.connect(self._on_exportar_ifc_bim)
         v.addWidget(btn_ifc)
@@ -10558,6 +10567,9 @@ class HydroAndinaProDialog(QDialog):
         espesor = self.spin_bim_espesor_muro.value()
         margen = self.spin_bim_margen_excavacion.value()
         cuantia = self.spin_bim_cuantia_acero.value() or None
+        refuerzo_previo = getattr(self, "_ultimo_refuerzo_bim", None)
+        resultado_refuerzo = (refuerzo_previo["resultado"]
+                               if refuerzo_previo and refuerzo_previo.get("nombre") == nombre else None)
         try:
             if self.combo_bim_fuente.currentIndex() == 0:
                 datos = self.resultados_hidraulica_drenaje.get(nombre)
@@ -10567,7 +10579,8 @@ class HydroAndinaProDialog(QDialog):
                         f"actualice la lista de nuevo.")
                 bim_ifc.exportar_ifc_pestana7(
                     ruta, nombre, datos, self.spin_bim_longitud.value(), espesor, margen, cuantia,
-                    organizacion="CORPORATIVO CONSTRUCTIVO LIMA BERLIN SRL")
+                    organizacion="CORPORATIVO CONSTRUCTIVO LIMA BERLIN SRL",
+                    resultado_refuerzo=resultado_refuerzo)
             else:
                 indice = self.combo_bim_estructura.currentIndex()
                 if indice < 0 or indice >= len(self._estructuras_bim_p8):
@@ -10575,7 +10588,8 @@ class HydroAndinaProDialog(QDialog):
                         "la tabla de la Pestaña 8 cambió -- actualice la lista de nuevo.")
                 bim_ifc.exportar_ifc_pestana8(
                     ruta, self._estructuras_bim_p8[indice], espesor, margen, cuantia,
-                    organizacion="CORPORATIVO CONSTRUCTIVO LIMA BERLIN SRL")
+                    organizacion="CORPORATIVO CONSTRUCTIVO LIMA BERLIN SRL",
+                    resultado_refuerzo=resultado_refuerzo)
         except ImportError as e:
             self.lbl_estado_ifc_bim.setText(f"Estado: falta una librería -- {e}")
             QMessageBox.warning(self, "ifcopenshell no disponible", str(e))
@@ -10590,9 +10604,13 @@ class HydroAndinaProDialog(QDialog):
             self.lbl_estado_ifc_bim.setText(f"Estado: ERROR inesperado -- {e}")
             QMessageBox.critical(self, "Error exportando a IFC", str(e))
             return
+        nota_refuerzo = ("\n\nIncluye el acero de refuerzo como geometría real (IfcReinforcingBar)."
+                          if resultado_refuerzo is not None else
+                          "\n\n(Sin acero de refuerzo -- calcule primero el «Diseño de refuerzo» "
+                          "de esta estructura si desea incluirlo.)")
         self.lbl_estado_ifc_bim.setText(f"Estado: IFC exportado en {ruta}")
         QMessageBox.information(self, "IFC exportado",
-                                 f"Modelo IFC guardado en:\n{ruta}\n\n"
+                                 f"Modelo IFC guardado en:\n{ruta}{nota_refuerzo}\n\n"
                                  "Ábralo en Revit (Insertar → Vincular IFC), Navisworks, ArchiCAD, "
                                  "Tekla o BIM Vision.")
 
@@ -10637,6 +10655,7 @@ class HydroAndinaProDialog(QDialog):
             sobrecarga_kn_m2=self.spin_bim_sobrecarga.value(),
             zona_sismica=None if zona.startswith("(sin") else zona,
             diametro_barra=self.combo_bim_barra.currentText(),
+            diametro_barra_temperatura=self.combo_bim_barra_temperatura.currentText(),
         )
         try:
             if self.combo_bim_fuente.currentIndex() == 0:
@@ -10678,19 +10697,67 @@ class HydroAndinaProDialog(QDialog):
             ("φVc (capacidad de corte del concreto)", r["phi_Vc_kg_por_m"], "kg/m",
              "¿Vu ≤ φVc?  " + ("Sí, cumple" if r["cortante_cumple"] else "NO cumple -- aumente el espesor")),
             ("As requerido por flexión", r["as_requerido_flexion_cm2_m"], "cm²/m"),
-            ("As mínimo (temperatura/retracción, E.060)", r["as_minimo_temperatura_cm2_m"], "cm²/m"),
             ("As mínimo (flexión tipo viga)", r["as_minimo_flexion_cm2_m"], "cm²/m"),
-            ("As adoptado", r["as_adoptado_cm2_m"], "cm²/m", "el mayor de los tres anteriores"),
-            ("Refuerzo sugerido", f"{r['barra_sugerida']} @ {r['espaciamiento_sugerido_cm']} cm", ""),
-            ("Peso de acero total estimado", r["peso_acero_total_kg"], "kg",
-             "refuerzo principal + temperatura, ambas caras -- ver core/bim_refuerzo.py"),
+            ("— Acero PRINCIPAL (flexión) —", "", ""),
+            ("As principal adoptado", r["as_principal_cm2_m"], "cm²/m", "= max(requerido por flexión, mínimo)"),
+            ("Refuerzo principal sugerido", f"{r['barra_principal']} @ {r['espaciamiento_principal_cm']} cm", ""),
+            ("Peso de acero principal", r["peso_acero_principal_kg"], "kg", "ambas caras"),
+            ("— Acero de TEMPERATURA / REPARTICIÓN —", "", ""),
+            ("As mínimo (temperatura/retracción, E.060)", r["as_minimo_temperatura_cm2_m"], "cm²/m"),
+            ("Refuerzo de temperatura sugerido", f"{r['barra_temperatura']} @ {r['espaciamiento_temperatura_cm']} cm", ""),
+            ("Peso de acero de temperatura", r["peso_acero_temperatura_kg"], "kg", "ambas caras"),
+            ("Peso de acero TOTAL", r["peso_acero_total_kg"], "kg", "principal + temperatura, ambas caras"),
             ("Método", r["metodo"], ""),
         ]
         poblar_tabla_parametros(self.tabla_refuerzo_bim, filas)
         self.lbl_estado_refuerzo_bim.setText(
-            f"Estado: refuerzo calculado para «{nombre}» -- {r['barra_sugerida']} @ "
-            f"{r['espaciamiento_sugerido_cm']} cm ({r['caso_gobernante']}).")
+            f"Estado: refuerzo calculado para «{nombre}» -- principal {r['barra_principal']} @ "
+            f"{r['espaciamiento_principal_cm']} cm + temperatura {r['barra_temperatura']} @ "
+            f"{r['espaciamiento_temperatura_cm']} cm ({r['caso_gobernante']}).")
         self._ultimo_refuerzo_bim = {"nombre": nombre, "resultado": r}
+        self._mostrar_refuerzo_3d_bim(nombre, r)
+
+    def _mostrar_refuerzo_3d_bim(self, nombre, resultado_refuerzo):
+        """Regenera el modelo 3D de concreto de `nombre` y le superpone
+        el refuerzo recién calculado (gráfico de alto impacto pedido
+        por el usuario) -- best-effort: si la estructura no tiene un
+        contorno de muro reconocido (roca/borde-libre), no hace nada."""
+        try:
+            if self.combo_bim_fuente.currentIndex() == 0:
+                datos = self.resultados_hidraulica_drenaje.get(nombre)
+                if datos is None:
+                    return
+                longitud_m = self.spin_bim_longitud.value()
+                xs_muro, zs_muro, cerrado_muro = bim_geometry.contorno_muro_pestana7(datos)
+                if datos.get("tipo") == "Sumidero":
+                    longitud_m = datos.get("L_m") or longitud_m
+                self.canvas_bim_3d.graficar_desde_pestana7(nombre, datos, longitud_m)
+            else:
+                indice = self.combo_bim_estructura.currentIndex()
+                estructuras = getattr(self, "_estructuras_bim_p8", [])
+                if indice < 0 or indice >= len(estructuras):
+                    return
+                estructura = estructuras[indice]
+                xs_muro, zs_muro, cerrado_muro = bim_geometry.contorno_muro_pestana8(estructura)
+                longitud_m = estructura.parametros.get(
+                    "longitud", math.sqrt(max(estructura.parametros.get("area", 0.5), 1e-6)))
+                self.canvas_bim_3d.graficar_desde_pestana8(estructura)
+            if xs_muro is None:
+                return
+            espesor = self.spin_bim_espesor_muro.value()
+            geo = bim_refuerzo.geometria_barras_refuerzo(
+                xs_muro, zs_muro, cerrado=cerrado_muro, longitud_m=longitud_m, espesor_muro_m=espesor,
+                espaciamiento_principal_cm=resultado_refuerzo["espaciamiento_principal_cm"],
+                espaciamiento_temperatura_cm=resultado_refuerzo["espaciamiento_temperatura_cm"],
+                diametro_barra=resultado_refuerzo["barra_principal"],
+                diametro_barra_temperatura=resultado_refuerzo["barra_temperatura"])
+            self.canvas_bim_3d.graficar_refuerzo(geo)
+            self.lbl_estado_bim.setText(
+                f"Estado: modelo 3D con refuerzo de acero superpuesto para «{nombre}».")
+        except GeometriaNoDisponibleError:
+            pass  # el render base ya informó el motivo en lbl_estado_bim -- no duplicar el error
+        except Exception:
+            pass  # el overlay de refuerzo es un plus visual -- nunca debe romper el cálculo ya hecho
 
     def _build_tab_modulos_avanzados(self):
         tab = QWidget()
