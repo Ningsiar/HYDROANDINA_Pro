@@ -21,9 +21,10 @@ from qgis.PyQt.QtWidgets import (
 
 from ..core import licencia
 
-# Contacto que se muestra al usuario para comprar/renovar la licencia --
-# AJUSTAR antes de distribuir el plugin.
-CONTACTO_LICENCIA = "ningsiar.lima@unsaac.edu.pe"
+# Contacto que se muestra al usuario para comprar/renovar la licencia.
+CONTACTO_TELEFONO = "+51 984440128"
+CONTACTO_EMAIL = "corporativoconstructivo@gmail.com"
+EMPRESA_LICENCIA = "CORPORATIVO CONSTRUCTIVO LIMA BERLIN SRL - Cusco - Perú"
 
 
 class DialogoLicenciaAgotada(QDialog):
@@ -37,12 +38,15 @@ class DialogoLicenciaAgotada(QDialog):
         v = QVBoxLayout(self)
 
         if estado.get("bloqueado"):
-            titulo = "Se agotaron los usos gratuitos de HydroAndes SYM BIM"
+            titulo = "La fase de prueba gratuita se agotó"
             cuerpo = (
                 f"Este plugin incluye {estado.get('limite', licencia.LIMITE_USOS_GRATIS)} usos "
-                f"gratuitos. Ya se registraron {estado.get('usos', '?')}.<br><br>"
-                f"Para seguir usándolo, ingrese su clave de licencia abajo, o escriba a "
-                f"<b>{CONTACTO_LICENCIA}</b> para adquirir una."
+                f"gratuitos y ya se registraron {estado.get('usos', '?')}.<br><br>"
+                f"Si desea una licencia permanente por el software deberá contactarse con el "
+                f"número <b>{CONTACTO_TELEFONO}</b> (Perú) y/o remitir un correo para "
+                f"cotización a <b>{CONTACTO_EMAIL}</b>.<br><br>"
+                f"Desarrollado por <b>{EMPRESA_LICENCIA}</b>.<br><br>"
+                f"Si ya cuenta con una clave de licencia, ingrésela abajo para continuar."
             )
         else:
             titulo = "Activar licencia de HydroAndes SYM BIM"
@@ -50,8 +54,10 @@ class DialogoLicenciaAgotada(QDialog):
                 f"Usos registrados: {estado.get('usos', '?')} de "
                 f"{estado.get('limite', licencia.LIMITE_USOS_GRATIS)} gratuitos.<br><br>"
                 f"Si ya tiene una clave de licencia, ingrésela abajo. Si no, puede seguir usando "
-                f"el plugin hasta agotar los usos gratuitos, o escribir a "
-                f"<b>{CONTACTO_LICENCIA}</b> para adquirir una."
+                f"el plugin hasta agotar los usos gratuitos, o contactarse con el número "
+                f"<b>{CONTACTO_TELEFONO}</b> (Perú) y/o escribir a <b>{CONTACTO_EMAIL}</b> "
+                f"para adquirir una licencia permanente.<br><br>"
+                f"Desarrollado por <b>{EMPRESA_LICENCIA}</b>."
             )
 
         lbl_titulo = QLabel(f"<h3>{titulo}</h3>")

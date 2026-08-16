@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.3.15
+version=0.3.16
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,19 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.3.16: mensaje del diálogo de licencia agotada actualizado a pedido
+      del cliente. Al agotarse los 10 usos gratis, ui/dialogo_licencia.py
+      ahora muestra: "La fase de prueba gratuita se agotó. Si desea una
+      licencia permanente por el software deberá contactarse con el
+      número +51 984440128 (Perú) y/o remitir un correo para cotización a
+      corporativoconstructivo@gmail.com" y "Desarrollado por CORPORATIVO
+      CONSTRUCTIVO LIMA BERLIN SRL - Cusco - Perú". El diálogo de
+      activación voluntaria (antes de agotar el límite) usa el mismo
+      teléfono/correo por consistencia. El campo para ingresar la clave
+      de licencia sigue funcionando igual en ambos casos. Verificado con
+      QGIS 3.40.1 real en modo headless (12 comprobaciones: texto exacto
+      presente en ambas variantes del diálogo, constantes de contacto
+      correctas, correo anterior ya no aparece, botones correctos).
     - v0.3.15: backend de licencia DESPLEGADO y probado en producción real
       (ya no es una promesa futura). Se configuró
       hydroandes_sym_bim/core/licencia.py::URL_BACKEND_LICENCIA con la
