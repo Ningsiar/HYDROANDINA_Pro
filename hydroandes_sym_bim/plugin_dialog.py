@@ -48,7 +48,7 @@ from .core import (delineation, morphometry, curve_number, tc_methods, dem_downl
                     regionalization, gridded_validation, swe2d, mesh_export,
                     runoff_coefficient, roughness_methods, roughness_materials,
                     iila_senamhi_zones, bim_metrados, bim_ifc, bim_refuerzo, bim_geometry,
-                    lateral_pressures, reinforced_concrete_e060)
+                    lateral_pressures, reinforced_concrete_e060, presupuesto, formula_polinomica)
 from .core.qgis_layer_utils import obtener_capa
 from .ui.hypsometric_canvas import HypsometricCanvas
 from .ui.hydrograph_canvas import HydrographCanvas
@@ -77,6 +77,7 @@ from .ui.swe2d_canvas import (MapaCalado2DCanvas, MapaPeligrosidadCanvas,
 from .ui.swe2d_runner import SimulacionSwe2DWorker, estimar_coste
 from .ui import swe2d_animation
 from .ui.bim_canvas import Estructura3DCanvas, GeometriaNoDisponibleError, LONGITUD_POR_DEFECTO_M
+from .ui.presupuesto_canvas import PresupuestoCanvas
 from .ui.table_utils import (ajustar_alto_tabla, aplicar_columna_elastica, limitar_ancho_tabla,
                               limitar_ancho_boton, crear_tabla_parametros, poblar_tabla_parametros)
 from .ui import export_overlay
@@ -432,6 +433,7 @@ class HydroAndinaProDialog(QDialog):
         self._build_tab_hidraulica_drenaje()
         self._build_tab_simulacion_2d()
         self._build_tab_bim()
+        self._build_tab_presupuesto()
         self._build_tab_modulos_avanzados()
         self._build_tab_socavacion()
         self._build_tab_perdida_suelos()
@@ -10758,6 +10760,503 @@ class HydroAndinaProDialog(QDialog):
             pass  # el render base ya informó el motivo en lbl_estado_bim -- no duplicar el error
         except Exception:
             pass  # el overlay de refuerzo es un plus visual -- nunca debe romper el cálculo ya hecho
+
+    # ==================================================================
+    # Módulo "Presupuesto, APU e Insumos" -- fase 2 (interfaz). Ver
+    # core/presupuesto.py para el modelo de datos y las fórmulas.
+    # ==================================================================
+    _COLS_INSUMOS_LIB = ("Código", "Descripción", "Unidad", "Tipo", "Precio Unit. (S/.)", "Índice INEI")
+    _COLS_PARTIDAS = ("Código", "Grupo (Título > Subtítulo)", "Descripción", "Unidad", "Metrado")
+    _COLS_APU_ITEMS = ("Código Insumo", "Cuadrilla", "Rendimiento", "Cantidad directa", "Desperdicio %")
+
+    def _build_tab_presupuesto(self):
+        tab = QWidget()
+        v = QVBoxLayout(tab)
+        _lbl_intro_pres = QLabel(
+            "<b>Presupuesto, APU e Insumos</b> — presupuesto de obra con Análisis de Precios "
+            "Unitarios (mano de obra + materiales + equipos + herramienta manual + subcontratos) "
+            "y Relación de Insumos consolidada, con el mismo esquema que S10 Presupuestos. Puede "
+            "PEGAR datos copiados desde Excel directamente en cada tabla (Ctrl+V). La librería de "
+            "insumos (rendimientos y precios) es 100% suya -- este plugin no trae cifras de "
+            "CAPECO/Revista Costos precargadas (son publicaciones comerciales)."
+        )
+        _lbl_intro_pres.setWordWrap(True)
+        v.addWidget(_lbl_intro_pres)
+
+        # ------------------------------------------------------------
+        # 1) Librería de insumos
+        # ------------------------------------------------------------
+        v.addWidget(QLabel(
+            "<hr><b>1. Librería de insumos</b> — recursos reutilizables entre partidas. Tipo debe "
+            f"ser uno de: {', '.join(presupuesto.TipoInsumo.TODOS)}. Índice INEI es opcional (solo "
+            "hace falta para la Fórmula Polinómica más abajo)."))
+        self.tabla_insumos_lib = TablaPegable(8, len(self._COLS_INSUMOS_LIB))
+        self.tabla_insumos_lib.setHorizontalHeaderLabels(list(self._COLS_INSUMOS_LIB))
+        aplicar_columna_elastica(self.tabla_insumos_lib, 1)
+        v.addWidget(self.tabla_insumos_lib)
+        h_lib = QHBoxLayout()
+        btn_fila_insumo = QPushButton("➕ Agregar fila")
+        btn_fila_insumo.clicked.connect(lambda: self.tabla_insumos_lib.setRowCount(self.tabla_insumos_lib.rowCount() + 1))
+        h_lib.addWidget(btn_fila_insumo)
+        btn_actualizar_lib = QPushButton("🔄 Actualizar librería desde la tabla")
+        btn_actualizar_lib.clicked.connect(self._on_actualizar_insumos_lib)
+        h_lib.addWidget(btn_actualizar_lib)
+        v.addLayout(h_lib)
+        self.lbl_estado_insumos_lib = QLabel("Estado: librería vacía -- agregue insumos y presione «Actualizar».")
+        self.lbl_estado_insumos_lib.setWordWrap(True)
+        v.addWidget(self.lbl_estado_insumos_lib)
+
+        # ------------------------------------------------------------
+        # 2) Partidas del presupuesto
+        # ------------------------------------------------------------
+        v.addWidget(QLabel(
+            "<hr><b>2. Partidas del presupuesto</b> — código, agrupación (Título > Subtítulo, solo "
+            "para organizar -- no afecta el cálculo), descripción, unidad y metrado. El precio "
+            "unitario de cada partida sale del APU que le asigne en la sección 3."))
+        self.tabla_partidas_pres = TablaPegable(6, len(self._COLS_PARTIDAS))
+        self.tabla_partidas_pres.setHorizontalHeaderLabels(list(self._COLS_PARTIDAS))
+        aplicar_columna_elastica(self.tabla_partidas_pres, 2)
+        v.addWidget(self.tabla_partidas_pres)
+        h_part = QHBoxLayout()
+        btn_fila_partida = QPushButton("➕ Agregar fila")
+        btn_fila_partida.clicked.connect(lambda: self.tabla_partidas_pres.setRowCount(self.tabla_partidas_pres.rowCount() + 1))
+        h_part.addWidget(btn_fila_partida)
+        btn_actualizar_part = QPushButton("🔄 Actualizar partidas desde la tabla")
+        btn_actualizar_part.clicked.connect(self._on_actualizar_partidas_pres)
+        h_part.addWidget(btn_actualizar_part)
+        v.addLayout(h_part)
+        self.lbl_estado_partidas_pres = QLabel("Estado: sin partidas -- agréguelas y presione «Actualizar».")
+        self.lbl_estado_partidas_pres.setWordWrap(True)
+        v.addWidget(self.lbl_estado_partidas_pres)
+
+        # ------------------------------------------------------------
+        # 3) Editor de APU (por partida)
+        # ------------------------------------------------------------
+        v.addWidget(QLabel(
+            "<hr><b>3. Análisis de Precios Unitarios (APU)</b> — elija una partida (ya actualizada "
+            "en la sección 2) y arme su APU con insumos de la librería (sección 1), referenciados "
+            "por Código Insumo. Mano de Obra/Equipos: llene Cuadrilla + Rendimiento (la cantidad en "
+            "hh/hm se calcula sola). Materiales/Herramienta/Subcontratos: llene Cantidad directa "
+            "(+ Desperdicio % opcional)."))
+        f_apu = QFormLayout()
+        f_apu.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.combo_apu_partida = QComboBox()
+        self.combo_apu_partida.currentIndexChanged.connect(self._on_cambiar_partida_apu)
+        f_apu.addRow("Partida:", self.combo_apu_partida)
+        v.addLayout(f_apu)
+        self.tabla_apu_items = TablaPegable(5, len(self._COLS_APU_ITEMS))
+        self.tabla_apu_items.setHorizontalHeaderLabels(list(self._COLS_APU_ITEMS))
+        v.addWidget(self.tabla_apu_items)
+        h_apu = QHBoxLayout()
+        btn_fila_apu = QPushButton("➕ Agregar fila")
+        btn_fila_apu.clicked.connect(lambda: self.tabla_apu_items.setRowCount(self.tabla_apu_items.rowCount() + 1))
+        h_apu.addWidget(btn_fila_apu)
+        btn_guardar_apu = QPushButton("💾 Guardar APU de esta partida")
+        btn_guardar_apu.clicked.connect(self._on_guardar_apu)
+        h_apu.addWidget(btn_guardar_apu)
+        v.addLayout(h_apu)
+        self.lbl_estado_apu = QLabel("Estado: sin APU calculado para esta partida.")
+        self.lbl_estado_apu.setWordWrap(True)
+        v.addWidget(self.lbl_estado_apu)
+        self.tabla_apu_resumen = crear_tabla_parametros(con_comentario=False)
+        v.addWidget(self.tabla_apu_resumen)
+
+        # ------------------------------------------------------------
+        # 4) Resumen del presupuesto
+        # ------------------------------------------------------------
+        v.addWidget(QLabel(
+            "<hr><b>4. Resumen del presupuesto</b> — Costo Directo (suma de partidas con APU "
+            "guardado) + Gastos Generales + Utilidad = Subtotal + IGV = Valor Referencial."))
+        f_resumen = QFormLayout()
+        f_resumen.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.spin_pres_gg = QDoubleSpinBox()
+        self.spin_pres_gg.setRange(0.0, 50.0)
+        self.spin_pres_gg.setDecimals(2)
+        self.spin_pres_gg.setValue(10.0)
+        self.spin_pres_gg.setSuffix(" %")
+        f_resumen.addRow("Gastos Generales:", self.spin_pres_gg)
+        self.spin_pres_ut = QDoubleSpinBox()
+        self.spin_pres_ut.setRange(0.0, 50.0)
+        self.spin_pres_ut.setDecimals(2)
+        self.spin_pres_ut.setValue(10.0)
+        self.spin_pres_ut.setSuffix(" %")
+        f_resumen.addRow("Utilidad:", self.spin_pres_ut)
+        self.spin_pres_igv = QDoubleSpinBox()
+        self.spin_pres_igv.setRange(0.0, 30.0)
+        self.spin_pres_igv.setDecimals(2)
+        self.spin_pres_igv.setValue(18.0)
+        self.spin_pres_igv.setSuffix(" %")
+        f_resumen.addRow("IGV:", self.spin_pres_igv)
+        v.addLayout(f_resumen)
+        btn_calcular_pres = QPushButton("🧮 Calcular presupuesto")
+        btn_calcular_pres.clicked.connect(self._on_calcular_presupuesto)
+        v.addWidget(btn_calcular_pres)
+        self.lbl_estado_presupuesto = QLabel("Estado: sin calcular.")
+        self.lbl_estado_presupuesto.setWordWrap(True)
+        v.addWidget(self.lbl_estado_presupuesto)
+        self.tabla_resumen_presupuesto = crear_tabla_parametros(con_comentario=False)
+        v.addWidget(self.tabla_resumen_presupuesto)
+        self.canvas_presupuesto = PresupuestoCanvas(width=7.6, height=5.0)
+        v.addWidget(self.canvas_presupuesto)
+
+        # ------------------------------------------------------------
+        # 5) Relación de Insumos
+        # ------------------------------------------------------------
+        v.addWidget(QLabel(
+            "<hr><b>5. Relación de Insumos</b> — consolida TODOS los insumos de TODAS las partidas "
+            "con APU (cantidad × metrado) en una sola lista de compra. Alimentará el cronograma de "
+            "adquisición de materiales del futuro Módulo de Programación y Cronogramas."))
+        btn_relacion_insumos = QPushButton("📋 Generar relación de insumos")
+        btn_relacion_insumos.clicked.connect(self._on_generar_relacion_insumos_pres)
+        v.addWidget(btn_relacion_insumos)
+        self.tabla_relacion_insumos_pres = QTableWidget(
+            0, 7, objectName="tabla_relacion_insumos_pres")
+        self.tabla_relacion_insumos_pres.setHorizontalHeaderLabels(
+            ["Código", "Descripción", "Tipo", "Unidad", "Cantidad Total", "Precio Unit. (S/.)", "Costo Total (S/.)"])
+        aplicar_columna_elastica(self.tabla_relacion_insumos_pres, 1)
+        v.addWidget(self.tabla_relacion_insumos_pres)
+
+        # ------------------------------------------------------------
+        # 6) Inversión pública (opcional) -- Supervisión, Expediente
+        # Técnico, Gestión del Proyecto, Control Concurrente -- ver
+        # core/presupuesto.py::resumen_inversion_publica().
+        # ------------------------------------------------------------
+        v.addWidget(QLabel(
+            "<hr><b>6. Inversión pública (opcional)</b> — para obras públicas peruanas: cadena de "
+            "costos por ENCIMA del Valor Referencial de la sección 4 (Supervisión y Liquidación, "
+            "Expediente Técnico, Gestión del Proyecto, Control Concurrente de Obra). El % de "
+            "Control Concurrente NO tiene una tasa única fijada por norma -- verifíquelo contra la "
+            "Contraloría vigente para su caso."))
+        f_inv = QFormLayout()
+        f_inv.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.spin_pres_supervision = QDoubleSpinBox()
+        self.spin_pres_supervision.setRange(0.0, 20.0)
+        self.spin_pres_supervision.setDecimals(2)
+        self.spin_pres_supervision.setValue(3.0)
+        self.spin_pres_supervision.setSuffix(" %")
+        f_inv.addRow("Supervisión y Liquidación (% Valor Referencial):", self.spin_pres_supervision)
+        self.spin_pres_expediente = QDoubleSpinBox()
+        self.spin_pres_expediente.setRange(0.0, 1e9)
+        self.spin_pres_expediente.setDecimals(2)
+        self.spin_pres_expediente.setValue(0.0)
+        self.spin_pres_expediente.setSuffix(" S/.")
+        f_inv.addRow("Expediente Técnico (monto directo, si aplica):", self.spin_pres_expediente)
+        self.spin_pres_control_concurrente = QDoubleSpinBox()
+        self.spin_pres_control_concurrente.setRange(0.0, 5.0)
+        self.spin_pres_control_concurrente.setDecimals(3)
+        self.spin_pres_control_concurrente.setValue(0.5)
+        self.spin_pres_control_concurrente.setSuffix(" %")
+        f_inv.addRow("Control Concurrente de Obra (% Costo Total Inversión):", self.spin_pres_control_concurrente)
+        v.addLayout(f_inv)
+        v.addWidget(QLabel("Gestión del Proyecto (concepto | monto S/. -- una fila por partida, p.ej. PAC, "
+                            "Gestión de Riesgos, JPRD, PMA, Gastos Administrativos):"))
+        self.tabla_gestion_proyecto_pres = TablaPegable(5, 2)
+        self.tabla_gestion_proyecto_pres.setHorizontalHeaderLabels(["Concepto", "Monto (S/.)"])
+        v.addWidget(self.tabla_gestion_proyecto_pres)
+        btn_inv_publica = QPushButton("🏛 Calcular inversión pública")
+        btn_inv_publica.clicked.connect(self._on_calcular_inversion_publica)
+        v.addWidget(btn_inv_publica)
+        self.lbl_estado_inversion_publica = QLabel(
+            "Estado: sin calcular -- primero calcule el presupuesto (sección 4).")
+        self.lbl_estado_inversion_publica.setWordWrap(True)
+        v.addWidget(self.lbl_estado_inversion_publica)
+        self.tabla_inversion_publica = crear_tabla_parametros(con_comentario=False)
+        v.addWidget(self.tabla_inversion_publica)
+
+        self._insumos_lib_pres = {}
+        self._partidas_meta_pres = {}
+        self._apus_por_partida_pres = {}
+        self._orden_partidas_pres = []
+        self._ultimo_presupuesto_pres = None
+        v.addStretch()
+        self._agregar_pestaña_con_scroll(tab, "9. Presupuesto, APU e Insumos")
+
+    def _tipo_insumo_normalizado(self, texto: str, fila_1_based: int):
+        texto = (texto or "").strip()
+        for tipo in presupuesto.TipoInsumo.TODOS:
+            if texto.lower() == tipo.lower():
+                return tipo
+        raise presupuesto.PresupuestoError(
+            f"tipo de insumo «{texto}» no reconocido en la fila {fila_1_based} de la librería -- "
+            f"use uno de: {', '.join(presupuesto.TipoInsumo.TODOS)}")
+
+    def _on_actualizar_insumos_lib(self):
+        nuevos = {}
+        try:
+            for fila in range(self.tabla_insumos_lib.rowCount()):
+                valores = [self.tabla_insumos_lib.item(fila, c).text().strip()
+                           if self.tabla_insumos_lib.item(fila, c) else "" for c in range(6)]
+                codigo, descripcion, unidad, tipo_txt, precio_txt, indice_txt = valores
+                if not codigo and not descripcion:
+                    continue
+                if not codigo:
+                    raise presupuesto.PresupuestoError(f"falta el código en la fila {fila + 1} de la librería.")
+                tipo = self._tipo_insumo_normalizado(tipo_txt, fila + 1)
+                try:
+                    precio = float(precio_txt.replace(",", "."))
+                except ValueError:
+                    raise presupuesto.PresupuestoError(
+                        f"precio unitario no numérico en la fila {fila + 1} («{precio_txt}»).")
+                indice_inei = None
+                if indice_txt:
+                    try:
+                        indice_inei = int(float(indice_txt))
+                    except ValueError:
+                        raise presupuesto.PresupuestoError(
+                            f"índice INEI no numérico en la fila {fila + 1} («{indice_txt}»).")
+                nuevos[codigo] = presupuesto.Insumo(codigo, descripcion, unidad, tipo, precio, indice_inei)
+        except presupuesto.PresupuestoError as e:
+            self.lbl_estado_insumos_lib.setText(f"Estado: ERROR -- {e}")
+            return
+        except Exception as e:
+            self.lbl_estado_insumos_lib.setText(f"Estado: ERROR inesperado -- {e}")
+            return
+        self._insumos_lib_pres = nuevos
+        self.lbl_estado_insumos_lib.setText(f"Estado: {len(nuevos)} insumo(s) en la librería.")
+
+    def _on_actualizar_partidas_pres(self):
+        nuevas = {}
+        orden = []
+        try:
+            for fila in range(self.tabla_partidas_pres.rowCount()):
+                valores = [self.tabla_partidas_pres.item(fila, c).text().strip()
+                           if self.tabla_partidas_pres.item(fila, c) else "" for c in range(5)]
+                codigo, grupo, descripcion, unidad, metrado_txt = valores
+                if not codigo and not descripcion:
+                    continue
+                if not codigo:
+                    raise presupuesto.PresupuestoError(f"falta el código en la fila {fila + 1} de partidas.")
+                try:
+                    metrado = float(metrado_txt.replace(",", ".")) if metrado_txt else 0.0
+                except ValueError:
+                    raise presupuesto.PresupuestoError(
+                        f"metrado no numérico en la fila {fila + 1} («{metrado_txt}»).")
+                nuevas[codigo] = {"grupo": grupo, "descripcion": descripcion, "unidad": unidad, "metrado": metrado}
+                orden.append(codigo)
+        except presupuesto.PresupuestoError as e:
+            self.lbl_estado_partidas_pres.setText(f"Estado: ERROR -- {e}")
+            return
+        except Exception as e:
+            self.lbl_estado_partidas_pres.setText(f"Estado: ERROR inesperado -- {e}")
+            return
+        self._partidas_meta_pres = nuevas
+        self._orden_partidas_pres = orden
+        con_apu = sum(1 for c in orden if c in self._apus_por_partida_pres)
+        self.lbl_estado_partidas_pres.setText(
+            f"Estado: {len(nuevas)} partida(s) -- {con_apu} con APU guardado, "
+            f"{len(nuevas) - con_apu} pendiente(s) (sección 3).")
+        self.combo_apu_partida.blockSignals(True)
+        self.combo_apu_partida.clear()
+        for codigo in orden:
+            self.combo_apu_partida.addItem(f"{codigo} — {nuevas[codigo]['descripcion']}", codigo)
+        self.combo_apu_partida.blockSignals(False)
+        self._on_cambiar_partida_apu()
+
+    def _on_cambiar_partida_apu(self):
+        self.tabla_apu_items.setRowCount(0)
+        self.tabla_apu_resumen.setRowCount(0)
+        if self.combo_apu_partida.count() == 0:
+            self.lbl_estado_apu.setText("Estado: sin partidas -- actualice la sección 2 primero.")
+            return
+        codigo = self.combo_apu_partida.currentData()
+        apu = self._apus_por_partida_pres.get(codigo)
+        if apu is None:
+            self.lbl_estado_apu.setText(f"Estado: la partida «{codigo}» todavía no tiene APU guardado.")
+            return
+        self.tabla_apu_items.setRowCount(len(apu.items))
+        for fila, item in enumerate(apu.items):
+            usa_rendimiento = item.insumo.tipo in (presupuesto.TipoInsumo.MANO_DE_OBRA, presupuesto.TipoInsumo.EQUIPOS)
+            self.tabla_apu_items.setItem(fila, 0, QTableWidgetItem(item.insumo.codigo))
+            self.tabla_apu_items.setItem(fila, 1, QTableWidgetItem(
+                f"{item.cuadrilla:g}" if usa_rendimiento and item.cuadrilla is not None else ""))
+            self.tabla_apu_items.setItem(fila, 2, QTableWidgetItem(
+                f"{item.rendimiento:g}" if usa_rendimiento and item.rendimiento is not None else ""))
+            self.tabla_apu_items.setItem(fila, 3, QTableWidgetItem(
+                "" if usa_rendimiento else f"{item.cantidad:g}" if item.cantidad is not None else ""))
+            self.tabla_apu_items.setItem(fila, 4, QTableWidgetItem(
+                "" if usa_rendimiento else f"{item.desperdicio_pct:g}"))
+        self._mostrar_resumen_apu(apu, codigo)
+
+    def _mostrar_resumen_apu(self, apu, codigo):
+        subtotales = apu.subtotal_por_tipo()
+        filas = [(tipo, subtotales[tipo], "S/./ud") for tipo in presupuesto.TipoInsumo.TODOS if subtotales[tipo]]
+        filas.append(("Precio unitario total", apu.precio_unitario(), "S/./ud"))
+        poblar_tabla_parametros(self.tabla_apu_resumen, filas)
+        self.lbl_estado_apu.setText(
+            f"Estado: APU de «{codigo}» -- precio unitario S/.{apu.precio_unitario():.2f} por unidad.")
+
+    def _on_guardar_apu(self):
+        if self.combo_apu_partida.count() == 0:
+            self.lbl_estado_apu.setText("Estado: no hay ninguna partida seleccionada -- actualice la sección 2.")
+            return
+        codigo_partida = self.combo_apu_partida.currentData()
+        apu = presupuesto.Apu()
+        try:
+            for fila in range(self.tabla_apu_items.rowCount()):
+                valores = [self.tabla_apu_items.item(fila, c).text().strip()
+                           if self.tabla_apu_items.item(fila, c) else "" for c in range(5)]
+                codigo_insumo, cuadrilla_txt, rendimiento_txt, cantidad_txt, desperdicio_txt = valores
+                if not codigo_insumo:
+                    continue
+                insumo = self._insumos_lib_pres.get(codigo_insumo)
+                if insumo is None:
+                    raise presupuesto.PresupuestoError(
+                        f"el insumo «{codigo_insumo}» (fila {fila + 1} del APU) no está en la librería "
+                        f"-- actualícela en la sección 1 primero.")
+                usa_rendimiento = insumo.tipo in (presupuesto.TipoInsumo.MANO_DE_OBRA, presupuesto.TipoInsumo.EQUIPOS)
+                try:
+                    if usa_rendimiento:
+                        cuadrilla = float(cuadrilla_txt.replace(",", ".")) if cuadrilla_txt else 1.0
+                        if not rendimiento_txt:
+                            raise presupuesto.PresupuestoError(
+                                f"falta el rendimiento para «{codigo_insumo}» (fila {fila + 1} del APU).")
+                        rendimiento = float(rendimiento_txt.replace(",", "."))
+                        apu.agregar(presupuesto.ItemApu(insumo, cuadrilla=cuadrilla, rendimiento=rendimiento))
+                    else:
+                        if not cantidad_txt:
+                            raise presupuesto.PresupuestoError(
+                                f"falta la cantidad para «{codigo_insumo}» (fila {fila + 1} del APU).")
+                        cantidad = float(cantidad_txt.replace(",", "."))
+                        desperdicio = float(desperdicio_txt.replace(",", ".")) if desperdicio_txt else 0.0
+                        apu.agregar(presupuesto.ItemApu(insumo, cantidad=cantidad, desperdicio_pct=desperdicio))
+                except ValueError:
+                    raise presupuesto.PresupuestoError(
+                        f"valor numérico inválido en la fila {fila + 1} del APU.")
+            if not apu.items:
+                raise presupuesto.PresupuestoError("el APU no tiene ningún insumo -- agregue al menos una fila.")
+            apu.precio_unitario()  # dispara PresupuestoError si algún rendimiento es inválido
+        except presupuesto.PresupuestoError as e:
+            self.lbl_estado_apu.setText(f"Estado: ERROR -- {e}")
+            return
+        except Exception as e:
+            self.lbl_estado_apu.setText(f"Estado: ERROR inesperado -- {e}")
+            return
+        self._apus_por_partida_pres[codigo_partida] = apu
+        self._mostrar_resumen_apu(apu, codigo_partida)
+
+    def _construir_presupuesto_pres(self):
+        """Arma el Presupuesto a partir de las partidas actualizadas
+        (sección 2) que YA tienen un APU guardado (sección 3) -- las que
+        no, se omiten con una advertencia, en vez de bloquear el cálculo
+        de las que sí están listas."""
+        partidas = []
+        faltantes = []
+        for codigo in self._orden_partidas_pres:
+            meta = self._partidas_meta_pres[codigo]
+            apu = self._apus_por_partida_pres.get(codigo)
+            if apu is None:
+                faltantes.append(codigo)
+                continue
+            partidas.append(presupuesto.Partida(
+                codigo, meta["descripcion"], meta["unidad"], meta["metrado"], apu=apu, grupo=meta["grupo"]))
+        pres = presupuesto.Presupuesto(
+            "Presupuesto", partidas, gastos_generales_pct=self.spin_pres_gg.value(),
+            utilidad_pct=self.spin_pres_ut.value(), igv_pct=self.spin_pres_igv.value())
+        return pres, faltantes
+
+    def _on_calcular_presupuesto(self):
+        if not self._orden_partidas_pres:
+            self.lbl_estado_presupuesto.setText(
+                "Estado: no hay partidas -- actualice la sección 2 primero.")
+            return
+        try:
+            pres, faltantes = self._construir_presupuesto_pres()
+            if not pres.partidas:
+                raise presupuesto.PresupuestoError(
+                    "ninguna partida tiene APU guardado todavía -- complete la sección 3 primero.")
+            r = pres.resumen()
+        except presupuesto.PresupuestoError as e:
+            self.tabla_resumen_presupuesto.setRowCount(0)
+            self.lbl_estado_presupuesto.setText(f"Estado: ERROR -- {e}")
+            return
+        except Exception as e:
+            self.tabla_resumen_presupuesto.setRowCount(0)
+            self.lbl_estado_presupuesto.setText(f"Estado: ERROR inesperado -- {e}")
+            return
+        filas = [
+            ("Costo Directo", r["costo_directo"], "S/."),
+            (f"Gastos Generales ({r['gastos_generales_pct']:.2f}%)", r["gastos_generales"], "S/."),
+            (f"Utilidad ({r['utilidad_pct']:.2f}%)", r["utilidad"], "S/."),
+            ("Subtotal", r["subtotal"], "S/."),
+            (f"IGV ({r['igv_pct']:.2f}%)", r["igv"], "S/."),
+            ("Valor Referencial (Total)", r["total"], "S/."),
+            ("N° de partidas presupuestadas", r["n_partidas"], "und"),
+        ]
+        poblar_tabla_parametros(self.tabla_resumen_presupuesto, filas)
+        nota_faltantes = (f" ({len(faltantes)} partida(s) sin APU excluida(s): {', '.join(faltantes[:5])}"
+                           f"{'…' if len(faltantes) > 5 else ''})") if faltantes else ""
+        self.lbl_estado_presupuesto.setText(
+            f"Estado: presupuesto calculado -- Valor Referencial S/.{r['total']:,.2f}.{nota_faltantes}")
+        self._ultimo_presupuesto_pres = pres
+        try:
+            relacion = pres.relacion_insumos()
+            self.canvas_presupuesto.graficar_composicion(r, relacion)
+        except Exception:
+            pass  # el gráfico es un plus visual -- nunca debe romper el cálculo ya hecho
+
+    def _on_generar_relacion_insumos_pres(self):
+        if self._ultimo_presupuesto_pres is None:
+            self.lbl_estado_presupuesto.setText(
+                "Estado: calcule el presupuesto primero (sección 4) para generar la relación de insumos.")
+            return
+        relacion = self._ultimo_presupuesto_pres.relacion_insumos()
+        self.tabla_relacion_insumos_pres.setRowCount(len(relacion))
+        for fila, r in enumerate(relacion):
+            self.tabla_relacion_insumos_pres.setItem(fila, 0, QTableWidgetItem(r["codigo"]))
+            self.tabla_relacion_insumos_pres.setItem(fila, 1, QTableWidgetItem(r["descripcion"]))
+            self.tabla_relacion_insumos_pres.setItem(fila, 2, QTableWidgetItem(r["tipo"]))
+            self.tabla_relacion_insumos_pres.setItem(fila, 3, QTableWidgetItem(r["unidad"]))
+            self.tabla_relacion_insumos_pres.setItem(fila, 4, QTableWidgetItem(f"{r['cantidad_total']:g}"))
+            self.tabla_relacion_insumos_pres.setItem(fila, 5, QTableWidgetItem(f"{r['precio_unitario']:.2f}"))
+            self.tabla_relacion_insumos_pres.setItem(fila, 6, QTableWidgetItem(f"{r['costo_total']:.2f}"))
+        ajustar_alto_tabla(self.tabla_relacion_insumos_pres, filas_visibles_max=20)
+
+    def _on_calcular_inversion_publica(self):
+        if self._ultimo_presupuesto_pres is None:
+            self.lbl_estado_inversion_publica.setText(
+                "Estado: calcule el presupuesto primero (sección 4).")
+            return
+        gestion_proyecto = {}
+        try:
+            for fila in range(self.tabla_gestion_proyecto_pres.rowCount()):
+                item_c = self.tabla_gestion_proyecto_pres.item(fila, 0)
+                item_m = self.tabla_gestion_proyecto_pres.item(fila, 1)
+                concepto = item_c.text().strip() if item_c else ""
+                monto_txt = item_m.text().strip() if item_m else ""
+                if not concepto or not monto_txt:
+                    continue
+                gestion_proyecto[concepto] = float(monto_txt.replace(",", "."))
+        except ValueError as e:
+            self.lbl_estado_inversion_publica.setText(f"Estado: ERROR -- monto no numérico en Gestión del Proyecto ({e}).")
+            return
+        try:
+            valor_referencial = self._ultimo_presupuesto_pres.resumen()["total"]
+            r = presupuesto.resumen_inversion_publica(
+                valor_referencial, supervision_liquidacion_pct=self.spin_pres_supervision.value(),
+                expediente_tecnico=self.spin_pres_expediente.value(), gestion_proyecto=gestion_proyecto,
+                control_concurrente_pct=self.spin_pres_control_concurrente.value())
+        except presupuesto.PresupuestoError as e:
+            self.tabla_inversion_publica.setRowCount(0)
+            self.lbl_estado_inversion_publica.setText(f"Estado: ERROR -- {e}")
+            return
+        except Exception as e:
+            self.tabla_inversion_publica.setRowCount(0)
+            self.lbl_estado_inversion_publica.setText(f"Estado: ERROR inesperado -- {e}")
+            return
+        filas = [
+            ("Valor Referencial", r["valor_referencial"], "S/."),
+            (f"Supervisión y Liquidación ({r['supervision_liquidacion_pct']:.2f}%)",
+             r["supervision_liquidacion"], "S/."),
+            ("Expediente Técnico", r["expediente_tecnico"], "S/."),
+            ("Gestión del Proyecto (total)", r["gestion_proyecto_total"], "S/."),
+            ("Costo Total de la Inversión", r["costo_total_inversion"], "S/."),
+            (f"Control Concurrente de Obra ({r['control_concurrente_pct']:.3f}%)",
+             r["control_concurrente"], "S/."),
+            ("Presupuesto Total", r["presupuesto_total"], "S/."),
+        ]
+        poblar_tabla_parametros(self.tabla_inversion_publica, filas)
+        self.lbl_estado_inversion_publica.setText(
+            f"Estado: Presupuesto Total (inversión pública) = S/.{r['presupuesto_total']:,.2f}.")
 
     def _build_tab_modulos_avanzados(self):
         tab = QWidget()

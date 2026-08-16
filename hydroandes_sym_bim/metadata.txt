@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.3.26
+version=0.3.27
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,56 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.3.27: Módulo "Presupuesto, APU e Insumos" -- fase 2, la
+      INTERFAZ (nueva Pestaña "9. Presupuesto, APU e Insumos", después
+      del Módulo BIM). Seis secciones sobre core/presupuesto.py y
+      core/formula_polinomica.py (v0.3.25-26):
+      1) Librería de insumos -- tabla editable con pegado estilo Excel
+      (TablaPegable, Ctrl+V), tipo validado sin distinguir mayúsculas/
+      minúsculas contra las 5 categorías de TipoInsumo.
+      2) Partidas del presupuesto -- código, agrupación libre (Título >
+      Subtítulo, solo para organizar), descripción, unidad y metrado.
+      3) Editor de APU por partida -- selector de partida (autocompleta
+      desde la sección 2), tabla de insumos referenciados por código de
+      la librería; Mano de Obra/Equipos piden Cuadrilla+Rendimiento,
+      Materiales/Herramienta/Subcontratos piden Cantidad+Desperdicio%
+      (el tipo se detecta solo desde el insumo, sin que el usuario deba
+      saber cuál aplica); resumen de subtotales por tipo + precio
+      unitario, recalculado y recargado correctamente al cambiar de
+      partida.
+      4) Resumen del presupuesto -- Gastos Generales/Utilidad/IGV
+      editables, Costo Directo -> Valor Referencial, y el gráfico de
+      alto impacto (nuevo ui/presupuesto_canvas.py::PresupuestoCanvas):
+      barras horizontales de las partidas de mayor peso + dona de
+      composición por tipo de insumo. Las partidas SIN APU guardado se
+      excluyen del cálculo con una advertencia explícita (lista de
+      códigos), en vez de bloquear el presupuesto de las que sí están
+      listas.
+      5) Relación de Insumos -- tabla consolidada, un botón.
+      6) Inversión pública (opcional) -- Supervisión y Liquidación,
+      Expediente Técnico, Gestión del Proyecto (tabla editable de
+      partidas propias) y Control Concurrente de Obra, sobre el Valor
+      Referencial ya calculado (resumen_inversion_publica(), v0.3.26).
+      Verificado con QGIS 3.40.1 real en modo headless (27
+      comprobaciones): el flujo completo a través de los controles
+      reales de la interfaz -- librería con tipo case-insensitive,
+      partida con su APU guardado y recargado correctamente, precio
+      unitario y presupuesto reproduciendo EXACTO el caso de concreto
+      ya verificado a mano en fases anteriores (347.89 S/./m³, Valor
+      Referencial 4926.12), relación de insumos sumando exacto al
+      costo directo, inversión pública consistente con el núcleo, y
+      los 3 casos de error (tipo de insumo inválido, insumo inexistente
+      referenciado en un APU, presupuesto sin partidas) mostrando un
+      mensaje claro en vez de romper.
+      PENDIENTE (fases siguientes, ya acordadas): integración con los
+      metrados del Módulo BIM (autocompletar partidas de concreto/
+      acero/excavación), exportación de las tablas, y -- cuando el
+      usuario aporte la fuente -- rendimientos reales de CAPECO/Revista
+      Costos. Después sigue el Módulo de Programación y Cronogramas
+      (Gantt/PERT-CPM), para el que ya se validó la lectura de un
+      cronograma MS Project real (XML MSPDI, vía librería estándar) y
+      de un cronograma de desembolsos real (mismo código de partida que
+      el presupuesto, listo para enlazar).
     - v0.3.26: Módulo "Presupuesto, APU e Insumos" -- calibración contra
       un presupuesto de obra vial REAL que el usuario aportó como
       referencia (S10 completo: presupuesto ~S/.65.8M, relación de
