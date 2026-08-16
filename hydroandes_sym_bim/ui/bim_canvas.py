@@ -23,10 +23,13 @@ ui/swe2d_canvas.py::TerrenoCalado3DCanvas (item 8, fase 4a), así que se
 puede probar en headless igual que cualquier otro gráfico, sin
 depender de un contexto OpenGL real.
 
+Los perfiles 2D (contorno de cada estructura) viven en
+core/bim_geometry.py, no aquí -- así el render 3D (este archivo), los
+metrados (core/bim_metrados.py, fase 2) y la futura exportación IFC
+(fase 3) parten de EXACTAMENTE la misma geometría.
+
 NO es diseño estructural ni geotécnico: es una representación
-geométrica de las dimensiones YA calculadas en Pestaña 7/8, pensada
-para visualización, metrados (fase 2 del módulo BIM) y exportación IFC
-(fase 3).
+geométrica de las dimensiones YA calculadas en Pestaña 7/8.
 """
 import math
 
@@ -37,6 +40,8 @@ except ImportError:
 from matplotlib.figure import Figure
 
 from .chart_style import aplicar_estilo_graficos
+from ..core import bim_geometry as bg
+from ..core.bim_geometry import GeometriaNoDisponibleError  # noqa: F401  (reexportado)
 
 aplicar_estilo_graficos()
 
@@ -50,83 +55,6 @@ _COLOR_CONCRETO = "#B5B2AC"
 _COLOR_METAL = "#8C8C8C"
 _COLOR_ROCA = "#9C9C9C"
 _COLOR_AGUA = "#1F6FB2"
-
-
-class GeometriaNoDisponibleError(Exception):
-    """La estructura seleccionada no tiene datos suficientes para
-    construir una geometría 3D. El mensaje explica qué falta."""
-
-
-# ======================================================================
-# Perfiles 2D (contorno del fondo/paredes, SIN nivel de agua) -- mismo
-# trazado que ui/cross_section_canvas.py, para que el render 3D y el 2D
-# de Pestaña 7 sean geométricamente consistentes.
-# ======================================================================
-
-def _perfil_rectangular(b, y):
-    return [0.0, 0.0, b, b], [y * 1.15, 0.0, 0.0, y * 1.15]
-
-
-def _perfil_triangular(z, y):
-    return [-z * y * 1.15, 0.0, z * y * 1.15], [y * 1.15, 0.0, y * 1.15]
-
-
-def _perfil_trapezoidal(b, z, y):
-    x_top = b / 2 + z * y
-    xs = [-x_top * 1.1, -b / 2 - z * y, -b / 2, b / 2, b / 2 + z * y, x_top * 1.1]
-    zs = [y * 1.15, y, 0.0, 0.0, y, y * 1.15]
-    return xs, zs
-
-
-def _perfil_parabolico(t, y, n_pts=24):
-    xs, zs = [], []
-    for i in range(n_pts + 1):
-        frac = i / n_pts
-        xs.append((t / 2) * frac)
-        zs.append(y * (frac ** 2))
-    return [-x for x in reversed(xs)] + xs, list(reversed(zs)) + zs
-
-
-def _perfil_circular(diametro, n_pts=32):
-    r = diametro / 2
-    angulos = [i * 2 * math.pi / n_pts for i in range(n_pts)]
-    return [r * math.sin(a) for a in angulos], [r - r * math.cos(a) for a in angulos]
-
-
-def _perfil_cajon(ancho, alto):
-    return [0.0, 0.0, ancho, ancho], [alto, 0.0, 0.0, alto]
-
-
-def perfil_canal_desde_datos(datos: dict):
-    """(xs, zs, etiqueta) del contorno de un canal de Pestaña 7 (dict
-    guardado en self.resultados_hidraulica_drenaje), o levanta
-    GeometriaNoDisponibleError si la forma no está soportada todavía o
-    faltan las claves de geometría esperadas."""
-    forma = str(datos.get("forma", ""))
-    y = datos.get("tirante_normal_m")
-    if forma.startswith("Rectangular"):
-        b = datos.get("b_m")
-        if b is None or y is None:
-            raise GeometriaNoDisponibleError("faltan b_m/tirante_normal_m para el rectángulo")
-        return (*_perfil_rectangular(b, y), f"b = {b:.2f} m, y = {y:.2f} m")
-    if forma.startswith("Triangular"):
-        z = datos.get("z")
-        if z is None or y is None:
-            raise GeometriaNoDisponibleError("faltan z/tirante_normal_m para el triángulo")
-        return (*_perfil_triangular(z, y), f"z = {z:.2f} (H:V), y = {y:.2f} m")
-    if forma.startswith("Trapezoidal"):
-        b, z = datos.get("b_m"), datos.get("z")
-        if b is None or z is None or y is None:
-            raise GeometriaNoDisponibleError("faltan b_m/z/tirante_normal_m para el trapecio")
-        return (*_perfil_trapezoidal(b, z, y), f"b = {b:.2f} m, z = {z:.2f}, y = {y:.2f} m")
-    if forma == "Parabólico":
-        t = datos.get("T_m")
-        if t is None or y is None:
-            raise GeometriaNoDisponibleError("faltan T_m/tirante_normal_m para la parábola")
-        return (*_perfil_parabolico(t, y), f"T = {t:.2f} m, y = {y:.2f} m")
-    raise GeometriaNoDisponibleError(
-        f"la forma «{forma}» (irregular, o cuneta vial Gutter/HEC-22) todavía no tiene render 3D "
-        f"en el módulo BIM -- fase 1 cubre rectangular, triangular, trapezoidal y parabólico.")
 
 
 class Estructura3DCanvas(FigureCanvas):
@@ -220,7 +148,7 @@ class Estructura3DCanvas(FigureCanvas):
         self.draw()
 
     def _graficar_canal(self, datos, longitud_m):
-        xs, zs, etiqueta = perfil_canal_desde_datos(datos)
+        xs, zs, etiqueta = bg.perfil_canal_desde_datos(datos)
         self._extruir_perfil(xs, zs, longitud_m, cerrado=False, color=_COLOR_CONCRETO)
         y = datos.get("tirante_normal_m")
         if y:
@@ -229,24 +157,8 @@ class Estructura3DCanvas(FigureCanvas):
         self._ajustar_limites(xs, [0.0, longitud_m], zs)
 
     def _graficar_alcantarilla_p7(self, datos, longitud_m):
-        subtipo = str(datos.get("subtipo", ""))
         y = datos.get("tirante_m")
-        if subtipo.startswith("Circular"):
-            d = datos.get("diametro_m")
-            if d is None:
-                raise GeometriaNoDisponibleError(
-                    "esta alcantarilla se calculó con una versión anterior del plugin que no "
-                    "guardaba el diámetro -- vuelva a la Pestaña 7 y presione «Calcular» de nuevo.")
-            xs, zs = _perfil_circular(d)
-            etiqueta = f"D = {d:.2f} m"
-        else:
-            ancho, alto = datos.get("ancho_m"), datos.get("alto_m")
-            if ancho is None or alto is None:
-                raise GeometriaNoDisponibleError(
-                    "esta alcantarilla se calculó con una versión anterior del plugin que no "
-                    "guardaba ancho/alto -- vuelva a la Pestaña 7 y presione «Calcular» de nuevo.")
-            xs, zs = _perfil_cajon(ancho, alto)
-            etiqueta = f"ancho = {ancho:.2f} m, alto = {alto:.2f} m"
+        xs, zs, etiqueta = bg.perfil_alcantarilla_desde_datos(datos)
         self._extruir_perfil(xs, zs, longitud_m, cerrado=True, color=_COLOR_METAL)
         if y:
             self._agregar_plano(min(xs), max(xs), 0.0, longitud_m, y)
@@ -257,16 +169,7 @@ class Estructura3DCanvas(FigureCanvas):
         d50 = datos.get("D50_m")
         if d50 is None:
             raise GeometriaNoDisponibleError("falta D50_m para el enrocado")
-        alto_talud = max(1.5, 6 * d50)
-        ancho_talud = alto_talud / math.tan(math.radians(angulo_talud_deg))
-        espesor = 2 * d50  # práctica estándar: espesor mínimo = 2×D50
-        a = math.radians(angulo_talud_deg)
-        normal = (math.sin(a), math.cos(a))
-        xs_talud, zs_talud = [0.0, ancho_talud], [alto_talud, 0.0]
-        xs_capa = [x + espesor * normal[0] for x in xs_talud]
-        zs_capa = [z + espesor * normal[1] for z in zs_talud]
-        xs = xs_talud + list(reversed(xs_capa))
-        zs = zs_talud + list(reversed(zs_capa))
+        xs, zs, alto_talud, _, espesor = bg.perfil_talud_enrocado(d50, angulo_talud_deg)
         self._extruir_perfil(xs, zs, longitud_m, cerrado=True, color=_COLOR_ROCA)
         self.ax.text(0.0, longitud_m * 1.05, alto_talud,
                       f"D50 = {d50 * 100:.1f} cm, espesor ≈ {espesor:.2f} m\nL = {longitud_m:.1f} m "
@@ -278,9 +181,7 @@ class Estructura3DCanvas(FigureCanvas):
         y = datos.get("y_m")
         if largo_ventana is None or y is None:
             raise GeometriaNoDisponibleError("faltan L_m/y_m del sumidero")
-        profundidad_caja = max(0.6, 3 * y)  # profundidad de caja NOMINAL, solo visual
-        ancho_caja = max(0.6, largo_ventana)
-        xs, zs = _perfil_cajon(ancho_caja, profundidad_caja)
+        xs, zs, ancho_caja, profundidad_caja = bg.perfil_sumidero(largo_ventana, y)
         self._extruir_perfil(xs, zs, largo_ventana, cerrado=True, color=_COLOR_CONCRETO)
         self._agregar_plano(0.0, ancho_caja, 0.0, largo_ventana, y)
         self.ax.text(0.0, largo_ventana * 1.05, profundidad_caja,
@@ -319,16 +220,12 @@ class Estructura3DCanvas(FigureCanvas):
             raise GeometriaNoDisponibleError("faltan cota_agua_m/cota_corona_m/D50_m de la defensa ribereña")
         z0 = min(cota_agua, cota_corona) - 1.0
         agua_z, corona_z = cota_agua - z0, cota_corona - z0
-        alto_talud = max(corona_z, 1.5)
-        ancho_talud = alto_talud / math.tan(math.radians(angulo_talud_deg))
-        espesor = 2 * d50
-        a = math.radians(angulo_talud_deg)
-        normal = (math.sin(a), math.cos(a))
-        xs_talud, zs_talud = [0.0, ancho_talud], [alto_talud, 0.0]
-        xs_capa = [x + espesor * normal[0] for x in xs_talud]
-        zs_capa = [z + espesor * normal[1] for z in zs_talud]
-        xs = xs_talud + list(reversed(xs_capa))
-        zs = zs_talud + list(reversed(zs_capa))
+        xs, zs, alto_talud, _, espesor = bg.perfil_talud_enrocado(d50, angulo_talud_deg)
+        # el talud de la defensa arranca en la cota de agua local (z0), no en 0 --
+        # se desplaza el perfil verticalmente para que la corona quede en corona_z
+        desplazamiento = corona_z - alto_talud
+        zs = [z + desplazamiento for z in zs]
+        alto_talud = corona_z
         self._extruir_perfil(xs, zs, longitud_m, cerrado=True, color=_COLOR_ROCA)
         self._agregar_plano(min(xs), max(xs), 0.0, longitud_m, agua_z)
         bl = datos.get("borde_libre_disponible_m", cota_corona - cota_agua)
@@ -366,7 +263,7 @@ class Estructura3DCanvas(FigureCanvas):
         longitud = p.get("longitud", LONGITUD_POR_DEFECTO_M)
         if not d:
             raise GeometriaNoDisponibleError("falta el diámetro de la alcantarilla")
-        xs, zs = _perfil_circular(d)
+        xs, zs = bg.perfil_circular(d)
         self._extruir_perfil(xs, zs, longitud, cerrado=True, color=_COLOR_METAL)
         self.ax.text(min(xs), longitud * 1.05, max(zs),
                       f"D = {d:.2f} m, L = {longitud:.2f} m\ncota entrada = {p.get('cota_entrada', '?')} m s.n.m.",
@@ -376,9 +273,8 @@ class Estructura3DCanvas(FigureCanvas):
     def _graficar_vertedero_p8(self, p):
         longitud_cresta = p.get("longitud", 5.0)
         cota_cresta = p.get("cota_cresta", 0.0)
-        alto_muro = 1.5  # NOMINAL -- Pestaña 8 no registra la altura real del muro
-        espesor_muro = 0.3  # NOMINAL
-        xs, zs = [0.0, 0.0, espesor_muro, espesor_muro], [alto_muro, 0.0, 0.0, alto_muro]
+        xs, zs = bg.perfil_muro_nominal()
+        alto_muro = max(zs)
         self._extruir_perfil(xs, zs, longitud_cresta, cerrado=True, color=_COLOR_CONCRETO)
         self.ax.text(0.0, longitud_cresta * 1.05, alto_muro,
                       f"Vertedero -- longitud de cresta = {longitud_cresta:.2f} m\n"
@@ -390,9 +286,8 @@ class Estructura3DCanvas(FigureCanvas):
     def _graficar_orificio_p8(self, p):
         area = p.get("area", 0.5)
         lado = math.sqrt(max(area, 1e-6))
-        alto_muro = max(lado * 1.8, 1.5)  # NOMINAL
-        espesor_muro = 0.3  # NOMINAL
-        xs, zs = [0.0, 0.0, espesor_muro, espesor_muro], [alto_muro, 0.0, 0.0, alto_muro]
+        xs, zs = bg.perfil_muro_nominal(alto=max(lado * 1.8, 1.5))
+        alto_muro = max(zs)
         self._extruir_perfil(xs, zs, lado, cerrado=True, color=_COLOR_CONCRETO)
         self.ax.text(0.0, lado * 1.4, alto_muro,
                       f"Orificio -- área = {area:.3f} m² (lado equivalente ≈ {lado:.2f} m)\n"

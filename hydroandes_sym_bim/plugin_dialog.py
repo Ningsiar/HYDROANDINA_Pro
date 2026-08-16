@@ -47,7 +47,7 @@ from .core import (delineation, morphometry, curve_number, tc_methods, dem_downl
                     low_flows, phabsim, groundwater_flow, well_hydraulics, idf_curves,
                     regionalization, gridded_validation, swe2d, mesh_export,
                     runoff_coefficient, roughness_methods, roughness_materials,
-                    iila_senamhi_zones)
+                    iila_senamhi_zones, bim_metrados)
 from .core.qgis_layer_utils import obtener_capa
 from .ui.hypsometric_canvas import HypsometricCanvas
 from .ui.hydrograph_canvas import HydrographCanvas
@@ -10241,6 +10241,51 @@ class HydroAndinaProDialog(QDialog):
         self.canvas_bim_3d = Estructura3DCanvas(width=8.0, height=6.0)
         v.addWidget(self.canvas_bim_3d)
 
+        # ------------------------------------------------------------
+        # Metrados (fase 2 del módulo BIM) -- ver core/bim_metrados.py
+        # para el alcance y las limitaciones exactas de cada cantidad.
+        # ------------------------------------------------------------
+        v.addWidget(QLabel(
+            "<hr><b>Metrados (cantidades preliminares)</b> — a partir de la misma geometría del "
+            "render 3D de arriba. El espesor de muro/losa y la cuantía de acero son ASUNCIONES "
+            "suyas (este plugin no hace diseño estructural) -- ajústelas antes de generar."))
+
+        f_metrados = QFormLayout()
+        f_metrados.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.spin_bim_espesor_muro = QDoubleSpinBox()
+        self.spin_bim_espesor_muro.setRange(0.05, 2.0)
+        self.spin_bim_espesor_muro.setDecimals(2)
+        self.spin_bim_espesor_muro.setValue(0.20)
+        self.spin_bim_espesor_muro.setSuffix(" m")
+        f_metrados.addRow("Espesor de muro/losa (asunción):", self.spin_bim_espesor_muro)
+
+        self.spin_bim_margen_excavacion = QDoubleSpinBox()
+        self.spin_bim_margen_excavacion.setRange(0.0, 2.0)
+        self.spin_bim_margen_excavacion.setDecimals(2)
+        self.spin_bim_margen_excavacion.setValue(0.30)
+        self.spin_bim_margen_excavacion.setSuffix(" m")
+        f_metrados.addRow("Margen de excavación lateral (referencial):", self.spin_bim_margen_excavacion)
+
+        self.spin_bim_cuantia_acero = QDoubleSpinBox()
+        self.spin_bim_cuantia_acero.setRange(0.0, 300.0)
+        self.spin_bim_cuantia_acero.setDecimals(0)
+        self.spin_bim_cuantia_acero.setValue(100.0)
+        self.spin_bim_cuantia_acero.setSuffix(" kg/m³")
+        self.spin_bim_cuantia_acero.setSpecialValueText("(no estimar acero)")
+        f_metrados.addRow("Cuantía de acero (asunción, opcional):", self.spin_bim_cuantia_acero)
+        v.addLayout(f_metrados)
+
+        btn_metrados = QPushButton("Generar metrados")
+        btn_metrados.clicked.connect(self._on_generar_metrados_bim)
+        v.addWidget(btn_metrados)
+
+        self.lbl_estado_metrados_bim = QLabel("Estado: sin generar.")
+        self.lbl_estado_metrados_bim.setWordWrap(True)
+        v.addWidget(self.lbl_estado_metrados_bim)
+
+        self.tabla_metrados_bim = crear_tabla_parametros()
+        v.addWidget(self.tabla_metrados_bim)
+
         self._estructuras_bim_p8 = []
         v.addStretch()
         self._agregar_pestaña_con_scroll(tab, "8b. Módulo BIM (3D)")
@@ -10298,6 +10343,76 @@ class HydroAndinaProDialog(QDialog):
             self.lbl_estado_bim.setText(f"Estado: no se pudo generar el modelo -- {e}")
         except Exception as e:
             self.lbl_estado_bim.setText(f"Estado: ERROR inesperado -- {e}")
+
+    def _on_generar_metrados_bim(self):
+        if self.combo_bim_estructura.count() == 0:
+            self.lbl_estado_metrados_bim.setText(
+                "Estado: no hay ninguna estructura para metrar -- actualice la lista primero.")
+            return
+        nombre = self.combo_bim_estructura.currentText()
+        espesor = self.spin_bim_espesor_muro.value()
+        margen = self.spin_bim_margen_excavacion.value()
+        cuantia = self.spin_bim_cuantia_acero.value() or None
+        try:
+            if self.combo_bim_fuente.currentIndex() == 0:
+                datos = self.resultados_hidraulica_drenaje.get(nombre)
+                if datos is None:
+                    raise GeometriaNoDisponibleError(
+                        f"no se encontró «{nombre}» en los resultados de la Pestaña 7 -- "
+                        f"actualice la lista de nuevo.")
+                r = bim_metrados.metrados_desde_pestana7(
+                    nombre, datos, self.spin_bim_longitud.value(), espesor, margen, cuantia)
+            else:
+                indice = self.combo_bim_estructura.currentIndex()
+                if indice < 0 or indice >= len(self._estructuras_bim_p8):
+                    raise GeometriaNoDisponibleError(
+                        "la tabla de la Pestaña 8 cambió -- actualice la lista de nuevo.")
+                r = bim_metrados.metrados_desde_pestana8(
+                    self._estructuras_bim_p8[indice], espesor, margen, cuantia)
+        except bim_metrados.MetradoNoAplicaError as e:
+            self.tabla_metrados_bim.setRowCount(0)
+            self.lbl_estado_metrados_bim.setText(f"Estado: sin metrados aplicables -- {e}")
+            return
+        except GeometriaNoDisponibleError as e:
+            self.tabla_metrados_bim.setRowCount(0)
+            self.lbl_estado_metrados_bim.setText(f"Estado: no se pudo generar el metrado -- {e}")
+            return
+        except Exception as e:
+            self.tabla_metrados_bim.setRowCount(0)
+            self.lbl_estado_metrados_bim.setText(f"Estado: ERROR inesperado -- {e}")
+            return
+
+        filas = [
+            ("Estructura", r["nombre"], ""), ("Tipo", r["tipo"], ""),
+            ("Geometría", r["geometria"], ""), ("Longitud modelada", r["longitud_m"], "m"),
+            ("Material", r["material"], ""),
+        ]
+        if r["categoria"] == "cascara":
+            filas += [
+                ("Perímetro mojado", r["perimetro_mojado_m"], "m"),
+                ("Espesor de muro/losa (asunción)", r["espesor_muro_m"], "m"),
+                ("Volumen de concreto", r["volumen_concreto_m3"], "m³"),
+                ("Área de encofrado", r["area_encofrado_m2"], "m²",
+                 "ambas caras (interior + exterior) -- ajuste si el muro va contra terreno natural"),
+                ("Margen de excavación lateral", r["margen_excavacion_lateral_m"], "m", "referencial"),
+                ("Volumen de excavación", r["volumen_excavacion_m3"], "m³",
+                 "prisma envolvente referencial, no un cómputo de movimiento de tierras real"),
+            ]
+        else:
+            filas += [
+                ("Área transversal", r["area_transversal_m2"], "m²"),
+                ("Volumen", r["volumen_m3"], "m³"),
+            ]
+        if "cuantia_acero_kg_m3" in r:
+            filas += [
+                ("Cuantía de acero (asunción)", r["cuantia_acero_kg_m3"], "kg/m³"),
+                ("Peso de acero estimado", r["peso_acero_estimado_kg"], "kg"),
+            ]
+        if "nota" in r:
+            filas.append(("Nota", r["nota"], ""))
+
+        poblar_tabla_parametros(self.tabla_metrados_bim, filas)
+        self.lbl_estado_metrados_bim.setText(f"Estado: metrados generados para «{nombre}».")
 
     def _build_tab_modulos_avanzados(self):
         tab = QWidget()

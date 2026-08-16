@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.3.19
+version=0.3.20
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,36 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.3.20: Módulo BIM -- fase 2 de 3 (metrados/cantidades). Nueva
+      sección "Metrados (cantidades preliminares)" en la Pestaña 8b,
+      justo debajo del render 3D, a partir de la MISMA geometría (así
+      que dimensiones mostradas y cantidades calculadas nunca se
+      desincronizan): espesor de muro/losa, margen de excavación
+      lateral y cuantía de acero (opcional) son ASUNCIONES ajustables
+      por el usuario -- el plugin NO hace diseño estructural.
+      Nuevo core/bim_metrados.py con dos fórmulas genéricas: "cáscara"
+      (canal/alcantarilla/sumidero -- concreto envolviendo el contorno
+      MOJADO con el espesor indicado: perímetro × espesor × longitud;
+      encofrado = 2×perímetro×longitud; excavación = prisma envolvente
+      con margen) y "área sólida" (enrocado/defensa/muros esquemáticos
+      de Pestaña 8 -- el contorno YA es el material: área del polígono
+      × longitud, sin encofrado ni excavación). Pontón y Puente no
+      tienen metrados (solo verifican borde libre, sin geometría real
+      de material) -- mensaje claro en vez de un número inventado.
+      Refactor de apoyo: los perfiles 2D (antes duplicados dentro de
+      ui/bim_canvas.py) se movieron a core/bim_geometry.py, sin
+      dependencias de Qt/matplotlib -- así el render 3D, los metrados y
+      la futura exportación IFC (fase 3) parten de exactamente la misma
+      geometría en vez de cada uno recalcularla por su lado.
+      Verificado con QGIS 3.40.1 real en modo headless (30
+      comprobaciones): regresión completa de los 6 casos de render 3D
+      de la fase 1 tras el refactor, valores de metrados verificados
+      contra un cálculo manual exacto (canal rectangular: perímetro
+      3.44 m, concreto 6.88 m³, encofrado 68.8 m², excavación 26.84 m³,
+      acero 688 kg para los datos de prueba), categoría "área sólida"
+      sin encofrado/excavación (no es concreto), MetradoNoAplicaError
+      para Pontón/Puente, y la tabla poblándose con el valor correcto a
+      través del botón real de la interfaz.
     - v0.3.19: Módulo BIM -- fase 1 de 3 (nuevo, después de la Pestaña 8).
       Nueva Pestaña "8b. Módulo BIM (3D)": render 3D acotado de UNA
       estructura hidráulica ya calculada, elegida por el usuario desde
