@@ -9,9 +9,17 @@
 // PASO 1 -- Hoja de cálculo:
 //   Use la hoja "HydroAndes SYM BIM - Licencias" (Claude ya la creó con los
 //   encabezados en la fila 1: id | primer_uso | ultimo_uso | usos |
-//   licencia | notas), o cree una propia con esos mismos encabezados.
-//   El script usa la PRIMERA pestaña de la hoja, sea cual sea su nombre
-//   -- no hace falta que se llame "Instalaciones".
+//   licencia | notas | limite), o cree una propia con esos mismos
+//   encabezados. El script usa la PRIMERA pestaña de la hoja, sea cual
+//   sea su nombre -- no hace falta que se llame "Instalaciones".
+//
+//   Columna "limite" (G, opcional): déjela VACÍA para que esa
+//   instalación use el límite general (LIMITE_USOS_GRATIS, más abajo).
+//   Para darle a un invitado estratégico más usos gratis (50, 100, lo
+//   que sea), escriba ese número en su fila, columna "limite" -- toma
+//   efecto de inmediato, sin volver a desplegar nada. La fila de cada
+//   instalación se crea sola en su primer uso, así que primero déjelo
+//   abrir el plugin una vez y luego edite su límite ahí.
 //
 // PASO 2 -- Apps Script:
 //   Extensiones > Apps Script. Borre el contenido de Code.gs y pegue
@@ -56,23 +64,25 @@ function doPost(e) {
   if (accion === "registrar_uso") {
     var usos = Number(hoja.getRange(fila, 4).getValue()) || 0;
     var licencia = hoja.getRange(fila, 5).getValue() === true;
+    var limite = _limiteDeFila(hoja, fila);
     if (!licencia) {
       usos = usos + 1;
       hoja.getRange(fila, 4).setValue(usos);
     }
     hoja.getRange(fila, 3).setValue(new Date());
     return _json({
-      ok: true, usos: usos, limite: LIMITE_USOS_GRATIS,
-      licencia_activada: licencia, bloqueado: (!licencia && usos > LIMITE_USOS_GRATIS)
+      ok: true, usos: usos, limite: limite,
+      licencia_activada: licencia, bloqueado: (!licencia && usos > limite)
     });
   }
 
   if (accion === "consultar") {
     var usos2 = Number(hoja.getRange(fila, 4).getValue()) || 0;
     var licencia2 = hoja.getRange(fila, 5).getValue() === true;
+    var limite2 = _limiteDeFila(hoja, fila);
     return _json({
-      ok: true, usos: usos2, limite: LIMITE_USOS_GRATIS,
-      licencia_activada: licencia2, bloqueado: (!licencia2 && usos2 > LIMITE_USOS_GRATIS)
+      ok: true, usos: usos2, limite: limite2,
+      licencia_activada: licencia2, bloqueado: (!licencia2 && usos2 > limite2)
     });
   }
 
@@ -101,6 +111,19 @@ function _calcularClave(id) {
     return s.length === 1 ? "0" + s : s;
   }).join("").toUpperCase();
   return hex.substring(0, 16);
+}
+
+// Límite efectivo de una fila: si la columna "limite" (G, 7) tiene un
+// número mayor a 0, se usa ese (para invitados estratégicos con más
+// usos gratis); si está vacía o no es un número válido, se usa el
+// límite general LIMITE_USOS_GRATIS.
+function _limiteDeFila(hoja, fila) {
+  var valor = hoja.getRange(fila, 7).getValue();
+  var numero = Number(valor);
+  if (valor !== "" && !isNaN(numero) && numero > 0) {
+    return numero;
+  }
+  return LIMITE_USOS_GRATIS;
 }
 
 function _buscarOCrearFila(hoja, id) {
