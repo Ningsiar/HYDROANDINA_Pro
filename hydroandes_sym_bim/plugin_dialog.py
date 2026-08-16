@@ -26,7 +26,7 @@ from qgis.core import (
     QgsFeature, QgsField,
 )
 from qgis.gui import QgsMapLayerComboBox, QgsMapToolEmitPoint
-from qgis.PyQt.QtCore import Qt, QVariant
+from qgis.PyQt.QtCore import Qt, QVariant, QDate
 from qgis.PyQt.QtGui import QFont, QColor, QMovie
 from qgis.PyQt.QtWidgets import (
     QDialog, QTabWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox,
@@ -34,6 +34,7 @@ from qgis.PyQt.QtWidgets import (
     QTableWidget, QTableWidgetItem, QFileDialog, QMessageBox, QRadioButton,
     QButtonGroup, QCheckBox, QWidget, QHeaderView, QPlainTextEdit, QTextBrowser,
     QApplication, QScrollArea, QStackedWidget, QFrame, QGridLayout, QProgressBar,
+    QDateEdit,
 )
 
 from .core import (delineation, morphometry, curve_number, tc_methods, dem_download,
@@ -49,7 +50,7 @@ from .core import (delineation, morphometry, curve_number, tc_methods, dem_downl
                     runoff_coefficient, roughness_methods, roughness_materials,
                     iila_senamhi_zones, bim_metrados, bim_ifc, bim_refuerzo, bim_geometry,
                     lateral_pressures, reinforced_concrete_e060, presupuesto, formula_polinomica,
-                    apu_referencia)
+                    apu_referencia, cronograma)
 from .core.qgis_layer_utils import obtener_capa
 from .ui.hypsometric_canvas import HypsometricCanvas
 from .ui.hydrograph_canvas import HydrographCanvas
@@ -79,6 +80,7 @@ from .ui.swe2d_runner import SimulacionSwe2DWorker, estimar_coste
 from .ui import swe2d_animation
 from .ui.bim_canvas import Estructura3DCanvas, GeometriaNoDisponibleError, LONGITUD_POR_DEFECTO_M
 from .ui.presupuesto_canvas import PresupuestoCanvas
+from .ui.cronograma_canvas import CronogramaCanvas
 from .ui.table_utils import (ajustar_alto_tabla, aplicar_columna_elastica, limitar_ancho_tabla,
                               limitar_ancho_boton, crear_tabla_parametros, poblar_tabla_parametros)
 from .ui import export_overlay
@@ -435,6 +437,7 @@ class HydroAndinaProDialog(QDialog):
         self._build_tab_simulacion_2d()
         self._build_tab_bim()
         self._build_tab_presupuesto()
+        self._build_tab_cronograma()
         self._build_tab_modulos_avanzados()
         self._build_tab_socavacion()
         self._build_tab_perdida_suelos()
@@ -11451,6 +11454,195 @@ class HydroAndinaProDialog(QDialog):
         poblar_tabla_parametros(self.tabla_inversion_publica, filas)
         self.lbl_estado_inversion_publica.setText(
             f"Estado: Presupuesto Total (inversión pública) = S/.{r['presupuesto_total']:,.2f}.")
+
+    # ==================================================================
+    # Módulo "Programación y Cronogramas" -- fase 2 (interfaz). Ver
+    # core/cronograma.py para el motor CPM/PERT.
+    # ==================================================================
+    _COLS_ACTIVIDADES_CRON = ("Código", "Nombre", "Duración (días)", "Predecesoras (cód;cód)",
+                               "Lag por predecesora (días; mismo orden, opcional)")
+
+    def _build_tab_cronograma(self):
+        tab = QWidget()
+        v = QVBoxLayout(tab)
+        _lbl_intro_cron = QLabel(
+            "<b>Programación y Cronogramas</b> — diagrama de Gantt y Método de la Ruta Crítica "
+            "(CPM), con estimación PERT de 3 puntos opcional. Puede PEGAR datos copiados desde "
+            "Excel directamente en la tabla (Ctrl+V). Relaciones Fin-a-Inicio (FS) con "
+            "adelanto/atraso (lag) opcional -- días CORRIDOS, sin calendario laboral. No reemplaza "
+            "el criterio de un ingeniero de planificación de obra ni sustituye Microsoft Project/"
+            "Primavera para un cronograma contractual definitivo."
+        )
+        _lbl_intro_cron.setWordWrap(True)
+        v.addWidget(_lbl_intro_cron)
+
+        # ------------------------------------------------------------
+        # 1) Actividades
+        # ------------------------------------------------------------
+        v.addWidget(QLabel(
+            "<hr><b>1. Actividades</b> — código, nombre, duración en días, y sus predecesoras "
+            "(códigos separados por «;»). El lag es opcional -- días de espera tras terminar cada "
+            "predecesora (mismo orden, «;» separado; negativo = adelanto). Deje ambas columnas "
+            "vacías si la actividad no tiene predecesoras."))
+        self.tabla_actividades_cron = TablaPegable(8, len(self._COLS_ACTIVIDADES_CRON))
+        self.tabla_actividades_cron.setHorizontalHeaderLabels(list(self._COLS_ACTIVIDADES_CRON))
+        aplicar_columna_elastica(self.tabla_actividades_cron, 1)
+        v.addWidget(self.tabla_actividades_cron)
+        h_act = QHBoxLayout()
+        btn_fila_act = QPushButton("➕ Agregar fila")
+        btn_fila_act.clicked.connect(
+            lambda: self.tabla_actividades_cron.setRowCount(self.tabla_actividades_cron.rowCount() + 1))
+        h_act.addWidget(btn_fila_act)
+        btn_actualizar_act = QPushButton("🔄 Actualizar actividades desde la tabla")
+        btn_actualizar_act.clicked.connect(self._on_actualizar_actividades_cron)
+        h_act.addWidget(btn_actualizar_act)
+        v.addLayout(h_act)
+        self.lbl_estado_actividades_cron = QLabel("Estado: sin actividades.")
+        self.lbl_estado_actividades_cron.setWordWrap(True)
+        v.addWidget(self.lbl_estado_actividades_cron)
+
+        # ------------------------------------------------------------
+        # 2) Calcular CPM
+        # ------------------------------------------------------------
+        f_cron = QFormLayout()
+        f_cron.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.fecha_inicio_cron = QDateEdit()
+        self.fecha_inicio_cron.setCalendarPopup(True)
+        self.fecha_inicio_cron.setDisplayFormat("dd-MM-yyyy")
+        self.fecha_inicio_cron.setDate(QDate.currentDate())
+        f_cron.addRow("Fecha de inicio del proyecto:", self.fecha_inicio_cron)
+        v.addLayout(f_cron)
+        btn_calcular_cron = QPushButton("🧮 Calcular CPM (ruta crítica)")
+        btn_calcular_cron.clicked.connect(self._on_calcular_cronograma)
+        v.addWidget(btn_calcular_cron)
+        self.lbl_estado_cronograma = QLabel("Estado: sin calcular.")
+        self.lbl_estado_cronograma.setWordWrap(True)
+        v.addWidget(self.lbl_estado_cronograma)
+
+        # ------------------------------------------------------------
+        # 3) Resultados -- resumen + Gantt + tabla detallada
+        # ------------------------------------------------------------
+        self.tabla_resumen_cronograma = crear_tabla_parametros(con_comentario=False)
+        v.addWidget(self.tabla_resumen_cronograma)
+        self.canvas_cronograma = CronogramaCanvas(width=7.6, height=6.0)
+        v.addWidget(self.canvas_cronograma)
+
+        v.addWidget(QLabel("<hr><b>Detalle por actividad</b> (ES/EF/LS/LF = Inicio/Fin Temprano/"
+                            "Tardío, holgura = margen sin afectar la fecha final):"))
+        self.tabla_detalle_cronograma = QTableWidget(0, 8, objectName="tabla_detalle_cronograma")
+        self.tabla_detalle_cronograma.setHorizontalHeaderLabels(
+            ["Código", "Nombre", "Duración (d)", "Inicio (ES)", "Fin (EF)", "Fin tardío (LF)",
+             "Holgura (d)", "¿Crítica?"])
+        aplicar_columna_elastica(self.tabla_detalle_cronograma, 1)
+        v.addWidget(self.tabla_detalle_cronograma)
+
+        self._actividades_meta_cron = {}
+        self._orden_actividades_cron = []
+        self._ultimo_cronograma = None
+        v.addStretch()
+        self._agregar_pestaña_con_scroll(tab, "10. Programación y Cronogramas")
+
+    def _on_actualizar_actividades_cron(self):
+        nuevas = {}
+        orden = []
+        try:
+            for fila in range(self.tabla_actividades_cron.rowCount()):
+                valores = [self.tabla_actividades_cron.item(fila, c).text().strip()
+                           if self.tabla_actividades_cron.item(fila, c) else "" for c in range(5)]
+                codigo, nombre, duracion_txt, pred_txt, lag_txt = valores
+                if not codigo and not nombre:
+                    continue
+                if not codigo:
+                    raise cronograma.CronogramaError(f"falta el código en la fila {fila + 1}.")
+                try:
+                    duracion = float(duracion_txt.replace(",", "."))
+                except ValueError:
+                    raise cronograma.CronogramaError(
+                        f"duración no numérica en la fila {fila + 1} («{duracion_txt}»).")
+                predecesoras = [p.strip() for p in pred_txt.split(";") if p.strip()]
+                lag_valores = [x.strip() for x in lag_txt.split(";") if x.strip()]
+                if lag_valores and len(lag_valores) != len(predecesoras):
+                    raise cronograma.CronogramaError(
+                        f"la fila {fila + 1} tiene {len(predecesoras)} predecesora(s) pero "
+                        f"{len(lag_valores)} valor(es) de lag -- deben coincidir en cantidad y orden.")
+                try:
+                    lag_dias = {pred: float(lag_valores[i].replace(",", "."))
+                                for i, pred in enumerate(predecesoras)} if lag_valores else {}
+                except ValueError:
+                    raise cronograma.CronogramaError(f"lag no numérico en la fila {fila + 1}.")
+                nuevas[codigo] = {"nombre": nombre or codigo, "duracion": duracion,
+                                   "predecesoras": predecesoras, "lag_dias": lag_dias}
+                orden.append(codigo)
+        except cronograma.CronogramaError as e:
+            self.lbl_estado_actividades_cron.setText(f"Estado: ERROR -- {e}")
+            return
+        except Exception as e:
+            self.lbl_estado_actividades_cron.setText(f"Estado: ERROR inesperado -- {e}")
+            return
+        self._actividades_meta_cron = nuevas
+        self._orden_actividades_cron = orden
+        self.lbl_estado_actividades_cron.setText(f"Estado: {len(nuevas)} actividad(es) cargada(s).")
+
+    def _construir_cronograma(self):
+        if not self._orden_actividades_cron:
+            raise cronograma.CronogramaError(
+                "no hay actividades -- actualícelas en la sección 1 primero.")
+        actividades = [
+            cronograma.Actividad(codigo, meta["nombre"], meta["duracion"],
+                                  predecesoras=meta["predecesoras"], lag_dias=meta["lag_dias"])
+            for codigo, meta in self._actividades_meta_cron.items()
+        ]
+        fecha_inicio = self.fecha_inicio_cron.date().toPyDate()
+        return cronograma.Cronograma("Cronograma", actividades, fecha_inicio=fecha_inicio)
+
+    def _on_calcular_cronograma(self):
+        try:
+            cron = self._construir_cronograma()
+            resumen = cron.calcular()
+        except cronograma.CronogramaError as e:
+            self.tabla_resumen_cronograma.setRowCount(0)
+            self.tabla_detalle_cronograma.setRowCount(0)
+            self.lbl_estado_cronograma.setText(f"Estado: ERROR -- {e}")
+            return
+        except Exception as e:
+            self.tabla_resumen_cronograma.setRowCount(0)
+            self.tabla_detalle_cronograma.setRowCount(0)
+            self.lbl_estado_cronograma.setText(f"Estado: ERROR inesperado -- {e}")
+            return
+
+        filas = [
+            ("Duración total", resumen["duracion_total_dias"], "días"),
+            ("Fecha de inicio", resumen["fecha_inicio"].strftime("%d-%m-%Y"), ""),
+            ("Fecha de fin", resumen["fecha_fin"].strftime("%d-%m-%Y"), ""),
+            ("N° de actividades", resumen["n_actividades"], "und"),
+            ("N° de actividades en la ruta crítica", resumen["n_actividades_criticas"], "und"),
+            ("Ruta crítica", " → ".join(resumen["ruta_critica"]), ""),
+        ]
+        poblar_tabla_parametros(self.tabla_resumen_cronograma, filas)
+
+        detalle = cron.resumen_actividades()
+        self.tabla_detalle_cronograma.setRowCount(len(detalle))
+        for fila, f in enumerate(detalle):
+            self.tabla_detalle_cronograma.setItem(fila, 0, QTableWidgetItem(f["codigo"]))
+            self.tabla_detalle_cronograma.setItem(fila, 1, QTableWidgetItem(f["nombre"]))
+            self.tabla_detalle_cronograma.setItem(fila, 2, QTableWidgetItem(f"{f['duracion_dias']:g}"))
+            self.tabla_detalle_cronograma.setItem(fila, 3, QTableWidgetItem(f["es_fecha"].strftime("%d-%m-%Y")))
+            self.tabla_detalle_cronograma.setItem(fila, 4, QTableWidgetItem(f["ef_fecha"].strftime("%d-%m-%Y")))
+            self.tabla_detalle_cronograma.setItem(fila, 5, QTableWidgetItem(f["lf_fecha"].strftime("%d-%m-%Y")))
+            self.tabla_detalle_cronograma.setItem(fila, 6, QTableWidgetItem(f"{f['holgura_dias']:g}"))
+            self.tabla_detalle_cronograma.setItem(fila, 7, QTableWidgetItem("Sí" if f["critica"] else "No"))
+        ajustar_alto_tabla(self.tabla_detalle_cronograma, filas_visibles_max=20)
+
+        try:
+            self.canvas_cronograma.graficar_gantt(cron, resumen)
+        except Exception:
+            pass  # el gráfico es un plus visual -- nunca debe romper el cálculo ya hecho
+
+        self._ultimo_cronograma = cron
+        self.lbl_estado_cronograma.setText(
+            f"Estado: CPM calculado -- duración total {resumen['duracion_total_dias']:.0f} días "
+            f"({resumen['fecha_inicio']:%d-%m-%Y} a {resumen['fecha_fin']:%d-%m-%Y}), "
+            f"{resumen['n_actividades_criticas']} actividad(es) en la ruta crítica.")
 
     def _build_tab_modulos_avanzados(self):
         tab = QWidget()

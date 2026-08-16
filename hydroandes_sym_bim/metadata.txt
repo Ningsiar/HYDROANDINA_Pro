@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.3.29
+version=0.3.30
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,44 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.3.30: Módulo "Programación y Cronogramas" -- NUEVO (fases 1 y
+      2 de N), a pedido del usuario ("Gantt y PERT/CPM como Microsoft
+      Project en versión de alto impacto y mejorado, con cronograma de
+      adquisición de materiales"). Después de la Pestaña 9 (Presupuesto).
+      Nuevo core/cronograma.py: motor CPM (Método de la Ruta Crítica)
+      puro Python -- Actividad (código, nombre, duración, predecesoras
+      con relación Fin-a-Inicio + lag/lead opcional) y Cronograma
+      (orden topológico con detección de ciclos, pase hacia adelante
+      ES/EF, pase hacia atrás LS/LF, holgura, ruta crítica). PERT de 3
+      puntos opcional (duracion_pert(): te=(to+4·tm+tp)/6, varianza).
+      Días corridos, sin calendario laboral -- ver alcance exacto en
+      el propio módulo.
+      Nueva Pestaña "10. Programación y Cronogramas": tabla de
+      actividades editable (pegado estilo Excel), botón para calcular
+      el CPM, resumen (duración total, fechas, ruta crítica) y
+      NUEVO ui/cronograma_canvas.py -- diagrama de Gantt de alto
+      impacto: la ruta crítica en rojo, actividades normales en azul
+      con su holgura dibujada como franja punteada (cuánto pueden
+      atrasarse sin afectar la fecha final), fechas reales en el eje
+      X -- más una tabla detallada por actividad (ES/EF/LF/holgura).
+      Verificado con QGIS 3.40.1 real en modo headless (56
+      comprobaciones): el CPM reproduce EXACTO una red de libro de
+      texto calculada a mano (6 actividades, ruta crítica A-D-F,
+      duración total 12 días, ES/EF/LS/LF y holgura de cada actividad
+      verificados uno por uno), lag/lead, PERT de 3 puntos (simétrico
+      y asimétrico), los casos de error normativos (ciclo de
+      dependencias, predecesora inexistente, código duplicado,
+      cronograma vacío, duración negativa, estimación PERT fuera de
+      orden), y el flujo completo a través de los controles reales de
+      la interfaz -- incluida la reproducción exacta de la misma red
+      de prueba.
+      PENDIENTE (fases siguientes, ya acordadas con el usuario):
+      generar el cronograma directamente desde las partidas ya
+      cargadas en la Pestaña 9 (con precedencias editables) y el
+      cronograma de adquisición de materiales derivado de la Relación
+      de Insumos + las fechas de las actividades; e importar un
+      cronograma real de Microsoft Project (XML MSPDI, ya validado
+      contra un archivo real del usuario en esta misma sesión).
     - v0.3.29: Módulo "Presupuesto, APU e Insumos" -- fase 4, la ÚLTIMA
       pendiente: rendimientos y precios REALES, a partir del Análisis
       de Precios Unitarios (APU, 260 páginas) que el usuario aportó de
