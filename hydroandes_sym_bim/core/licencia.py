@@ -47,9 +47,9 @@ from typing import Optional
 
 LIMITE_USOS_GRATIS = 10
 
-# Pegar aquí la URL de la implementación del Apps Script (termina en
-# /exec) una vez desplegada -- ver scripts/licencia_backend_apps_script.gs.
-URL_BACKEND_LICENCIA = ""
+# URL de la implementación del Apps Script desplegada por el usuario
+# (hoja "HydroAndina Pro - Licencias" -- ver scripts/licencia_backend_apps_script.gs).
+URL_BACKEND_LICENCIA = "https://script.google.com/macros/s/AKfycbylO_MyhUCS784eejSKjcY-KcsFCc93nswt7Dpzlsq4HF7S6YF7771vryEzv5k4JmBN/exec"
 
 _TIMEOUT_RED_S = 6.0
 

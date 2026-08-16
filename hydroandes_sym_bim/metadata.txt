@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.3.14
+version=0.3.15
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,25 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.3.15: backend de licencia DESPLEGADO y probado en producción real
+      (ya no es una promesa futura). Se configuró
+      hydroandes_sym_bim/core/licencia.py::URL_BACKEND_LICENCIA con la
+      URL /exec del Apps Script que el usuario desplegó sobre la hoja
+      "HydroAndina Pro - Licencias". Verificado extremo a extremo contra
+      el backend real (no simulado, no forzado a inalcanzable): conteo
+      remoto de usos escribiendo en la hoja de cálculo real, bloqueo
+      exacto al superar el uso 10, activación de licencia con una clave
+      HMAC calculada localmente y verificada por el propio Apps Script
+      (el plugin nunca conoce el secreto), instalación ya licenciada que
+      deja de sumar usos y no vuelve a bloquear, y rechazo correcto de
+      una clave inválida. Nota de depuración para quien reutilice este
+      backend: si tras editar CLAVE_SECRETA en el editor de Apps Script
+      la activación sigue fallando, la implementación web probablemente
+      quedó fija en una versión anterior del código -- hay que volver a
+      publicar (Implementar > Administrar implementaciones > editar >
+      Nueva versión > Implementar) para que la URL /exec ya desplegada
+      sirva el código actual; no hace falta cambiar la URL en el plugin.
+      Sin cambios de cálculo ni de interfaz.
     - v0.3.14: renombrado del plugin -- "HydroAndes Pro" pasa a llamarse
       "HydroAndes SYM BIM" (nombre visible en el buscador de plugins de
       QGIS, título de la ventana, menú, splash, créditos, reportes
@@ -77,10 +96,7 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
       inutilizable), y un vector de prueba HMAC para verificar de forma
       independiente que el generador de claves y el Apps Script (una vez
       desplegado) calculan la misma clave para el mismo id.
-      PENDIENTE DE USTED (no es código, es configuración de su cuenta):
-      desplegar scripts/licencia_backend_apps_script.gs como aplicación
-      web de Google y pegar la URL resultante en
-      hydroandes_sym_bim/core/licencia.py::URL_BACKEND_LICENCIA.
+      (El backend se desplegó y configuró en v0.3.15 -- ver esa entrada.)
     - v0.3.12: item 5 -- la ÚLTIMA fase pendiente de las 9 del pedido
       original (Pestaña 5, autocompletar el método IDF IILA-SENAMHI-UNI
       por ubicación). Con esto quedan completas las 9 fases.
