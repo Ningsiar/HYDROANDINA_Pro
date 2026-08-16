@@ -175,3 +175,49 @@ def longitud_perimetro(xs, zs, cerrado: bool) -> float:
         j = (i + 1) % n
         total += math.hypot(xs[j] - xs[i], zs[j] - zs[i])
     return total
+
+
+# ======================================================================
+# Perfil SÓLIDO (material real, no el vacío) -- usado por la
+# exportación IFC (fase 3). Envuelve el contorno "cascara" con un
+# espesor constante para obtener el contorno de concreto real, en vez
+# de exportar el vacío mojado como si fuera el material.
+# ======================================================================
+def desplazar_contorno_normal(xs, zs, distancia):
+    """Desplaza cada vértice del contorno una distancia `distancia`
+    hacia AFUERA (perpendicular local a cada segmento) -- misma lógica
+    que ui/cross_section_canvas.py::_offset_perpendicular. Válido para
+    cualquier perfil de este módulo porque todos se recorren en el
+    mismo sentido (de la esquina superior izquierda, bajando por el
+    fondo, hasta la esquina superior derecha; o una vuelta completa en
+    sentido antihorario para las secciones cerradas) -- en ambos casos,
+    rotar el vector tangente 90° en sentido HORARIO da el normal que
+    apunta hacia afuera del área mojada."""
+    n = len(xs)
+    xs_ext, zs_ext = [], []
+    for i in range(n):
+        i0, i1 = max(i - 1, 0), min(i + 1, n - 1)
+        dx, dz = xs[i1] - xs[i0], zs[i1] - zs[i0]
+        norma = math.hypot(dx, dz) or 1.0
+        nx, nz = dz / norma, -dx / norma
+        xs_ext.append(xs[i] + nx * distancia)
+        zs_ext.append(zs[i] + nz * distancia)
+    return xs_ext, zs_ext
+
+
+def perfil_solido_cascara(xs, zs, cerrado: bool, espesor: float):
+    """Contorno 2D del material SÓLIDO (concreto) de una estructura tipo
+    "cascara" -- envuelve el contorno mojado (xs, zs) con `espesor`
+    constante. Devuelve (xs_poligono, zs_poligono, xs_hueco, zs_hueco):
+
+      - Perfil ABIERTO (canal): un único polígono simple que recorre el
+        borde mojado y regresa por el borde exterior -- mismo patrón
+        que el relleno 2D de _dibujar_muro() en cross_section_canvas.py.
+        xs_hueco/zs_hueco quedan en None (no hay hueco que declarar).
+      - Perfil CERRADO (alcantarilla/sumidero): xs_poligono/zs_poligono
+        es el anillo EXTERIOR y xs_hueco/zs_hueco es el anillo interior
+        (el vacío mojado) -- listo para un IfcArbitraryProfileDefWithVoids."""
+    xs_ext, zs_ext = desplazar_contorno_normal(xs, zs, espesor)
+    if not cerrado:
+        return list(xs) + list(reversed(xs_ext)), list(zs) + list(reversed(zs_ext)), None, None
+    return xs_ext, zs_ext, list(xs), list(zs)

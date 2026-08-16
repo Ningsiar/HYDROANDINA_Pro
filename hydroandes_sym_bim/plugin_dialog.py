@@ -47,7 +47,7 @@ from .core import (delineation, morphometry, curve_number, tc_methods, dem_downl
                     low_flows, phabsim, groundwater_flow, well_hydraulics, idf_curves,
                     regionalization, gridded_validation, swe2d, mesh_export,
                     runoff_coefficient, roughness_methods, roughness_materials,
-                    iila_senamhi_zones, bim_metrados)
+                    iila_senamhi_zones, bim_metrados, bim_ifc)
 from .core.qgis_layer_utils import obtener_capa
 from .ui.hypsometric_canvas import HypsometricCanvas
 from .ui.hydrograph_canvas import HydrographCanvas
@@ -10286,6 +10286,24 @@ class HydroAndinaProDialog(QDialog):
         self.tabla_metrados_bim = crear_tabla_parametros()
         v.addWidget(self.tabla_metrados_bim)
 
+        # ------------------------------------------------------------
+        # Exportación IFC (fase 3 del módulo BIM) -- modelo federado
+        # real para Revit/Navisworks/ArchiCAD/Tekla. Ver
+        # core/bim_ifc.py para el alcance exacto.
+        # ------------------------------------------------------------
+        v.addWidget(QLabel(
+            "<hr><b>Exportar a IFC</b> — genera un archivo .ifc (Industry Foundation Classes) con "
+            "la geometría 3D real de arriba MÁS los metrados como propiedades del elemento "
+            "(Pset_HydroAndesMetrados). Ábralo directamente en Revit (Insertar → Vincular IFC), "
+            "Navisworks, ArchiCAD, Tekla o BIM Vision. No existe forma de generar un .rvt nativo "
+            "de Revit fuera del propio Revit -- IFC es el estándar abierto para esto."))
+        btn_ifc = QPushButton("📦 Exportar a IFC...")
+        btn_ifc.clicked.connect(self._on_exportar_ifc_bim)
+        v.addWidget(btn_ifc)
+        self.lbl_estado_ifc_bim = QLabel("Estado: sin exportar.")
+        self.lbl_estado_ifc_bim.setWordWrap(True)
+        v.addWidget(self.lbl_estado_ifc_bim)
+
         self._estructuras_bim_p8 = []
         v.addStretch()
         self._agregar_pestaña_con_scroll(tab, "8b. Módulo BIM (3D)")
@@ -10413,6 +10431,57 @@ class HydroAndinaProDialog(QDialog):
 
         poblar_tabla_parametros(self.tabla_metrados_bim, filas)
         self.lbl_estado_metrados_bim.setText(f"Estado: metrados generados para «{nombre}».")
+
+    def _on_exportar_ifc_bim(self):
+        if self.combo_bim_estructura.count() == 0:
+            self.lbl_estado_ifc_bim.setText(
+                "Estado: no hay ninguna estructura para exportar -- actualice la lista primero.")
+            return
+        nombre = self.combo_bim_estructura.currentText()
+        ruta, _ = QFileDialog.getSaveFileName(
+            self, "Exportar a IFC", f"{nombre}.ifc", "Modelo IFC (*.ifc)")
+        if not ruta:
+            return
+        espesor = self.spin_bim_espesor_muro.value()
+        margen = self.spin_bim_margen_excavacion.value()
+        cuantia = self.spin_bim_cuantia_acero.value() or None
+        try:
+            if self.combo_bim_fuente.currentIndex() == 0:
+                datos = self.resultados_hidraulica_drenaje.get(nombre)
+                if datos is None:
+                    raise GeometriaNoDisponibleError(
+                        f"no se encontró «{nombre}» en los resultados de la Pestaña 7 -- "
+                        f"actualice la lista de nuevo.")
+                bim_ifc.exportar_ifc_pestana7(
+                    ruta, nombre, datos, self.spin_bim_longitud.value(), espesor, margen, cuantia,
+                    organizacion="CORPORATIVO CONSTRUCTIVO LIMA BERLIN SRL")
+            else:
+                indice = self.combo_bim_estructura.currentIndex()
+                if indice < 0 or indice >= len(self._estructuras_bim_p8):
+                    raise GeometriaNoDisponibleError(
+                        "la tabla de la Pestaña 8 cambió -- actualice la lista de nuevo.")
+                bim_ifc.exportar_ifc_pestana8(
+                    ruta, self._estructuras_bim_p8[indice], espesor, margen, cuantia,
+                    organizacion="CORPORATIVO CONSTRUCTIVO LIMA BERLIN SRL")
+        except ImportError as e:
+            self.lbl_estado_ifc_bim.setText(f"Estado: falta una librería -- {e}")
+            QMessageBox.warning(self, "ifcopenshell no disponible", str(e))
+            return
+        except bim_metrados.MetradoNoAplicaError as e:
+            self.lbl_estado_ifc_bim.setText(f"Estado: no se pudo exportar -- {e}")
+            return
+        except GeometriaNoDisponibleError as e:
+            self.lbl_estado_ifc_bim.setText(f"Estado: no se pudo exportar -- {e}")
+            return
+        except Exception as e:
+            self.lbl_estado_ifc_bim.setText(f"Estado: ERROR inesperado -- {e}")
+            QMessageBox.critical(self, "Error exportando a IFC", str(e))
+            return
+        self.lbl_estado_ifc_bim.setText(f"Estado: IFC exportado en {ruta}")
+        QMessageBox.information(self, "IFC exportado",
+                                 f"Modelo IFC guardado en:\n{ruta}\n\n"
+                                 "Ábralo en Revit (Insertar → Vincular IFC), Navisworks, ArchiCAD, "
+                                 "Tekla o BIM Vision.")
 
     def _build_tab_modulos_avanzados(self):
         tab = QWidget()
