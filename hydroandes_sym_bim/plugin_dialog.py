@@ -10238,7 +10238,7 @@ class HydroAndinaProDialog(QDialog):
         self.lbl_estado_bim.setWordWrap(True)
         v.addWidget(self.lbl_estado_bim)
 
-        self.canvas_bim_3d = Estructura3DCanvas(width=8.0, height=6.0)
+        self.canvas_bim_3d = Estructura3DCanvas(width=7.6, height=6.0)
         v.addWidget(self.canvas_bim_3d)
 
         # ------------------------------------------------------------

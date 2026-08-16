@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.3.21
+version=0.3.22
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,14 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.3.22: corrige el ancho del render 3D del Módulo BIM (Pestaña
+      8b) -- quedó a 8.0 (800 px), más ancho que el resto de gráficos
+      del plugin (convención establecida: 7.2-7.6, la mayoría en 7.4) y
+      más ancho que otras pestañas, notado por el usuario tras probar
+      la Fase 1. Ajustado a 7.6 (760 px), el mismo ancho que usa
+      TerrenoCalado3DCanvas (el otro gráfico 3D del plugin, item 8 fase
+      4a) -- ya cabe dentro de la ventana principal (980 px). Verificado
+      con QGIS 3.40.1 real en modo headless.
     - v0.3.21: Módulo BIM -- fase 3 de 3, COMPLETA (exportación IFC).
       Nuevo botón "📦 Exportar a IFC..." en la Pestaña 8b: genera un
       archivo .ifc (IFC4, Industry Foundation Classes) con la geometría
