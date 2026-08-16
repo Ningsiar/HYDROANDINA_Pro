@@ -21,11 +21,11 @@ texto plano.
 """
 import os
 
-from qgis.PyQt.QtCore import Qt
+from qgis.PyQt.QtCore import Qt, QTimer
 from qgis.PyQt.QtGui import QFont, QPixmap
 from qgis.PyQt.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QMessageBox, QFrame,
+    QMessageBox, QFrame, QApplication,
 )
 
 from ..core import licencia
@@ -203,6 +203,31 @@ class DialogoLicenciaAgotada(QDialog):
         linea.setStyleSheet("color: #d5d5d5;")
         vc.addWidget(linea)
 
+        # ------------------------------------------------------------
+        # ID de instalación -- para que el cliente pueda copiarlo y
+        # enviarlo por WhatsApp/correo al solicitar su licencia. Antes
+        # este dato no aparecía en ningún lado de la interfaz (solo en
+        # un archivo técnico en su equipo), lo que hacía imposible
+        # pedírselo de forma práctica.
+        # ------------------------------------------------------------
+        self._id_instalacion = licencia.obtener_id_instalacion()
+        lbl_id_titulo = QLabel(
+            "Para solicitar su licencia, envíe este código de instalación:")
+        lbl_id_titulo.setWordWrap(True)
+        vc.addWidget(lbl_id_titulo)
+
+        h_id = QHBoxLayout()
+        self.edit_id_instalacion = QLineEdit(self._id_instalacion)
+        self.edit_id_instalacion.setReadOnly(True)
+        f_mono = QFont("Consolas")
+        f_mono.setStyleHint(QFont.Monospace)
+        self.edit_id_instalacion.setFont(f_mono)
+        h_id.addWidget(self.edit_id_instalacion)
+        self.btn_copiar_id = QPushButton("Copiar")
+        self.btn_copiar_id.clicked.connect(self._on_copiar_id)
+        h_id.addWidget(self.btn_copiar_id)
+        vc.addLayout(h_id)
+
         lbl_clave_titulo = QLabel("¿Ya cuenta con una clave de licencia?")
         f_clave_titulo = QFont()
         f_clave_titulo.setBold(True)
@@ -235,6 +260,18 @@ class DialogoLicenciaAgotada(QDialog):
 
     def licencia_quedo_activada(self) -> bool:
         return self._licencia_activada
+
+    def _on_copiar_id(self):
+        QApplication.clipboard().setText(self._id_instalacion)
+        texto_original = self.btn_copiar_id.text()
+        self.btn_copiar_id.setText("¡Copiado!")
+        self.btn_copiar_id.setEnabled(False)
+
+        def _restaurar():
+            self.btn_copiar_id.setText(texto_original)
+            self.btn_copiar_id.setEnabled(True)
+
+        QTimer.singleShot(1500, _restaurar)
 
     def _on_activar(self):
         clave = self.edit_clave.text().strip()
