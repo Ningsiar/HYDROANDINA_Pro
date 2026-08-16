@@ -47,7 +47,8 @@ from .core import (delineation, morphometry, curve_number, tc_methods, dem_downl
                     low_flows, phabsim, groundwater_flow, well_hydraulics, idf_curves,
                     regionalization, gridded_validation, swe2d, mesh_export,
                     runoff_coefficient, roughness_methods, roughness_materials,
-                    iila_senamhi_zones, bim_metrados, bim_ifc)
+                    iila_senamhi_zones, bim_metrados, bim_ifc, bim_refuerzo,
+                    lateral_pressures, reinforced_concrete_e060)
 from .core.qgis_layer_utils import obtener_capa
 from .ui.hypsometric_canvas import HypsometricCanvas
 from .ui.hydrograph_canvas import HydrographCanvas
@@ -10214,6 +10215,7 @@ class HydroAndinaProDialog(QDialog):
         f.addRow("Fuente de datos:", self.combo_bim_fuente)
 
         self.combo_bim_estructura = QComboBox()
+        self.combo_bim_estructura.currentIndexChanged.connect(self._on_cambiar_estructura_bim)
         f.addRow("Estructura:", self.combo_bim_estructura)
 
         self.spin_bim_longitud = QDoubleSpinBox()
@@ -10283,6 +10285,108 @@ class HydroAndinaProDialog(QDialog):
         self.lbl_estado_metrados_bim.setWordWrap(True)
         v.addWidget(self.lbl_estado_metrados_bim)
 
+        # ------------------------------------------------------------
+        # Diseño de refuerzo estructural NTP E.060 / E.030 (fase 4 del
+        # módulo BIM) -- ver core/bim_refuerzo.py, core/lateral_pressures.py
+        # y core/reinforced_concrete_e060.py para el alcance EXACTO y
+        # las limitaciones de este cálculo.
+        # ------------------------------------------------------------
+        v.addWidget(QLabel(
+            "<hr><b>Diseño de refuerzo estructural (NTP E.060 / E.030)</b> — diseño simplificado "
+            "por flexión del muro/losa bajo empuje de agua y, si tiene relleno posterior, empuje "
+            "de tierra (con incremento sísmico Mononobe-Okabe opcional). Es un cálculo "
+            "PRELIMINAR de apoyo -- NO reemplaza la revisión de un ingeniero estructural/"
+            "geotécnico colegiado ni cubre cimentación, juntas o un análisis sísmico dinámico "
+            "completo. El acero mostrado aquí ya reemplaza a la cuantía estimada de la sección "
+            "de metrados de arriba una vez calculado."))
+
+        f_refuerzo = QFormLayout()
+        f_refuerzo.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+
+        self.spin_bim_altura_muro = QDoubleSpinBox()
+        self.spin_bim_altura_muro.setRange(0.1, 50.0)
+        self.spin_bim_altura_muro.setDecimals(2)
+        self.spin_bim_altura_muro.setValue(1.0)
+        self.spin_bim_altura_muro.setSuffix(" m")
+        f_refuerzo.addRow("Altura del muro/losa (autocompletada, ajustable):", self.spin_bim_altura_muro)
+
+        self.spin_bim_fc = QDoubleSpinBox()
+        self.spin_bim_fc.setRange(140.0, 700.0)
+        self.spin_bim_fc.setDecimals(0)
+        self.spin_bim_fc.setValue(210.0)
+        self.spin_bim_fc.setSuffix(" kg/cm²")
+        f_refuerzo.addRow("f'c del concreto:", self.spin_bim_fc)
+
+        self.spin_bim_fy = QDoubleSpinBox()
+        self.spin_bim_fy.setRange(2800.0, 6000.0)
+        self.spin_bim_fy.setDecimals(0)
+        self.spin_bim_fy.setValue(4200.0)
+        self.spin_bim_fy.setSuffix(" kg/cm²")
+        f_refuerzo.addRow("fy del acero:", self.spin_bim_fy)
+
+        self.spin_bim_recubrimiento = QDoubleSpinBox()
+        self.spin_bim_recubrimiento.setRange(2.0, 10.0)
+        self.spin_bim_recubrimiento.setDecimals(1)
+        self.spin_bim_recubrimiento.setValue(4.0)
+        self.spin_bim_recubrimiento.setSuffix(" cm")
+        f_refuerzo.addRow("Recubrimiento:", self.spin_bim_recubrimiento)
+
+        self.combo_bim_barra = QComboBox()
+        self.combo_bim_barra.addItems([n for n, _, _ in reinforced_concrete_e060.BARRAS_COMERCIALES])
+        self.combo_bim_barra.setCurrentText("1/2\"")
+        f_refuerzo.addRow("Barra de refuerzo:", self.combo_bim_barra)
+
+        self.check_bim_relleno = QCheckBox("Muro con relleno de tierra en la cara posterior")
+        self.check_bim_relleno.setChecked(True)
+        f_refuerzo.addRow("", self.check_bim_relleno)
+
+        self.spin_bim_gamma_suelo = QDoubleSpinBox()
+        self.spin_bim_gamma_suelo.setRange(12.0, 25.0)
+        self.spin_bim_gamma_suelo.setDecimals(1)
+        self.spin_bim_gamma_suelo.setValue(18.0)
+        self.spin_bim_gamma_suelo.setSuffix(" kN/m³")
+        f_refuerzo.addRow("Peso específico del suelo de relleno:", self.spin_bim_gamma_suelo)
+
+        self.spin_bim_phi_suelo = QDoubleSpinBox()
+        self.spin_bim_phi_suelo.setRange(15.0, 45.0)
+        self.spin_bim_phi_suelo.setDecimals(0)
+        self.spin_bim_phi_suelo.setValue(30.0)
+        self.spin_bim_phi_suelo.setSuffix(" °")
+        f_refuerzo.addRow("Ángulo de fricción del suelo (φ):", self.spin_bim_phi_suelo)
+
+        self.combo_bim_metodo_empuje = QComboBox()
+        self.combo_bim_metodo_empuje.addItems([
+            "Ko -- en reposo, Jaky (Recomendado para muros rígidos/enterrados)",
+            "Ka -- activo, Rankine (muro que puede deflectar)",
+        ])
+        f_refuerzo.addRow("Coeficiente de empuje de tierra:", self.combo_bim_metodo_empuje)
+
+        self.spin_bim_sobrecarga = QDoubleSpinBox()
+        self.spin_bim_sobrecarga.setRange(0.0, 50.0)
+        self.spin_bim_sobrecarga.setDecimals(1)
+        self.spin_bim_sobrecarga.setValue(0.0)
+        self.spin_bim_sobrecarga.setSuffix(" kN/m²")
+        self.spin_bim_sobrecarga.setSpecialValueText("(sin sobrecarga)")
+        f_refuerzo.addRow("Sobrecarga viva en superficie (opcional):", self.spin_bim_sobrecarga)
+
+        self.combo_bim_zona_sismica = QComboBox()
+        self.combo_bim_zona_sismica.addItems(
+            ["(sin incremento sísmico)"] + list(lateral_pressures.ZONAS_SISMICAS_E030.keys()))
+        f_refuerzo.addRow("Zona sísmica (E.030, para el empuje dinámico):", self.combo_bim_zona_sismica)
+
+        v.addLayout(f_refuerzo)
+
+        btn_refuerzo = QPushButton("🏗 Calcular refuerzo (E.060 / E.030)")
+        btn_refuerzo.clicked.connect(self._on_calcular_refuerzo_bim)
+        v.addWidget(btn_refuerzo)
+
+        self.lbl_estado_refuerzo_bim = QLabel("Estado: sin calcular.")
+        self.lbl_estado_refuerzo_bim.setWordWrap(True)
+        v.addWidget(self.lbl_estado_refuerzo_bim)
+
+        self.tabla_refuerzo_bim = crear_tabla_parametros()
+        v.addWidget(self.tabla_refuerzo_bim)
+
         self.tabla_metrados_bim = crear_tabla_parametros()
         v.addWidget(self.tabla_metrados_bim)
 
@@ -10305,6 +10409,7 @@ class HydroAndinaProDialog(QDialog):
         v.addWidget(self.lbl_estado_ifc_bim)
 
         self._estructuras_bim_p8 = []
+        self._ultimo_refuerzo_bim = None
         v.addStretch()
         self._agregar_pestaña_con_scroll(tab, "8b. Módulo BIM (3D)")
         self._on_actualizar_lista_bim()
@@ -10423,9 +10528,17 @@ class HydroAndinaProDialog(QDialog):
             ]
         if "cuantia_acero_kg_m3" in r:
             filas += [
-                ("Cuantía de acero (asunción)", r["cuantia_acero_kg_m3"], "kg/m³"),
-                ("Peso de acero estimado", r["peso_acero_estimado_kg"], "kg"),
+                ("Cuantía de acero (asunción rápida)", r["cuantia_acero_kg_m3"], "kg/m³"),
+                ("Peso de acero (estimado por cuantía)", r["peso_acero_estimado_kg"], "kg",
+                 "estimación rápida -- vea «Diseño de refuerzo» abajo para el cálculo real E.060/E.030"),
             ]
+        refuerzo_previo = getattr(self, "_ultimo_refuerzo_bim", None)
+        if refuerzo_previo and refuerzo_previo.get("nombre") == nombre:
+            rr = refuerzo_previo["resultado"]
+            filas.append((
+                "Peso de acero (diseño E.060/E.030)", rr["peso_acero_total_kg"], "kg",
+                f"reemplaza a la cuantía estimada -- caso gobernante: {rr['caso_gobernante']}, "
+                f"{rr['barra_sugerida']} @ {rr['espaciamiento_sugerido_cm']} cm"))
         if "nota" in r:
             filas.append(("Nota", r["nota"], ""))
 
@@ -10482,6 +10595,102 @@ class HydroAndinaProDialog(QDialog):
                                  f"Modelo IFC guardado en:\n{ruta}\n\n"
                                  "Ábralo en Revit (Insertar → Vincular IFC), Navisworks, ArchiCAD, "
                                  "Tekla o BIM Vision.")
+
+    def _on_cambiar_estructura_bim(self):
+        """Autocompleta la altura de muro/losa sugerida al cambiar de
+        estructura -- el usuario la puede ajustar libremente antes de
+        calcular el refuerzo."""
+        if not hasattr(self, "spin_bim_altura_muro") or self.combo_bim_estructura.count() == 0:
+            return
+        nombre = self.combo_bim_estructura.currentText()
+        try:
+            if self.combo_bim_fuente.currentIndex() == 0:
+                datos = self.resultados_hidraulica_drenaje.get(nombre)
+                altura = bim_refuerzo.altura_muro_por_defecto_pestana7(datos) if datos else None
+            else:
+                indice = self.combo_bim_estructura.currentIndex()
+                estructuras = getattr(self, "_estructuras_bim_p8", [])
+                altura = (bim_refuerzo.altura_muro_por_defecto_pestana8(estructuras[indice])
+                          if 0 <= indice < len(estructuras) else None)
+            if altura:
+                self.spin_bim_altura_muro.setValue(altura)
+        except Exception:
+            pass  # autocompletado best-effort -- nunca debe impedir seguir usando la pestaña
+
+    def _on_calcular_refuerzo_bim(self):
+        if self.combo_bim_estructura.count() == 0:
+            self.lbl_estado_refuerzo_bim.setText(
+                "Estado: no hay ninguna estructura para calcular -- actualice la lista primero.")
+            return
+        nombre = self.combo_bim_estructura.currentText()
+        zona = self.combo_bim_zona_sismica.currentText()
+        espesor = self.spin_bim_espesor_muro.value()
+        kwargs = dict(
+            longitud_m=self.spin_bim_longitud.value(),
+            altura_muro_m=self.spin_bim_altura_muro.value(),
+            fc_kg_cm2=self.spin_bim_fc.value(), fy_kg_cm2=self.spin_bim_fy.value(),
+            recubrimiento_cm=self.spin_bim_recubrimiento.value(),
+            con_relleno_posterior=self.check_bim_relleno.isChecked(),
+            gamma_suelo_kn_m3=self.spin_bim_gamma_suelo.value(),
+            phi_suelo_deg=self.spin_bim_phi_suelo.value(),
+            metodo_empuje="Ko" if self.combo_bim_metodo_empuje.currentIndex() == 0 else "Ka",
+            sobrecarga_kn_m2=self.spin_bim_sobrecarga.value(),
+            zona_sismica=None if zona.startswith("(sin") else zona,
+            diametro_barra=self.combo_bim_barra.currentText(),
+        )
+        try:
+            if self.combo_bim_fuente.currentIndex() == 0:
+                datos = self.resultados_hidraulica_drenaje.get(nombre)
+                if datos is None:
+                    raise GeometriaNoDisponibleError(
+                        f"no se encontró «{nombre}» en los resultados de la Pestaña 7 -- "
+                        f"actualice la lista de nuevo.")
+                r = bim_refuerzo.refuerzo_desde_pestana7(nombre, datos, espesor_muro_m=espesor, **kwargs)
+            else:
+                indice = self.combo_bim_estructura.currentIndex()
+                if indice < 0 or indice >= len(self._estructuras_bim_p8):
+                    raise GeometriaNoDisponibleError(
+                        "la tabla de la Pestaña 8 cambió -- actualice la lista de nuevo.")
+                r = bim_refuerzo.refuerzo_desde_pestana8(
+                    self._estructuras_bim_p8[indice], espesor_muro_m=espesor, **kwargs)
+        except bim_refuerzo.RefuerzoNoAplicaError as e:
+            self.tabla_refuerzo_bim.setRowCount(0)
+            self.lbl_estado_refuerzo_bim.setText(f"Estado: no aplica -- {e}")
+            return
+        except GeometriaNoDisponibleError as e:
+            self.tabla_refuerzo_bim.setRowCount(0)
+            self.lbl_estado_refuerzo_bim.setText(f"Estado: no se pudo calcular -- {e}")
+            return
+        except Exception as e:
+            self.tabla_refuerzo_bim.setRowCount(0)
+            self.lbl_estado_refuerzo_bim.setText(f"Estado: ERROR inesperado -- {e}")
+            return
+
+        filas = [
+            ("Estructura", r["nombre"], ""), ("Tipo", r["tipo_estructura"], ""),
+            ("Caso gobernante", r["caso_gobernante"], ""),
+            ("Altura de muro/losa", r["altura_muro_m"], "m"),
+            ("Altura de agua (caso A)", r["altura_agua_m"], "m"),
+            ("Espesor de muro/losa", r["espesor_muro_m"], "m"),
+            ("Peralte efectivo d", r["peralte_efectivo_d_cm"], "cm"),
+            ("Momento de diseño Mu", r["momento_diseno_kN_m_por_m"], "kN·m/m"),
+            ("Cortante de diseño Vu", r["Vu_kg_por_m"], "kg/m"),
+            ("φVc (capacidad de corte del concreto)", r["phi_Vc_kg_por_m"], "kg/m",
+             "¿Vu ≤ φVc?  " + ("Sí, cumple" if r["cortante_cumple"] else "NO cumple -- aumente el espesor")),
+            ("As requerido por flexión", r["as_requerido_flexion_cm2_m"], "cm²/m"),
+            ("As mínimo (temperatura/retracción, E.060)", r["as_minimo_temperatura_cm2_m"], "cm²/m"),
+            ("As mínimo (flexión tipo viga)", r["as_minimo_flexion_cm2_m"], "cm²/m"),
+            ("As adoptado", r["as_adoptado_cm2_m"], "cm²/m", "el mayor de los tres anteriores"),
+            ("Refuerzo sugerido", f"{r['barra_sugerida']} @ {r['espaciamiento_sugerido_cm']} cm", ""),
+            ("Peso de acero total estimado", r["peso_acero_total_kg"], "kg",
+             "refuerzo principal + temperatura, ambas caras -- ver core/bim_refuerzo.py"),
+            ("Método", r["metodo"], ""),
+        ]
+        poblar_tabla_parametros(self.tabla_refuerzo_bim, filas)
+        self.lbl_estado_refuerzo_bim.setText(
+            f"Estado: refuerzo calculado para «{nombre}» -- {r['barra_sugerida']} @ "
+            f"{r['espaciamiento_sugerido_cm']} cm ({r['caso_gobernante']}).")
+        self._ultimo_refuerzo_bim = {"nombre": nombre, "resultado": r}
 
     def _build_tab_modulos_avanzados(self):
         tab = QWidget()

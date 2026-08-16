@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.3.22
+version=0.3.23
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,51 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.3.23: Módulo BIM -- fase 4 (nueva), diseño de refuerzo de
+      acero por Norma E.060 (concreto armado) + E.030 (sismorresistente,
+      empuje de tierra dinámico Mononobe-Okabe). Reemplaza la "cuantía
+      kg/m³" aproximada de los metrados por un cálculo real: momento de
+      diseño por flexión bajo empuje de agua (estructura llena) y/o
+      empuje de tierra con relleno posterior (estructura vacía, el que
+      gobierna), acero requerido/mínimo/adoptado, barra y espaciamiento
+      sugeridos, y verificación básica de corte -- para TODAS las
+      estructuras de concreto del módulo (canales, alcantarillas,
+      sumideros, de Pestaña 7 y 8). Enrocado/Defensa Ribereña (roca, no
+      concreto) y Pontón/Puente (sin geometría de material) rechazan el
+      cálculo con un mensaje claro, no un número inventado.
+      Nuevos core/lateral_pressures.py (empuje hidrostático, Ko de Jaky,
+      Ka de Rankine, Mononobe-Okabe con punto de aplicación de Seed &
+      Whitman a 0.6H, zonas sísmicas Z1-Z4 de E.030) y
+      core/reinforced_concrete_e060.py (diseño por resistencia: As por
+      flexión, As mínimo por temperatura/retracción y por flexión tipo
+      viga, verificación de corte, barras comerciales peruanas). Nuevo
+      core/bim_refuerzo.py orquesta ambos sobre la altura de muro
+      autocompletada (ajustable) según el tipo de estructura.
+      Nueva sección "Diseño de refuerzo estructural (NTP E.060 / E.030)"
+      en la Pestaña 8b: altura de muro, f'c, fy, recubrimiento, barra,
+      relleno posterior (sí/no), peso específico y ángulo de fricción
+      del suelo, coeficiente Ko/Ka, sobrecarga viva opcional, y zona
+      sísmica (o "sin incremento sísmico"). El peso de acero real
+      calculado aquí reemplaza automáticamente a la cuantía estimada en
+      la tabla de metrados de arriba, una vez calculado.
+      ALCANCE Y LIMITACIONES explícitas (en el propio módulo y en la
+      interfaz): cálculo PRELIMINAR con simplificaciones estándar (muro
+      vertical, relleno horizontal, sin fricción muro-suelo, kh=0.5·Z
+      pseudo-estático) -- NO es un análisis sísmico dinámico modal-
+      espectral completo, NO cubre cimentación, juntas ni detallado de
+      anclaje/empalmes, y NO reemplaza la revisión de un ingeniero
+      estructural/geotécnico colegiado.
+      Verificado con Python puro + QGIS 3.40.1 real en modo headless
+      (39 comprobaciones): Ka de Rankine y Ko de Jaky contra sus
+      fórmulas cerradas, Kae de Mononobe-Okabe contra un cálculo manual
+      independiente (φ=30°, kh=0.175 → Kae≈0.4459), empuje hidrostático,
+      momento/cortante/As de un caso completo verificados a mano
+      (canal 1.0×0.20 m: Mu=1.635 kN·m/m, Vu=500 kg/m, As gobernado por
+      el mínimo ≈3.71 cm²/m, Ø1/2″@30cm), el caso con sismo exige más
+      acero que sin sismo, y la integración completa a través de los
+      controles reales de la interfaz (autocompletado de altura,
+      cálculo, tabla, y su reflejo en los metrados) para los 3 tipos de
+      Pestaña 7 soportados y Pestaña 8.
     - v0.3.22: corrige el ancho del render 3D del Módulo BIM (Pestaña
       8b) -- quedó a 8.0 (800 px), más ancho que el resto de gráficos
       del plugin (convención establecida: 7.2-7.6, la mayoría en 7.4) y
