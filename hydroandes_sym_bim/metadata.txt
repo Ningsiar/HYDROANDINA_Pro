@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.3.24
+version=0.3.25
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,51 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.3.25: Módulo "Presupuesto, APU e Insumos" -- fase 1 de N
+      (nuevo, sin interfaz todavía). Núcleo de datos y motor de cálculo
+      en core/presupuesto.py, con la misma estructura que S10
+      Presupuestos/CAPECO (el estándar de facto en construcción civil
+      peruana): Partida (código, descripción, unidad, metrado) con su
+      propio Análisis de Precios Unitarios (APU) -- Mano de Obra +
+      Materiales + Equipos + Herramienta Manual, cada uno con insumos
+      de una librería reutilizable (Insumo: código/descripción/unidad/
+      precio). Mano de obra y equipo usan el método del rendimiento
+      (cantidad en hh/hm por unidad = cuadrilla×8h / rendimiento, igual
+      que S10); materiales usan cantidad directa con % de desperdicio
+      opcional; atajo agregar_herramienta_manual_pct() para el caso
+      común de expresar la herramienta manual como % de la mano de
+      obra en vez de insumo por insumo.
+      Presupuesto agrupa Partidas y calcula el cuadro resumen completo
+      (Costo Directo -> Gastos Generales -> Utilidad -> Subtotal -> IGV
+      -> Total, todos los % editables) y la Relación de Insumos:
+      consolida TODOS los insumos de TODAS las partidas (cantidad ×
+      metrado) en una sola lista de compra -- un mismo insumo usado en
+      varias partidas aparece una sola vez con la cantidad total sumada
+      -- es la que alimentará el cronograma de adquisición de
+      materiales del futuro Módulo de Programación y Cronogramas.
+      IMPORTANTE: este módulo NO trae rendimientos de CAPECO/Revista
+      Costos precargados -- son tablas de publicaciones comerciales, no
+      reproducibles de memoria de forma confiable ni por derechos de
+      autor. La librería de insumos es 100% editable por el usuario
+      (mismo patrón que la matriz de uso de suelo del número de curva
+      SCS); si el usuario aporta el documento fuente, se poblará con
+      cifras reales verificadas en una fase posterior, igual que se
+      hizo con las Tablas 37-39 de IILA-SENAMHI.
+      Verificado con Python puro (21 comprobaciones): un caso completo
+      de concreto f'c=210 kg/cm² calculado a mano (mano de obra 58.00,
+      materiales 278.15, equipos 10.00, herramienta 1.74 -> precio
+      unitario 347.89 S/./m³, costo directo 3478.90 para 10 m³),
+      Gastos Generales/Utilidad/IGV al 10%/10%/18% verificados contra
+      el cálculo manual exacto (total 4926.12), y la relación de
+      insumos sumando EXACTO al costo directo (consistencia interna).
+      PENDIENTE (fases siguientes, ya acordadas con el usuario):
+      interfaz (árbol de partidas, editor de APU, librería de insumos,
+      resumen con gráfico de alto impacto), autocompletar metrados de
+      concreto/acero/excavación desde el Módulo BIM, exportación
+      Excel/CSV, y -- una vez recibida la fuente -- rendimientos reales
+      de CAPECO/Revista Costos. Después de este módulo sigue el Módulo
+      de Programación y Cronogramas (Gantt/PERT-CPM) generado sobre
+      estas mismas partidas.
     - v0.3.24: Módulo BIM -- fase 5 (nueva), el refuerzo de acero se VE
       y se EXPORTA como geometría real, no solo como una cifra en una
       tabla, a pedido del cliente ("incluir el gráfico de alto impacto
