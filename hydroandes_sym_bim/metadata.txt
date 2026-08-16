@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.3.27
+version=0.3.28
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,52 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.3.28: Módulo "Presupuesto, APU e Insumos" -- fase 3, la ÚLTIMA
+      de las fases del núcleo del módulo: integración con los metrados
+      del Módulo BIM y exportación (esta última resultó ya estar
+      cubierta de fábrica -- ver abajo).
+      Nueva sección "2b. Importar cantidades desde el Módulo BIM": un
+      botón trae, como partidas nuevas (código estable, metrado y
+      unidad correctos), el concreto/encofrado/excavación/acero de la
+      estructura ACTUALMENTE seleccionada en la Pestaña 8b -- mismo
+      patrón de "autocompletar desde un cálculo ya hecho en otra
+      pestaña" que usa el resto del plugin (Q de Pestaña 6 en
+      estructuras, n de Pestaña 4, etc.). Si ya calculó el «Diseño de
+      refuerzo» (E.060/E.030) de esa misma estructura, el acero
+      importado usa ese peso REAL en vez de la cuantía estimada --
+      mismo criterio que ya aplicaba la tabla de metrados de la propia
+      Pestaña 8b. Reimportar la MISMA estructura ACTUALIZA sus
+      partidas (código estable tipo BIM-<NOMBRE>-CONC/ENCOF/EXC/ACE),
+      no las duplica.
+      Bug real encontrado y corregido por la propia prueba: la función
+      que agrega/actualiza filas en la tabla de partidas no reutilizaba
+      las filas en blanco iniciales de la TablaPegable (6 filas vacías
+      al construirla) -- siempre agregaba filas nuevas al final,
+      dejando huecos y creciendo la tabla sin necesidad en cada
+      importación. Corregido para reutilizar la primera fila en blanco
+      antes de agregar una nueva.
+      EXPORTACIÓN: ya estaba cubierta -- el barrido único del item 9
+      (_habilitar_descargas_universales(), que agrega el botón flotante
+      de descarga a TODO QTableWidget/gráfico ya construido en el
+      diálogo) se ejecuta DESPUÉS de construir la Pestaña 9, así que
+      las 8 tablas y el gráfico de composición de costos del módulo ya
+      tenían el botón de exportar (CSV/XLSX/copiar; PNG/JPG el
+      gráfico) sin necesidad de código nuevo -- verificado explícitamente
+      en esta fase, no solo asumido.
+      Verificado con QGIS 3.40.1 real en modo headless (20
+      comprobaciones): el botón de descarga presente en las tablas y el
+      gráfico del módulo, importación desde una estructura BIM real
+      (Canal) con los 4 metrados coincidiendo EXACTO contra
+      bim_metrados.metrados_desde_pestana7(), el acero usando primero
+      la cuantía estimada y luego -- tras calcular el refuerzo real --
+      el peso E.060/E.030 SIN duplicar partidas, y el caso de error
+      (sin estructura BIM seleccionada) mostrando un mensaje claro.
+      Con esto queda COMPLETO el núcleo del Módulo Presupuesto/APU/
+      Insumos (fases 1-3). PENDIENTE: rendimientos reales de CAPECO/
+      Revista Costos cuando el usuario aporte la fuente (fase 4), y
+      luego el Módulo de Programación y Cronogramas (Gantt/PERT-CPM),
+      para el que ya se validó la lectura de un cronograma MS Project
+      real (XML MSPDI) y de un cronograma de desembolsos real.
     - v0.3.27: Módulo "Presupuesto, APU e Insumos" -- fase 2, la
       INTERFAZ (nueva Pestaña "9. Presupuesto, APU e Insumos", después
       del Módulo BIM). Seis secciones sobre core/presupuesto.py y

@@ -10830,6 +10830,24 @@ class HydroAndinaProDialog(QDialog):
         v.addWidget(self.lbl_estado_partidas_pres)
 
         # ------------------------------------------------------------
+        # 2b) Importar cantidades desde el Módulo BIM (fase 3)
+        # ------------------------------------------------------------
+        v.addWidget(QLabel(
+            "<hr><b>2b. Importar cantidades desde el Módulo BIM</b> — trae como partidas (con "
+            "metrado ya calculado, unidad correcta y código estable) el concreto, encofrado, "
+            "excavación y acero de la estructura ACTUALMENTE seleccionada en la Pestaña «8b. Módulo "
+            "BIM (3D)» (con sus metrados ya generados ahí). Si ya calculó el «Diseño de refuerzo» "
+            "(E.060/E.030) de esa misma estructura, el acero importado usa ese peso real en vez de "
+            "la cuantía estimada. Reimportar la misma estructura ACTUALIZA sus partidas (mismo "
+            "código), no las duplica -- después debe asignarles su APU en la sección 3."))
+        btn_importar_bim = QPushButton("📥 Importar partida(s) desde la estructura BIM seleccionada")
+        btn_importar_bim.clicked.connect(self._on_importar_partida_bim)
+        v.addWidget(btn_importar_bim)
+        self.lbl_estado_importar_bim = QLabel("Estado: sin importar.")
+        self.lbl_estado_importar_bim.setWordWrap(True)
+        v.addWidget(self.lbl_estado_importar_bim)
+
+        # ------------------------------------------------------------
         # 3) Editor de APU (por partida)
         # ------------------------------------------------------------
         v.addWidget(QLabel(
@@ -11051,6 +11069,119 @@ class HydroAndinaProDialog(QDialog):
             self.combo_apu_partida.addItem(f"{codigo} — {nuevas[codigo]['descripcion']}", codigo)
         self.combo_apu_partida.blockSignals(False)
         self._on_cambiar_partida_apu()
+
+    def _slug_bim(self, nombre: str) -> str:
+        """Código estable a partir del nombre de una estructura BIM --
+        solo alfanuméricos, para que reimportar la MISMA estructura
+        actualice sus partidas (mismo código) en vez de duplicarlas."""
+        limpio = "".join(c for c in nombre.upper() if c.isalnum())
+        return limpio[:20] or "ESTRUCTURA"
+
+    def _agregar_o_actualizar_fila_partida(self, codigo, grupo, descripcion, unidad, metrado):
+        """Busca `codigo` en tabla_partidas_pres (columna 0) y actualiza
+        esa fila si existe; si no, reutiliza la primera fila EN BLANCO
+        (p.ej. las filas iniciales vacías de la TablaPegable) antes de
+        agregar una nueva al final -- para no dejar huecos ni crecer la
+        tabla sin necesidad en cada importación. NO llama a
+        _on_actualizar_partidas_pres() (el llamador lo hace una sola vez
+        al final, tras agregar/actualizar varias filas)."""
+        tabla = self.tabla_partidas_pres
+        fila_existente = None
+        fila_libre = None
+        for fila in range(tabla.rowCount()):
+            item = tabla.item(fila, 0)
+            texto = item.text().strip() if item else ""
+            if texto == codigo:
+                fila_existente = fila
+                break
+            if not texto and fila_libre is None:
+                fila_libre = fila
+        if fila_existente is None:
+            fila_existente = fila_libre if fila_libre is not None else tabla.rowCount()
+            if fila_existente == tabla.rowCount():
+                tabla.setRowCount(fila_existente + 1)
+        tabla.setItem(fila_existente, 0, QTableWidgetItem(codigo))
+        tabla.setItem(fila_existente, 1, QTableWidgetItem(grupo))
+        tabla.setItem(fila_existente, 2, QTableWidgetItem(descripcion))
+        tabla.setItem(fila_existente, 3, QTableWidgetItem(unidad))
+        tabla.setItem(fila_existente, 4, QTableWidgetItem(f"{metrado:g}"))
+
+    def _on_importar_partida_bim(self):
+        if not hasattr(self, "combo_bim_estructura") or self.combo_bim_estructura.count() == 0:
+            self.lbl_estado_importar_bim.setText(
+                "Estado: no hay ninguna estructura seleccionada en el Módulo BIM (Pestaña 8b) -- "
+                "vaya ahí, calcule sus metrados y vuelva.")
+            return
+        nombre = self.combo_bim_estructura.currentText()
+        espesor = self.spin_bim_espesor_muro.value()
+        margen = self.spin_bim_margen_excavacion.value()
+        cuantia = self.spin_bim_cuantia_acero.value() or None
+        fuente_p7 = self.combo_bim_fuente.currentIndex() == 0
+        try:
+            if fuente_p7:
+                datos = self.resultados_hidraulica_drenaje.get(nombre)
+                if datos is None:
+                    raise bim_metrados.MetradoNoAplicaError(
+                        f"no se encontró «{nombre}» en los resultados de la Pestaña 7 -- "
+                        f"actualice la lista de la Pestaña 8b de nuevo.")
+                r = bim_metrados.metrados_desde_pestana7(
+                    nombre, datos, self.spin_bim_longitud.value(), espesor, margen, cuantia)
+                origen = f"Pestaña 7: {nombre}"
+            else:
+                indice = self.combo_bim_estructura.currentIndex()
+                estructuras = getattr(self, "_estructuras_bim_p8", [])
+                if indice < 0 or indice >= len(estructuras):
+                    raise bim_metrados.MetradoNoAplicaError(
+                        "la tabla de la Pestaña 8 cambió -- actualice la lista de la Pestaña 8b de nuevo.")
+                r = bim_metrados.metrados_desde_pestana8(estructuras[indice], espesor, margen, cuantia)
+                origen = f"Pestaña 8: {nombre}"
+        except bim_metrados.MetradoNoAplicaError as e:
+            self.lbl_estado_importar_bim.setText(f"Estado: sin metrados aplicables -- {e}")
+            return
+        except GeometriaNoDisponibleError as e:
+            self.lbl_estado_importar_bim.setText(f"Estado: no se pudo generar el metrado -- {e}")
+            return
+        except Exception as e:
+            self.lbl_estado_importar_bim.setText(f"Estado: ERROR inesperado -- {e}")
+            return
+
+        slug = self._slug_bim(nombre)
+        grupo = f"BIM > {r['tipo']}"
+        importadas = []
+        if r["categoria"] == "cascara":
+            self._agregar_o_actualizar_fila_partida(
+                f"BIM-{slug}-CONC", grupo, f"Concreto -- {nombre}", "m3", r["volumen_concreto_m3"])
+            importadas.append(f"BIM-{slug}-CONC (concreto, {r['volumen_concreto_m3']:.2f} m³)")
+            self._agregar_o_actualizar_fila_partida(
+                f"BIM-{slug}-ENCOF", grupo, f"Encofrado y desencofrado -- {nombre}", "m2",
+                r["area_encofrado_m2"])
+            importadas.append(f"BIM-{slug}-ENCOF (encofrado, {r['area_encofrado_m2']:.2f} m²)")
+            self._agregar_o_actualizar_fila_partida(
+                f"BIM-{slug}-EXC", grupo, f"Excavación -- {nombre}", "m3", r["volumen_excavacion_m3"])
+            importadas.append(f"BIM-{slug}-EXC (excavación, {r['volumen_excavacion_m3']:.2f} m³)")
+
+            refuerzo_previo = getattr(self, "_ultimo_refuerzo_bim", None)
+            peso_acero = fuente_acero = None
+            if refuerzo_previo and refuerzo_previo.get("nombre") == nombre:
+                peso_acero = refuerzo_previo["resultado"]["peso_acero_total_kg"]
+                fuente_acero = "diseño E.060/E.030"
+            elif "peso_acero_estimado_kg" in r:
+                peso_acero = r["peso_acero_estimado_kg"]
+                fuente_acero = f"cuantía {r['cuantia_acero_kg_m3']:.0f} kg/m³, estimación rápida"
+            if peso_acero is not None:
+                self._agregar_o_actualizar_fila_partida(
+                    f"BIM-{slug}-ACE", grupo, f"Acero de refuerzo ({fuente_acero}) -- {nombre}",
+                    "kg", peso_acero)
+                importadas.append(f"BIM-{slug}-ACE (acero, {peso_acero:.1f} kg, {fuente_acero})")
+        else:  # "area_solida"
+            self._agregar_o_actualizar_fila_partida(
+                f"BIM-{slug}-MAT", grupo, f"{r['material']} -- {nombre}", "m3", r["volumen_m3"])
+            importadas.append(f"BIM-{slug}-MAT ({r['material']}, {r['volumen_m3']:.2f} m³)")
+
+        self._on_actualizar_partidas_pres()
+        self.lbl_estado_importar_bim.setText(
+            f"Estado: {len(importadas)} partida(s) importada(s)/actualizada(s) desde «{origen}»: "
+            + "; ".join(importadas) + ". Ahora asígneles su APU en la sección 3.")
 
     def _on_cambiar_partida_apu(self):
         self.tabla_apu_items.setRowCount(0)
