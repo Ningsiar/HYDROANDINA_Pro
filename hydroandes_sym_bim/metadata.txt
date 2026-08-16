@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.3.16
+version=0.3.17
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,27 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.3.17: rediseño de alto impacto del diálogo de licencia + logo
+      real de la empresa en dos lugares, a pedido del cliente.
+      ui/dialogo_licencia.py: cabecera de marca (franja de color con el
+      icono del plugin), título destacado, y una tarjeta de contacto con
+      fondo propio que agrupa teléfono/correo/empresa en negrita junto
+      al logo, en vez del bloque de texto plano anterior. Ancho mínimo
+      560px para que el texto respire en una ventana estándar.
+      icon.png reemplazado por el isotipo REAL de CORPORATIVO
+      CONSTRUCTIVO LIMA BERLIN SRL que el cliente proporcionó (recortado
+      y centrado a partir de su logo oficial en alta resolución) -- como
+      es el mismo archivo que usa plugin.py para el ícono del menú
+      Complementos y de la barra de herramientas, el logo real ahora
+      aparece también ahí ("el primer desplegable para buscar el
+      plugin"), no solo dentro del diálogo. Se agregó
+      resources/logo_empresa.png (mismo isotipo) para la tarjeta de
+      contacto del diálogo, cargado de forma defensiva -- si el archivo
+      faltara, el diálogo se sigue mostrando sin imagen, sin romperse.
+      Verificado con QGIS 3.40.1 real en modo headless (13
+      comprobaciones: construcción sin excepciones con y sin el logo
+      presente, texto completo correcto en ambas variantes, botones
+      correctos, ancho mínimo).
     - v0.3.16: mensaje del diálogo de licencia agotada actualizado a pedido
       del cliente. Al agotarse los 10 usos gratis, ui/dialogo_licencia.py
       ahora muestra: "La fase de prueba gratuita se agotó. Si desea una
