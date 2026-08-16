@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.3.25
+version=0.3.26
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,62 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.3.26: Módulo "Presupuesto, APU e Insumos" -- calibración contra
+      un presupuesto de obra vial REAL que el usuario aportó como
+      referencia (S10 completo: presupuesto ~S/.65.8M, relación de
+      insumos, agrupamiento preliminar y fórmula polinómica de una
+      carretera en Cajamarca) más el nuevo cálculo de Fórmula
+      Polinómica de reajuste de precios (D.S. 011-79-VC), a pedido
+      explícito del usuario.
+      core/presupuesto.py: nueva categoría TipoInsumo.SUBCONTRATOS
+      (confirmada real -- imprimación/carpeta asfáltica "a todo costo"
+      del proyecto de referencia aparecían ahí, no en Materiales);
+      nuevo campo opcional Insumo.indice_inei (código del Índice
+      Unificado INEI, para la fórmula polinómica); relacion_insumos()
+      ahora incluye ese índice en cada fila; nueva
+      resumen_inversion_publica() -- cadena de costos de una obra
+      pública peruana por ENCIMA del Valor Referencial (Supervisión y
+      Liquidación -> Expediente Técnico -> Gestión del Proyecto ->
+      Costo Total de la Inversión -> Control Concurrente de Obra ->
+      Presupuesto Total), verificada EXACTA contra el presupuesto real
+      (S/.65,838,433.22 reproducido al céntimo).
+      Nuevo core/formula_polinomica.py: catálogo INDICES_INEI (códigos
+      y descripciones oficiales del INEI, verificados contra el
+      proyecto real -- información pública, no una tabla comercial);
+      clases ComponenteMonomio/Monomio/FormulaPolinomica con las
+      validaciones normativas (Σpesos de cada monomio=100%, Σfactores
+      de la fórmula=1.000, máximo 8 monomios); calcular_k() (coeficiente
+      de reajuste K = Σ factor·razón Ir/Io); participacion_por_indice()
+      (agrupamiento preliminar -- % de cada índice INEI sobre el costo
+      directo, a partir de relacion_insumos()); reajustar_valorizacion()
+      (D.S. 011-79-VC, art. 2: monto reajustado = valorización × K).
+      ALCANCE: el agrupamiento final (qué índice pequeño se agrupa
+      dentro de cuál mayor) requiere criterio técnico-económico del
+      proyectista y NO se automatiza -- se arma explícitamente con
+      Monomio/ComponenteMonomio, que sí validan que el resultado sea
+      normativamente válido. Los valores reales Ir/Io de cada mes deben
+      tomarse del Boletín de Índices Unificados de Precios de la
+      Construcción que publica el INEI -- este módulo no los calcula ni
+      los descarga.
+      Pendiente (según lo pedido, ya acordado): interfaz de ambos
+      (Presupuesto Fase 2) y, en el futuro Módulo de Programación y
+      Cronogramas, el cronograma de adquisición de materiales -- los
+      archivos de cronograma Gantt (.mpp) y desembolsos (.xls) que
+      aportó el usuario no se pudieron leer directamente en esta sesión
+      (formatos binarios sin librería disponible) y se retomarán al
+      llegar a ese módulo.
+      Verificado con Python puro (41 comprobaciones: 21 de la Fase 1 +
+      20 nuevas): la cadena de inversión pública reproduce EXACTO el
+      presupuesto total real del proyecto de referencia; la fórmula
+      polinómica reproduce el texto y la estructura reales del
+      proyecto (K=0.109J+0.111A+0.289M+0.113D+0.075E+0.303GG, Σ=1.000);
+      K=1.0 exacto cuando todas las razones Ir/Io son 1.0; K contra un
+      cálculo manual independiente con razones no triviales; todos los
+      casos de error normativos (pesos que no suman 100%, factores que
+      no suman 1.000, más de 8 monomios, índice inexistente, razón
+      faltante); y participacion_por_indice() sumando ~100% y
+      coincidiendo con el cálculo manual sobre el caso de concreto ya
+      verificado en la Fase 1.
     - v0.3.25: Módulo "Presupuesto, APU e Insumos" -- fase 1 de N
       (nuevo, sin interfaz todavía). Núcleo de datos y motor de cálculo
       en core/presupuesto.py, con la misma estructura que S10

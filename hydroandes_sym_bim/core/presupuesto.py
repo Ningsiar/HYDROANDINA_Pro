@@ -54,8 +54,9 @@ class TipoInsumo:
     MATERIALES = "Materiales"
     EQUIPOS = "Equipos"
     HERRAMIENTAS = "Herramienta Manual"
+    SUBCONTRATOS = "Subcontratos"
 
-    TODOS = (MANO_DE_OBRA, MATERIALES, EQUIPOS, HERRAMIENTAS)
+    TODOS = (MANO_DE_OBRA, MATERIALES, EQUIPOS, HERRAMIENTAS, SUBCONTRATOS)
 
 
 class PresupuestoError(Exception):
@@ -71,12 +72,17 @@ class Insumo:
     """Un recurso de la librería -- descripción, unidad y precio
     unitario, independiente de en qué partidas se use. `codigo` es la
     clave que consolida cantidades iguales en la Relación de Insumos
-    (dos ItemApu con el mismo Insumo se suman, no se duplican)."""
+    (dos ItemApu con el mismo Insumo se suman, no se duplican).
+    `indice_inei` (opcional) es el código del Índice Unificado de
+    Precios de la Construcción del INEI al que corresponde este
+    insumo (ver core/formula_polinomica.py::INDICES_INEI) -- se usa
+    para calcular la Fórmula Polinómica de reajuste; no hace falta
+    para presupuestar ni para el APU."""
 
-    __slots__ = ("codigo", "descripcion", "unidad", "tipo", "precio_unitario")
+    __slots__ = ("codigo", "descripcion", "unidad", "tipo", "precio_unitario", "indice_inei")
 
     def __init__(self, codigo: str, descripcion: str, unidad: str, tipo: str,
-                 precio_unitario: float):
+                 precio_unitario: float, indice_inei: int = None):
         if tipo not in TipoInsumo.TODOS:
             raise PresupuestoError(
                 f"tipo de insumo «{tipo}» no reconocido -- use uno de {TipoInsumo.TODOS}")
@@ -87,6 +93,7 @@ class Insumo:
         self.unidad = unidad
         self.tipo = tipo
         self.precio_unitario = float(precio_unitario)
+        self.indice_inei = indice_inei
 
 
 # ======================================================================
@@ -287,8 +294,62 @@ class Presupuesto:
             "codigo": datos["insumo"].codigo, "descripcion": datos["insumo"].descripcion,
             "unidad": datos["insumo"].unidad, "tipo": datos["insumo"].tipo,
             "precio_unitario": datos["insumo"].precio_unitario,
+            "indice_inei": datos["insumo"].indice_inei,
             "cantidad_total": round(datos["cantidad"], 4),
             "costo_total": round(datos["costo"], 2),
         } for datos in acumulado.values()]
         filas.sort(key=lambda f: (TipoInsumo.TODOS.index(f["tipo"]), f["descripcion"]))
         return filas
+
+
+# ======================================================================
+# Cadena de INVERSIÓN PÚBLICA peruana (Invierte.pe), por encima del
+# Valor Referencial de la obra (Presupuesto.resumen()["total"]) --
+# función independiente porque estos conceptos (supervisión,
+# expediente técnico, gestión del proyecto, control concurrente) NO
+# forman parte del precio que licita el contratista, sino del costo
+# total de la inversión que presupuesta la entidad pública.
+# ======================================================================
+def resumen_inversion_publica(valor_referencial: float, supervision_liquidacion_pct: float = 3.0,
+                               expediente_tecnico: float = 0.0, gestion_proyecto: dict = None,
+                               control_concurrente_pct: float = 0.5) -> dict:
+    """Cadena de costos de una obra pública peruana por encima del
+    Valor Referencial (el propio Presupuesto.resumen()["total"]):
+        Valor Referencial
+        -> + Supervisión y Liquidación (% del Valor Referencial)
+        -> + Expediente Técnico (monto directo, si se cotiza aparte)
+        -> + Gestión del Proyecto (suma de partidas propias del
+             usuario -- p.ej. PAC, Gestión de Riesgos, JPRD, PMA,
+             Gastos Administrativos)
+        = Costo Total de la Inversión
+        -> + Control Concurrente de Obra (% del Costo Total de la
+             Inversión, Contraloría General de la República)
+        = Presupuesto Total
+    `control_concurrente_pct` NO tiene un valor único fijado por norma
+    para todo tipo de obra/entidad -- verifique el % vigente para su
+    caso contra la Contraloría antes de un expediente definitivo; el
+    valor por defecto (0.5%) es solo el observado en el proyecto de
+    referencia usado para verificar esta función, no una tasa oficial
+    universal. NO reemplaza el criterio de la Oficina de Programación
+    Multianual de Inversiones (OPMI) ni la normativa vigente de
+    Invierte.pe."""
+    if valor_referencial < 0:
+        raise PresupuestoError("valor_referencial negativo")
+    supervision = valor_referencial * supervision_liquidacion_pct / 100.0
+    gestion_proyecto = gestion_proyecto or {}
+    total_gestion = sum(gestion_proyecto.values())
+    costo_total_inversion = valor_referencial + supervision + expediente_tecnico + total_gestion
+    control_concurrente = costo_total_inversion * control_concurrente_pct / 100.0
+    presupuesto_total = costo_total_inversion + control_concurrente
+    return {
+        "valor_referencial": round(valor_referencial, 2),
+        "supervision_liquidacion_pct": supervision_liquidacion_pct,
+        "supervision_liquidacion": round(supervision, 2),
+        "expediente_tecnico": round(expediente_tecnico, 2),
+        "gestion_proyecto": {k: round(v, 2) for k, v in gestion_proyecto.items()},
+        "gestion_proyecto_total": round(total_gestion, 2),
+        "costo_total_inversion": round(costo_total_inversion, 2),
+        "control_concurrente_pct": control_concurrente_pct,
+        "control_concurrente": round(control_concurrente, 2),
+        "presupuesto_total": round(presupuesto_total, 2),
+    }
