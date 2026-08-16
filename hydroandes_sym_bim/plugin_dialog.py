@@ -50,7 +50,7 @@ from .core import (delineation, morphometry, curve_number, tc_methods, dem_downl
                     runoff_coefficient, roughness_methods, roughness_materials,
                     iila_senamhi_zones, bim_metrados, bim_ifc, bim_refuerzo, bim_geometry,
                     lateral_pressures, reinforced_concrete_e060, presupuesto, formula_polinomica,
-                    apu_referencia, cronograma, geotecnia_e050, estabilidad_muros)
+                    apu_referencia, cronograma, geotecnia_e050, estabilidad_muros, zapatas)
 from .core.qgis_layer_utils import obtener_capa
 from .ui.hypsometric_canvas import HypsometricCanvas
 from .ui.hydrograph_canvas import HydrographCanvas
@@ -82,6 +82,7 @@ from .ui.bim_canvas import Estructura3DCanvas, GeometriaNoDisponibleError, LONGI
 from .ui.presupuesto_canvas import PresupuestoCanvas
 from .ui.cronograma_canvas import CronogramaCanvas
 from .ui.estabilidad_muros_canvas import EstabilidadMurosCanvas
+from .ui.zapatas_canvas import ZapataCanvas
 from .ui.table_utils import (ajustar_alto_tabla, aplicar_columna_elastica, limitar_ancho_tabla,
                               limitar_ancho_boton, crear_tabla_parametros, poblar_tabla_parametros)
 from .ui import export_overlay
@@ -10547,6 +10548,142 @@ class HydroAndinaProDialog(QDialog):
         self._ultima_estabilidad_muro = None
 
         # ------------------------------------------------------------
+        # Diseño de zapata aislada de columna -- E.050 (dimensionamiento
+        # en planta con la presión admisible) + E.060 Cap. 15 (peralte,
+        # cortante 1D, punzonamiento, flexión, transferencia de
+        # fuerzas) + E.030 (fuerza mínima de conexión en zonas
+        # sísmicas 2/3 con perfil S3/S4). Calculadora INDEPENDIENTE
+        # (columna aislada bajo carga axial), no ligada al muro de
+        # arriba. Ver core/zapatas.py.
+        # ------------------------------------------------------------
+        v.addWidget(QLabel(
+            "<hr><b>Diseño de Zapata Aislada (columna)</b> — dimensiona en planta con la carga de "
+            "SERVICIO contra la presión admisible (E.050 Art. 21), y verifica el peralte y el acero "
+            "por RESISTENCIA con la carga amplificada Pu (E.060 Cap. 15: cortante en una dirección, "
+            "punzonamiento, momento en la cara de la columna, transferencia de fuerzas por "
+            "aplastamiento/dowels). Alcance: zapata CUADRADA bajo carga AXIAL centrada (columna sin "
+            "momento significativo) -- no cubre zapatas combinadas/medianeras ni plateas. Cálculo "
+            "PRELIMINAR -- no reemplaza el criterio de un ingeniero estructural/geotécnico colegiado."))
+
+        f_carga_zap = QFormLayout()
+        f_carga_zap.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.spin_zap_pu = QDoubleSpinBox()
+        self.spin_zap_pu.setRange(1.0, 100000.0)
+        self.spin_zap_pu.setDecimals(1)
+        self.spin_zap_pu.setValue(784.8)
+        self.spin_zap_pu.setSuffix(" kN")
+        f_carga_zap.addRow("Pu -- carga AMPLIFICADA de la columna:", self.spin_zap_pu)
+        self.spin_zap_servicio = QDoubleSpinBox()
+        self.spin_zap_servicio.setRange(1.0, 100000.0)
+        self.spin_zap_servicio.setDecimals(1)
+        self.spin_zap_servicio.setValue(539.6)
+        self.spin_zap_servicio.setSuffix(" kN")
+        f_carga_zap.addRow("Carga de SERVICIO de la columna:", self.spin_zap_servicio)
+        self.spin_zap_b_columna = QDoubleSpinBox()
+        self.spin_zap_b_columna.setRange(0.15, 3.0)
+        self.spin_zap_b_columna.setDecimals(2)
+        self.spin_zap_b_columna.setValue(0.40)
+        self.spin_zap_b_columna.setSuffix(" m")
+        f_carga_zap.addRow("Ancho de columna (b):", self.spin_zap_b_columna)
+        self.spin_zap_h_columna = QDoubleSpinBox()
+        self.spin_zap_h_columna.setRange(0.15, 3.0)
+        self.spin_zap_h_columna.setDecimals(2)
+        self.spin_zap_h_columna.setValue(0.40)
+        self.spin_zap_h_columna.setSuffix(" m")
+        f_carga_zap.addRow("Peralte de columna (h):", self.spin_zap_h_columna)
+        self.spin_zap_q_adm = QDoubleSpinBox()
+        self.spin_zap_q_adm.setRange(20.0, 2000.0)
+        self.spin_zap_q_adm.setDecimals(1)
+        self.spin_zap_q_adm.setValue(196.2)
+        self.spin_zap_q_adm.setSuffix(" kPa")
+        f_carga_zap.addRow("Presión admisible del suelo q_adm:", self.spin_zap_q_adm)
+        btn_zap_q_adm = QPushButton("↻ Calcular q_adm con el motor E.050 (arriba)")
+        btn_zap_q_adm.setToolTip(
+            "Reutiliza φ, c y γ del suelo ya cargados arriba (Estabilidad de Muros) y Df de esta "
+            "misma sección para estimar q_adm con core/geotecnia_e050.py, usando el ancho de "
+            "zapata en tanteo indicado abajo -- ajuste y recalcule si el B resultante difiere mucho "
+            "del tanteo (práctica iterativa usual).")
+        btn_zap_q_adm.clicked.connect(self._on_calcular_q_adm_zapata)
+        f_carga_zap.addRow("", btn_zap_q_adm)
+        self.spin_zap_b_tanteo = QDoubleSpinBox()
+        self.spin_zap_b_tanteo.setRange(0.5, 10.0)
+        self.spin_zap_b_tanteo.setDecimals(2)
+        self.spin_zap_b_tanteo.setValue(1.75)
+        self.spin_zap_b_tanteo.setSuffix(" m")
+        f_carga_zap.addRow("B en tanteo (para calcular q_adm):", self.spin_zap_b_tanteo)
+        self.spin_zap_df = QDoubleSpinBox()
+        self.spin_zap_df.setRange(0.3, 6.0)
+        self.spin_zap_df.setDecimals(2)
+        self.spin_zap_df.setValue(1.20)
+        self.spin_zap_df.setSuffix(" m")
+        f_carga_zap.addRow("Profundidad de desplante Df:", self.spin_zap_df)
+        v.addLayout(f_carga_zap)
+
+        v.addWidget(QLabel("<i>Diseño estructural (E.060 Cap. 15):</i>"))
+        f_estr_zap = QFormLayout()
+        f_estr_zap.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.spin_zap_h_zapata = QDoubleSpinBox()
+        self.spin_zap_h_zapata.setRange(0.15, 3.0)
+        self.spin_zap_h_zapata.setDecimals(2)
+        self.spin_zap_h_zapata.setValue(0.50)
+        self.spin_zap_h_zapata.setSuffix(" m")
+        f_estr_zap.addRow("Peralte de zapata asumido (h):", self.spin_zap_h_zapata)
+        self.spin_zap_fc = QDoubleSpinBox()
+        self.spin_zap_fc.setRange(175.0, 700.0)
+        self.spin_zap_fc.setDecimals(0)
+        self.spin_zap_fc.setValue(210.0)
+        self.spin_zap_fc.setSuffix(" kg/cm²")
+        f_estr_zap.addRow("f'c del concreto:", self.spin_zap_fc)
+        self.spin_zap_fy = QDoubleSpinBox()
+        self.spin_zap_fy.setRange(2800.0, 6000.0)
+        self.spin_zap_fy.setDecimals(0)
+        self.spin_zap_fy.setValue(4200.0)
+        self.spin_zap_fy.setSuffix(" kg/cm²")
+        f_estr_zap.addRow("fy del acero:", self.spin_zap_fy)
+        self.spin_zap_recubrimiento = QDoubleSpinBox()
+        self.spin_zap_recubrimiento.setRange(4.0, 15.0)
+        self.spin_zap_recubrimiento.setDecimals(1)
+        self.spin_zap_recubrimiento.setValue(7.5)
+        self.spin_zap_recubrimiento.setSuffix(" cm")
+        f_estr_zap.addRow("Recubrimiento libre:", self.spin_zap_recubrimiento)
+        self.combo_zap_barra = QComboBox()
+        self.combo_zap_barra.addItems([n for n, _, _ in reinforced_concrete_e060.BARRAS_COMERCIALES])
+        self.combo_zap_barra.setCurrentText("5/8\"")
+        f_estr_zap.addRow("Barra de refuerzo:", self.combo_zap_barra)
+        self.combo_zap_tipo_columna = QComboBox()
+        self.combo_zap_tipo_columna.addItems(["interior", "borde", "esquina"])
+        f_estr_zap.addRow("Tipo de columna (punzonamiento):", self.combo_zap_tipo_columna)
+        self.check_zap_sobre_pilotes = QCheckBox("Zapata sobre cabezas de pilotes (peralte mínimo 300 mm)")
+        self.check_zap_sobre_pilotes.setChecked(False)
+        f_estr_zap.addRow("", self.check_zap_sobre_pilotes)
+        v.addLayout(f_estr_zap)
+
+        v.addWidget(QLabel("<i>Verificación sísmica de conexión (E.030, opcional):</i>"))
+        f_sismo_zap = QFormLayout()
+        f_sismo_zap.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.combo_zap_zona_sismica = QComboBox()
+        self.combo_zap_zona_sismica.addItems(
+            ["(sin verificación)"] + list(lateral_pressures.ZONAS_SISMICAS_E030.keys()))
+        f_sismo_zap.addRow("Zona sísmica:", self.combo_zap_zona_sismica)
+        self.combo_zap_perfil_suelo = QComboBox()
+        self.combo_zap_perfil_suelo.addItems(["S1", "S2", "S3", "S4"])
+        self.combo_zap_perfil_suelo.setCurrentText("S1")
+        f_sismo_zap.addRow("Perfil de suelo (E.030):", self.combo_zap_perfil_suelo)
+        v.addLayout(f_sismo_zap)
+
+        btn_disenar_zapata = QPushButton("🏗 Diseñar zapata")
+        btn_disenar_zapata.clicked.connect(self._on_disenar_zapata)
+        v.addWidget(btn_disenar_zapata)
+        self.lbl_estado_zapata = QLabel("Estado: sin calcular.")
+        self.lbl_estado_zapata.setWordWrap(True)
+        v.addWidget(self.lbl_estado_zapata)
+        self.tabla_zapata = crear_tabla_parametros()
+        v.addWidget(self.tabla_zapata)
+        self.canvas_zapata = ZapataCanvas(width=9.4, height=5.4)
+        v.addWidget(self.canvas_zapata)
+        self._ultimo_diseno_zapata = None
+
+        # ------------------------------------------------------------
         # Exportación IFC (fase 3 del módulo BIM) -- modelo federado
         # real para Revit/Navisworks/ArchiCAD/Tekla. Ver
         # core/bim_ifc.py para el alcance exacto.
@@ -10977,6 +11114,103 @@ class HydroAndinaProDialog(QDialog):
             todo_ok = todo_ok and sis["cumple_volteo"] and sis["cumple_deslizamiento"] and sis["cumple_capacidad_portante"]
         self.lbl_estado_estabilidad_muro.setText(
             f"Estado: verificación completa -- {'CUMPLE todas las verificaciones' if todo_ok else 'NO CUMPLE alguna verificación (revise la tabla)'}.")
+
+    def _on_calcular_q_adm_zapata(self):
+        """Reutiliza φ/c/γ del suelo ya cargados en la sección de
+        Estabilidad de Muros (arriba) -- integración entre secciones
+        de la misma pestaña, sin duplicar datos de entrada."""
+        try:
+            qd = geotecnia_e050.capacidad_portante_ultima(
+                c_kpa=self.spin_em_c_suelo.value(), phi_suelo_deg=self.spin_em_phi_suelo.value(),
+                gamma1_kn_m3=self.spin_em_gamma_suelo.value(), gamma2_kn_m3=self.spin_em_gamma_suelo.value(),
+                df_m=self.spin_zap_df.value(), b_m=self.spin_zap_b_tanteo.value())
+            q_adm = geotecnia_e050.presion_admisible(qd, "estatico")
+        except geotecnia_e050.GeotecniaError as e:
+            self.lbl_estado_zapata.setText(f"Estado: no se pudo calcular q_adm -- {e}")
+            return
+        except Exception as e:
+            self.lbl_estado_zapata.setText(f"Estado: ERROR inesperado calculando q_adm -- {e}")
+            return
+        self.spin_zap_q_adm.setValue(q_adm)
+        self.lbl_estado_zapata.setText(
+            f"Estado: q_adm = {q_adm:.1f} kPa calculado con φ={self.spin_em_phi_suelo.value():.0f}°, "
+            f"c={self.spin_em_c_suelo.value():.1f} kPa, γ={self.spin_em_gamma_suelo.value():.1f} kN/m³ "
+            f"(de la sección de Estabilidad de Muros), Df={self.spin_zap_df.value():.2f} m, "
+            f"B tanteo={self.spin_zap_b_tanteo.value():.2f} m. Diseñe la zapata y, si el B resultante "
+            f"difiere mucho del tanteo, ajuste el tanteo y recalcule (iteración usual).")
+
+    def _on_disenar_zapata(self):
+        try:
+            resultado = zapatas.disenar_zapata_aislada(
+                pu_kn=self.spin_zap_pu.value(), carga_servicio_kn=self.spin_zap_servicio.value(),
+                b_columna_m=self.spin_zap_b_columna.value(), h_columna_m=self.spin_zap_h_columna.value(),
+                q_adm_kpa=self.spin_zap_q_adm.value(), h_zapata_m=self.spin_zap_h_zapata.value(),
+                fc_kg_cm2=self.spin_zap_fc.value(), fy_kg_cm2=self.spin_zap_fy.value(),
+                recubrimiento_cm=self.spin_zap_recubrimiento.value(),
+                diametro_barra_pulg=self.combo_zap_barra.currentText(),
+                tipo_columna=self.combo_zap_tipo_columna.currentText(),
+                sobre_pilotes=self.check_zap_sobre_pilotes.isChecked())
+        except zapatas.ZapataError as e:
+            self.tabla_zapata.setRowCount(0)
+            self.lbl_estado_zapata.setText(f"Estado: no se pudo diseñar -- {e}")
+            return
+        except Exception as e:
+            self.tabla_zapata.setRowCount(0)
+            self.lbl_estado_zapata.setText(f"Estado: ERROR inesperado -- {e}")
+            return
+
+        zona = self.combo_zap_zona_sismica.currentText()
+        fuerza_conexion = None
+        if not zona.startswith("(sin"):
+            fuerza_conexion = zapatas.fuerza_minima_conexion_e030(
+                self.spin_zap_pu.value(), zona, self.combo_zap_perfil_suelo.currentText(), "zapata_aislada")
+
+        c1d = resultado["cortante_1d"]
+        punz = resultado["punzonamiento"]
+        flex = resultado["flexion"]
+        transf = resultado["transferencia_fuerzas"]
+        filas = [
+            ("Área requerida en planta", resultado["area_requerida_m2"], "m²",
+             "carga de servicio × factor peso propio / q_adm (E.060 15.2.2)"),
+            ("Dimensión adoptada B × L", resultado["b_zapata_m"], "m", f"L = {resultado['l_zapata_m']:.2f} m"),
+            ("Peralte de zapata (h)", resultado["peralte_zapata_cm"], "cm",
+             f"mínimo {resultado['peralte_minimo_cm']:.0f} cm -- "
+             f"{'cumple' if resultado['cumple_peralte_minimo'] else 'NO CUMPLE'}"),
+            ("Peralte efectivo (d)", resultado["peralte_efectivo_cm"], "cm", ""),
+            ("Reacción neta amplificada q_neta", resultado["q_neta_amplificada_kg_cm2"], "kg/cm²",
+             "con la carga amplificada Pu (E.060 15.2.3)"),
+            ("Cortante en 1 dirección Vu", c1d["vu_kg"], "kgf",
+             f"φVc={c1d['phi_vc_kg']:.1f} kgf -- {'cumple' if c1d['cumple'] else 'NO CUMPLE'}" if c1d["phi_vc_kg"]
+             else "peralte cubre todo el volado"),
+            ("Punzonamiento Vu", punz["vu_kg"], "kgf",
+             f"φVc={punz['phi_vc_kg']:.1f} kgf (bo={punz['bo_cm']:.1f} cm) -- "
+             f"{'cumple' if punz['cumple'] else 'NO CUMPLE'}"),
+            ("Momento en cara de columna Mu", flex["mu_kg_cm"], "kg·cm", f"volado = {flex['volado_cm']:.1f} cm"),
+            ("As requerido por flexión", flex["as_flexion_cm2"], "cm²", ""),
+            ("As mínimo (temperatura)", flex["as_minimo_cm2"], "cm²", ""),
+            ("As adoptado", flex["as_adoptado_cm2"], "cm²",
+             f"Ø{resultado['barra_sugerida']} @ {resultado['espaciamiento_sugerido_cm']:.0f} cm"
+             if resultado["espaciamiento_sugerido_cm"] else "-"),
+            ("φPnb (aplastamiento)", transf["phi_pnb_kg"], "kgf",
+             "excede aplastamiento -- requiere dowels por cálculo" if transf["excede_aplastamiento"]
+             else "no excede -- rige el mínimo de dowels (0.5% del área de columna)"),
+            ("As dowels adoptado", transf["as_dowels_cm2"], "cm²", ""),
+        ]
+        if fuerza_conexion is not None:
+            filas.append((
+                "Fuerza mínima elemento de conexión (E.030)", round(fuerza_conexion, 1), "kN",
+                f"Zona {zona}, perfil {self.combo_zap_perfil_suelo.currentText()} -- 10% de Pu "
+                f"(viga de cimentación, zapata aislada)"))
+        poblar_tabla_parametros(self.tabla_zapata, filas)
+
+        try:
+            self.canvas_zapata.graficar(resultado, self.spin_zap_b_columna.value(), self.spin_zap_h_columna.value())
+        except Exception:
+            pass  # el gráfico es un plus visual -- nunca debe romper el cálculo ya hecho
+
+        self._ultimo_diseno_zapata = resultado
+        self.lbl_estado_zapata.setText(
+            f"Estado: diseño completo -- {'CUMPLE todas las verificaciones' if resultado['cumple_todo'] else 'NO CUMPLE alguna verificación (revise la tabla)'}.")
 
     # ==================================================================
     # Módulo "Presupuesto, APU e Insumos" -- fase 2 (interfaz). Ver

@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.3.34
+version=0.3.35
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,45 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.3.35: NUEVO -- Diseño de Zapata Aislada (E.050/E.060/E.030),
+      segunda de las 6 mejoras priorizadas por el usuario (1 ya
+      entregada, ahora el 6). Reutiliza el motor de capacidad portante
+      de core/geotecnia_e050.py (ya compartido con Estabilidad de
+      Muros) para el dimensionamiento en planta.
+      Nuevo core/zapatas.py: zapata aislada CUADRADA bajo carga AXIAL
+      centrada (columna sin momento significativo). Dimensionamiento
+      en planta con la carga de SERVICIO contra la presión admisible
+      (E.060 15.2.2), redondeado al múltiplo de 5 cm superior. Diseño
+      por RESISTENCIA con la reacción neta amplificada del suelo
+      (E.060 15.2.3): cortante en una dirección (sección crítica a "d"
+      de la cara, viga ancha), punzonamiento (perímetro crítico a
+      "d/2", fórmula de 3 condiciones de ACI 318/E.060 -- se toma la
+      menor), momento en la cara de la columna con acero requerido y
+      mínimo por temperatura, peralte mínimo (150 mm sobre suelo/300
+      mm sobre pilotes, Art. 15.7), y transferencia de fuerzas
+      columna-zapata por aplastamiento con varillas de anclaje/dowels
+      (cuantía mínima 0.5% del área de columna, Art. 15.8.2.1).
+      Verificación sísmica E.030: fuerza horizontal mínima de diseño
+      para el elemento de conexión (viga de cimentación) -- 10% de la
+      carga vertical en zapatas aisladas, 15% en pilotes, exigible en
+      zonas sísmicas 2/3 con perfil de suelo S3/S4.
+      Verificado a mano por completo contra un ejemplo calculado desde
+      cero (columna 40×40 cm, Pu=80 t, servicio=55 t, q_adm=196.2 kPa,
+      h asumido=50 cm): B=L=1.75 m, d=41.7 cm, q_neta=2.61 kg/cm²,
+      cortante y punzonamiento con amplio margen, As adoptado=15.75
+      cm² (rige el mínimo de temperatura, típico en zapatas de gran
+      peralte) -- 43/43 comprobaciones, incluido un caso con peralte
+      insuficiente que intencionalmente NO cumple (para confirmar que
+      el verificador detecta problemas reales).
+      Nueva sección "Diseño de Zapata Aislada (columna)" en la
+      Pestaña 8b, con botón que calcula q_adm reutilizando φ/c/γ ya
+      cargados en la sección de Estabilidad de Muros (integración
+      entre secciones, sin duplicar datos de entrada), y gráfico de
+      alto impacto nuevo (ui/zapatas_canvas.py): planta con la malla
+      de refuerzo inferior a escala real (espaciamiento calculado) y
+      corte con la transferencia de fuerzas columna-zapata (dowels) y
+      el diagrama de presión de contacto uniforme, más un cuadro de
+      estado (cumple/no cumple) por verificación.
     - v0.3.34: NUEVO -- Estabilidad de Muros de Contención en voladizo
       (volteo, deslizamiento, excentricidad, capacidad portante), a
       pedido explícito del usuario tras pedir sugerencias de mejora
