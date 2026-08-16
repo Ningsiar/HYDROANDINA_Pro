@@ -48,7 +48,8 @@ from .core import (delineation, morphometry, curve_number, tc_methods, dem_downl
                     regionalization, gridded_validation, swe2d, mesh_export,
                     runoff_coefficient, roughness_methods, roughness_materials,
                     iila_senamhi_zones, bim_metrados, bim_ifc, bim_refuerzo, bim_geometry,
-                    lateral_pressures, reinforced_concrete_e060, presupuesto, formula_polinomica)
+                    lateral_pressures, reinforced_concrete_e060, presupuesto, formula_polinomica,
+                    apu_referencia)
 from .core.qgis_layer_utils import obtener_capa
 from .ui.hypsometric_canvas import HypsometricCanvas
 from .ui.hydrograph_canvas import HydrographCanvas
@@ -10784,6 +10785,25 @@ class HydroAndinaProDialog(QDialog):
         v.addWidget(_lbl_intro_pres)
 
         # ------------------------------------------------------------
+        # 0) Cargar ejemplo real de referencia (Cajamarca, dic-2025)
+        # ------------------------------------------------------------
+        v.addWidget(QLabel(
+            "<hr><b>0. Ejemplo real de referencia (opcional)</b> — carga de una sola vez la "
+            "librería de insumos y las partidas (CON su APU ya armado) de un presupuesto de obra "
+            "vial REAL (Cajamarca, dic-2025) que el usuario aportó como referencia. Cada partida "
+            "quedó verificada cruzando su precio unitario reconstruido contra el del presupuesto "
+            "real (±1%) -- NO es una tarifa oficial CAPECO/Revista Costos, es el presupuesto real "
+            "de UN proyecto específico: útil como ejemplo/punto de partida, verifique vigencia de "
+            "precios/rendimientos antes de usarlo en otro proyecto. REEMPLAZA el contenido actual "
+            "de las secciones 1 y 2."))
+        btn_cargar_referencia = QPushButton("📂 Cargar ejemplo de referencia (Cajamarca, dic-2025)")
+        btn_cargar_referencia.clicked.connect(self._on_cargar_referencia_apu)
+        v.addWidget(btn_cargar_referencia)
+        self.lbl_estado_referencia_apu = QLabel("Estado: sin cargar.")
+        self.lbl_estado_referencia_apu.setWordWrap(True)
+        v.addWidget(self.lbl_estado_referencia_apu)
+
+        # ------------------------------------------------------------
         # 1) Librería de insumos
         # ------------------------------------------------------------
         v.addWidget(QLabel(
@@ -10988,6 +11008,49 @@ class HydroAndinaProDialog(QDialog):
         self._ultimo_presupuesto_pres = None
         v.addStretch()
         self._agregar_pestaña_con_scroll(tab, "9. Presupuesto, APU e Insumos")
+
+    def _on_cargar_referencia_apu(self):
+        try:
+            insumos = apu_referencia.construir_insumos()
+            partidas = apu_referencia.construir_partidas(insumos)
+            metadatos = apu_referencia.obtener_metadatos()
+        except apu_referencia.ReferenciaNoDisponibleError as e:
+            self.lbl_estado_referencia_apu.setText(f"Estado: ERROR -- {e}")
+            return
+        except Exception as e:
+            self.lbl_estado_referencia_apu.setText(f"Estado: ERROR inesperado -- {e}")
+            return
+
+        self.tabla_insumos_lib.setRowCount(len(insumos))
+        for fila, insumo in enumerate(insumos.values()):
+            self.tabla_insumos_lib.setItem(fila, 0, QTableWidgetItem(insumo.codigo))
+            self.tabla_insumos_lib.setItem(fila, 1, QTableWidgetItem(insumo.descripcion))
+            self.tabla_insumos_lib.setItem(fila, 2, QTableWidgetItem(insumo.unidad))
+            self.tabla_insumos_lib.setItem(fila, 3, QTableWidgetItem(insumo.tipo))
+            self.tabla_insumos_lib.setItem(fila, 4, QTableWidgetItem(f"{insumo.precio_unitario:g}"))
+            self.tabla_insumos_lib.setItem(fila, 5, QTableWidgetItem(
+                str(insumo.indice_inei) if insumo.indice_inei is not None else ""))
+        self._on_actualizar_insumos_lib()
+
+        self.tabla_partidas_pres.setRowCount(len(partidas))
+        for fila, partida in enumerate(partidas.values()):
+            self.tabla_partidas_pres.setItem(fila, 0, QTableWidgetItem(partida.codigo))
+            self.tabla_partidas_pres.setItem(fila, 1, QTableWidgetItem(partida.grupo))
+            self.tabla_partidas_pres.setItem(fila, 2, QTableWidgetItem(partida.descripcion))
+            self.tabla_partidas_pres.setItem(fila, 3, QTableWidgetItem(partida.unidad))
+            self.tabla_partidas_pres.setItem(fila, 4, QTableWidgetItem(f"{partida.metrado:g}"))
+        self._on_actualizar_partidas_pres()
+
+        for codigo, partida in partidas.items():
+            self._apus_por_partida_pres[codigo] = partida.apu
+        self._on_cambiar_partida_apu()
+
+        self.lbl_estado_referencia_apu.setText(
+            f"Estado: ejemplo cargado -- {len(insumos)} insumos, {len(partidas)} partidas CON su "
+            f"APU ya armado (metrado = 1.0 por defecto -- ajústelo a mano o impórtelo desde el "
+            f"Módulo BIM en la sección 2b). {metadatos['n_partidas_verificadas']} de "
+            f"{metadatos['n_partidas_totales_en_presupuesto']} partidas del presupuesto real "
+            f"pasaron la validación cruzada de precio unitario.")
 
     def _tipo_insumo_normalizado(self, texto: str, fila_1_based: int):
         texto = (texto or "").strip()

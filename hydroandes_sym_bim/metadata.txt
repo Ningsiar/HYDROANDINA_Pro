@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.3.28
+version=0.3.29
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,63 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.3.29: Módulo "Presupuesto, APU e Insumos" -- fase 4, la ÚLTIMA
+      pendiente: rendimientos y precios REALES, a partir del Análisis
+      de Precios Unitarios (APU, 260 páginas) que el usuario aportó de
+      su proyecto vial real (Cajamarca, dic-2025), sumado al
+      Presupuesto y la Relación de Insumos ya usados en v0.3.26.
+      Nueva sección "0. Ejemplo real de referencia" en la Pestaña 9:
+      un botón carga de una sola vez 255 insumos reales (código,
+      descripción, unidad, precio) y 626 partidas CON su APU ya
+      armado (mano de obra/materiales/equipos/herramienta/subcontratos/
+      subpartidas, con las cantidades reales del proyecto) -- listo
+      para calcular presupuestos de inmediato, o como ejemplo/punto de
+      partida para adaptar a un proyecto propio.
+      MÉTODO DE EXTRACCIÓN (para que quede documentado, no solo el
+      resultado -- ver core/apu_referencia.py): el texto de los 3 PDF
+      reales (Presupuesto, Relación de Insumos, APU de 260 páginas) se
+      extrajo con PyPDF2 y se parseó con expresiones regulares: CADA
+      una de las partidas del APU se reconstruyó sumando (cantidad ×
+      precio del insumo) de sus propios insumos, y se comparó contra
+      el precio unitario que aparece en el Presupuesto real -- una
+      fuente independiente del mismo proyecto. Solo se conservaron las
+      partidas cuyo precio unitario reconstruido coincide con el real
+      dentro de 1% de error (626 de 638, 98% -- las demás se
+      descartaron por datos incompletos en la extracción de texto del
+      PDF, en vez de incluirse con un valor no verificado).
+      Nueva categoría TipoInsumo.SUBPARTIDA (otra partida/APU usada
+      como insumo compuesto dentro de otra, común en APU reales de
+      obras viales -- p.ej. un concreto premezclado con su propio
+      costo ya calculado, referenciado como recurso). Se trata como
+      cantidad directa, igual que Materiales -- sin cambios de
+      fórmula, ItemApu.cantidad_por_unidad() ya soportaba cantidad
+      directa para cualquier tipo de insumo cuando no se da
+      rendimiento.
+      Nuevo resources/apu_referencia_cajamarca_2025.json (~630 KB,
+      bundled con el plugin) y core/apu_referencia.py (construir_
+      insumos(), construir_partidas(), obtener_metadatos()).
+      IMPORTANTE -- alcance honesto: esto NO es una tarifa oficial de
+      CAPECO/Revista Costos (publicaciones comerciales que este plugin
+      no reproduce, ver v0.3.25) -- es el presupuesto REAL de un
+      proyecto específico (esa obra, esa ubicación, esa fecha), útil
+      como ejemplo/punto de partida verificado, no como referencia
+      vigente para cualquier otro proyecto sin comprobar precios y
+      rendimientos actualizados.
+      Verificado con QGIS 3.40.1 real en modo headless (22
+      comprobaciones): el MOTOR REAL del plugin (Apu.precio_unitario(),
+      no solo el script de extracción) reproduce 626/626 (100%) de los
+      precios unitarios esperados dentro de 1.5% de tolerancia: caso
+      puntual 01.01.01 (Movilización y desmovilización) verificado
+      exacto (S/.116,323.20), y el flujo completo a través de los
+      controles reales de la interfaz -- carga completa, selección de
+      cualquier partida con su APU ya poblado, cálculo del presupuesto
+      completo con costo directo exacto a la suma de precios
+      unitarios, y relación de insumos generada correctamente.
+      Con esto quedan COMPLETAS las 4 fases del Módulo Presupuesto,
+      APU e Insumos. Sigue el Módulo de Programación y Cronogramas
+      (Gantt/PERT-CPM), para el que ya se validó la lectura de un
+      cronograma MS Project real (XML MSPDI) y de un cronograma de
+      desembolsos real del mismo proyecto.
     - v0.3.28: Módulo "Presupuesto, APU e Insumos" -- fase 3, la ÚLTIMA
       de las fases del núcleo del módulo: integración con los metrados
       del Módulo BIM y exportación (esta última resultó ya estar

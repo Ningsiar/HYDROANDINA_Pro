@@ -55,8 +55,11 @@ class TipoInsumo:
     EQUIPOS = "Equipos"
     HERRAMIENTAS = "Herramienta Manual"
     SUBCONTRATOS = "Subcontratos"
+    SUBPARTIDA = "Subpartida"  # otra Partida/APU usada como insumo compuesto dentro de esta (p.ej. un
+    # concreto premezclado con su propio APU, referenciado como recurso de otra partida -- común en
+    # exportaciones reales de S10). Se trata como cantidad directa (no rendimiento), igual que Materiales.
 
-    TODOS = (MANO_DE_OBRA, MATERIALES, EQUIPOS, HERRAMIENTAS, SUBCONTRATOS)
+    TODOS = (MANO_DE_OBRA, MATERIALES, EQUIPOS, HERRAMIENTAS, SUBCONTRATOS, SUBPARTIDA)
 
 
 class PresupuestoError(Exception):
