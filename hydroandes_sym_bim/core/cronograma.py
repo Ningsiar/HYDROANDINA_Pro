@@ -214,3 +214,53 @@ class Cronograma:
                 "predecesoras": list(act.predecesoras),
             })
         return filas
+
+
+# ======================================================================
+# Cronograma de adquisición de materiales -- enlaza este módulo con el
+# Módulo Presupuesto, APU e Insumos (core/presupuesto.py) SIN importarlo
+# (duck typing sobre Partida/Apu/ItemApu/Insumo, para no crear una
+# dependencia entre módulos que no la necesitan en el otro sentido).
+# ======================================================================
+def cronograma_adquisicion_materiales(cronograma_calculado: "Cronograma", partidas: list,
+                                       dias_anticipacion: float = 15.0) -> list:
+    """Para cada insumo usado en `partidas` (lista de
+    core.presupuesto.Partida, cada una con su Apu ya armado), calcula
+    cuándo debe estar disponible en obra: la fecha de Inicio Temprano
+    (ES) de la actividad con el MISMO CÓDIGO en `cronograma_calculado`
+    (ya con .calcular() ejecutado), menos `dias_anticipacion` días de
+    plazo de compra/entrega -- y la cantidad total requerida,
+    consolidada si el insumo se usa en más de una partida (se toma la
+    fecha MÁS TEMPRANA entre todas las que lo necesitan, para que la
+    compra alcance a cubrir el primer uso). Partidas sin una actividad
+    de igual código en el cronograma se omiten (no hay fecha con la
+    que calcular su necesidad) -- ver Cronograma.resumen_actividades()
+    para saber qué actividades sí están programadas.
+    Devuelve una lista ordenada por fecha_requerida (lo más urgente
+    primero)."""
+    acumulado = {}
+    for partida in partidas:
+        act = cronograma_calculado.actividades.get(partida.codigo)
+        if act is None or act.es is None or partida.apu is None:
+            continue
+        fecha_requerida = cronograma_calculado.fecha_de(act.es) - datetime.timedelta(days=dias_anticipacion)
+        for item in partida.apu.items:
+            cantidad = item.cantidad_por_unidad() * partida.metrado
+            clave = item.insumo.codigo
+            if clave not in acumulado:
+                acumulado[clave] = {"insumo": item.insumo, "cantidad_total": 0.0,
+                                     "fecha_mas_temprana": fecha_requerida, "codigos_partida": set()}
+            acumulado[clave]["cantidad_total"] += cantidad
+            acumulado[clave]["fecha_mas_temprana"] = min(
+                acumulado[clave]["fecha_mas_temprana"], fecha_requerida)
+            acumulado[clave]["codigos_partida"].add(partida.codigo)
+
+    filas = [{
+        "codigo": datos["insumo"].codigo, "descripcion": datos["insumo"].descripcion,
+        "unidad": datos["insumo"].unidad, "tipo": datos["insumo"].tipo,
+        "cantidad_total": round(datos["cantidad_total"], 4),
+        "fecha_requerida": datos["fecha_mas_temprana"],
+        "n_partidas": len(datos["codigos_partida"]),
+    } for datos in acumulado.values()]
+    filas.sort(key=lambda f: f["fecha_requerida"])
+    return filas

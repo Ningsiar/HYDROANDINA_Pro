@@ -11502,6 +11502,21 @@ class HydroAndinaProDialog(QDialog):
         v.addWidget(self.lbl_estado_actividades_cron)
 
         # ------------------------------------------------------------
+        # 1b) Generar actividades desde el Presupuesto
+        # ------------------------------------------------------------
+        v.addWidget(QLabel(
+            "<hr><b>1b. Generar actividades desde el Presupuesto</b> — trae una actividad por "
+            "cada partida ya actualizada en la Pestaña 9 (mismo código, para poder enlazar el "
+            "cronograma de adquisición de materiales más abajo). Duración inicial = 1 día para "
+            "TODAS -- este plugin no fabrica un rendimiento por partida que no tiene de forma "
+            "confiable (ver Módulo Presupuesto). AJÚSTELA (puede pegar duraciones reales desde "
+            "Excel) y agregue las precedencias que correspondan antes de calcular el CPM. "
+            "REEMPLAZA el contenido actual de la sección 1."))
+        btn_generar_desde_presupuesto = QPushButton("📥 Generar actividades desde el Presupuesto (Pestaña 9)")
+        btn_generar_desde_presupuesto.clicked.connect(self._on_generar_actividades_desde_presupuesto)
+        v.addWidget(btn_generar_desde_presupuesto)
+
+        # ------------------------------------------------------------
         # 2) Calcular CPM
         # ------------------------------------------------------------
         f_cron = QFormLayout()
@@ -11535,6 +11550,36 @@ class HydroAndinaProDialog(QDialog):
              "Holgura (d)", "¿Crítica?"])
         aplicar_columna_elastica(self.tabla_detalle_cronograma, 1)
         v.addWidget(self.tabla_detalle_cronograma)
+
+        # ------------------------------------------------------------
+        # 4) Cronograma de adquisición de materiales
+        # ------------------------------------------------------------
+        v.addWidget(QLabel(
+            "<hr><b>4. Cronograma de adquisición de materiales</b> — para cada insumo de la "
+            "Relación de Insumos (Pestaña 9), calcula cuándo debe estar disponible en obra: la "
+            "fecha de Inicio Temprano de la actividad con el mismo código que su partida, menos "
+            "el plazo de anticipación. Si un insumo se usa en varias partidas, se toma la fecha "
+            "MÁS TEMPRANA entre todas (para que la compra alcance a cubrir el primer uso). "
+            "Requiere haber calculado el CPM (sección 2) Y el presupuesto (Pestaña 9, sección 4)."))
+        f_adq = QFormLayout()
+        f_adq.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.spin_dias_anticipacion_cron = QSpinBox()
+        self.spin_dias_anticipacion_cron.setRange(0, 180)
+        self.spin_dias_anticipacion_cron.setValue(15)
+        self.spin_dias_anticipacion_cron.setSuffix(" días")
+        f_adq.addRow("Plazo de anticipación de compra:", self.spin_dias_anticipacion_cron)
+        v.addLayout(f_adq)
+        btn_adquisicion = QPushButton("📦 Generar cronograma de adquisición de materiales")
+        btn_adquisicion.clicked.connect(self._on_generar_adquisicion_materiales)
+        v.addWidget(btn_adquisicion)
+        self.lbl_estado_adquisicion = QLabel("Estado: sin generar.")
+        self.lbl_estado_adquisicion.setWordWrap(True)
+        v.addWidget(self.lbl_estado_adquisicion)
+        self.tabla_adquisicion_materiales = QTableWidget(0, 6, objectName="tabla_adquisicion_materiales")
+        self.tabla_adquisicion_materiales.setHorizontalHeaderLabels(
+            ["Código", "Descripción", "Tipo", "Unidad", "Cantidad Total", "Fecha requerida"])
+        aplicar_columna_elastica(self.tabla_adquisicion_materiales, 1)
+        v.addWidget(self.tabla_adquisicion_materiales)
 
         self._actividades_meta_cron = {}
         self._orden_actividades_cron = []
@@ -11582,6 +11627,65 @@ class HydroAndinaProDialog(QDialog):
         self._actividades_meta_cron = nuevas
         self._orden_actividades_cron = orden
         self.lbl_estado_actividades_cron.setText(f"Estado: {len(nuevas)} actividad(es) cargada(s).")
+
+    def _on_generar_actividades_desde_presupuesto(self):
+        orden_partidas = getattr(self, "_orden_partidas_pres", [])
+        partidas_meta = getattr(self, "_partidas_meta_pres", {})
+        if not orden_partidas:
+            self.lbl_estado_actividades_cron.setText(
+                "Estado: no hay partidas en el Módulo Presupuesto (Pestaña 9) -- actualícelas ahí "
+                "primero (sección 2).")
+            return
+        self.tabla_actividades_cron.setRowCount(len(orden_partidas))
+        for fila, codigo in enumerate(orden_partidas):
+            meta = partidas_meta[codigo]
+            self.tabla_actividades_cron.setItem(fila, 0, QTableWidgetItem(codigo))
+            self.tabla_actividades_cron.setItem(fila, 1, QTableWidgetItem(meta["descripcion"]))
+            self.tabla_actividades_cron.setItem(fila, 2, QTableWidgetItem("1"))
+            self.tabla_actividades_cron.setItem(fila, 3, QTableWidgetItem(""))
+            self.tabla_actividades_cron.setItem(fila, 4, QTableWidgetItem(""))
+        self._on_actualizar_actividades_cron()
+        self.lbl_estado_actividades_cron.setText(
+            f"Estado: {len(orden_partidas)} actividad(es) generada(s) desde el Presupuesto -- "
+            f"duración inicial 1 día para todas, AJÚSTELA según el rendimiento real de cada "
+            f"partida y agregue las precedencias que correspondan antes de calcular el CPM.")
+
+    def _on_generar_adquisicion_materiales(self):
+        if self._ultimo_cronograma is None:
+            self.lbl_estado_adquisicion.setText("Estado: calcule el CPM primero (sección 2).")
+            return
+        presupuesto_actual = getattr(self, "_ultimo_presupuesto_pres", None)
+        if presupuesto_actual is None:
+            self.lbl_estado_adquisicion.setText(
+                "Estado: calcule el presupuesto primero (Pestaña 9, sección 4).")
+            return
+        dias_anticipacion = self.spin_dias_anticipacion_cron.value()
+        try:
+            filas = cronograma.cronograma_adquisicion_materiales(
+                self._ultimo_cronograma, presupuesto_actual.partidas, dias_anticipacion=dias_anticipacion)
+        except Exception as e:
+            self.tabla_adquisicion_materiales.setRowCount(0)
+            self.lbl_estado_adquisicion.setText(f"Estado: ERROR inesperado -- {e}")
+            return
+        self.tabla_adquisicion_materiales.setRowCount(len(filas))
+        for fila, f in enumerate(filas):
+            self.tabla_adquisicion_materiales.setItem(fila, 0, QTableWidgetItem(f["codigo"]))
+            self.tabla_adquisicion_materiales.setItem(fila, 1, QTableWidgetItem(f["descripcion"]))
+            self.tabla_adquisicion_materiales.setItem(fila, 2, QTableWidgetItem(f["tipo"]))
+            self.tabla_adquisicion_materiales.setItem(fila, 3, QTableWidgetItem(f["unidad"]))
+            self.tabla_adquisicion_materiales.setItem(fila, 4, QTableWidgetItem(f"{f['cantidad_total']:g}"))
+            self.tabla_adquisicion_materiales.setItem(
+                fila, 5, QTableWidgetItem(f["fecha_requerida"].strftime("%d-%m-%Y")))
+        ajustar_alto_tabla(self.tabla_adquisicion_materiales, filas_visibles_max=20)
+        if filas:
+            self.lbl_estado_adquisicion.setText(
+                f"Estado: {len(filas)} insumo(s) programado(s) -- el más urgente: «{filas[0]['descripcion']}» "
+                f"para el {filas[0]['fecha_requerida']:%d-%m-%Y}.")
+        else:
+            self.lbl_estado_adquisicion.setText(
+                "Estado: sin insumos programables -- ninguna partida del presupuesto tiene una "
+                "actividad con el mismo código en este cronograma (genérelas con el botón de la "
+                "sección 1b, o revise que los códigos coincidan).")
 
     def _construir_cronograma(self):
         if not self._orden_actividades_cron:

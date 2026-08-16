@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.3.30
+version=0.3.31
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,45 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.3.31: Módulo "Programación y Cronogramas" -- fase 3: generar
+      actividades directamente desde las partidas del Módulo
+      Presupuesto (Pestaña 9) y cronograma de adquisición de
+      materiales, tal como pidió el usuario.
+      Nueva sección "1b. Generar actividades desde el Presupuesto":
+      un botón trae una actividad por cada partida ya actualizada en
+      la Pestaña 9 (mismo código, para poder enlazarlas) -- duración
+      inicial 1 día para TODAS (este plugin no fabrica un rendimiento
+      por partida que no tiene de forma confiable, ver Módulo
+      Presupuesto) y sin precedencias, listas para que el usuario las
+      ajuste (puede pegar duraciones reales desde Excel) y agregue las
+      precedencias que correspondan antes de calcular el CPM.
+      Nueva sección "4. Cronograma de adquisición de materiales":
+      nueva core/cronograma.py::cronograma_adquisicion_materiales() --
+      para cada insumo de la Relación de Insumos del presupuesto YA
+      calculado, calcula cuándo debe estar disponible en obra (fecha
+      de Inicio Temprano de la actividad con el mismo código que su
+      partida, menos un plazo de anticipación configurable) y la
+      cantidad total requerida, consolidada por insumo tomando la
+      fecha MÁS TEMPRANA entre todas las partidas que lo necesitan (si
+      se usa en más de una) -- así la compra alcanza a cubrir el
+      primer uso. Enlaza SIN un import cruzado entre módulos (duck
+      typing sobre Partida/Apu/Insumo), para no crear una dependencia
+      innecesaria.
+      Verificado con QGIS 3.40.1 real en modo headless (30
+      comprobaciones: 14 del núcleo + 16 de la interfaz): un caso con
+      dos partidas que comparten un insumo (cemento) en fechas
+      distintas, confirmando que se toma la fecha más temprana y la
+      cantidad total correcta; una partida sin actividad
+      correspondiente que se omite sin romper nada; y el flujo
+      completo encadenando las Pestañas 9 y 10 con el ejemplo real de
+      626 partidas (Cajamarca, dic-2025) -- generar actividades,
+      calcular presupuesto, calcular CPM (626 actividades en paralelo
+      dan 1 día de duración total, como corresponde sin precedencias),
+      y generar la adquisición de materiales con la fecha esperada
+      exacta para todos los insumos.
+      PENDIENTE: importar un cronograma real de Microsoft Project
+      (XML MSPDI), ya validado contra un archivo real del usuario en
+      esta misma sesión.
     - v0.3.30: Módulo "Programación y Cronogramas" -- NUEVO (fases 1 y
       2 de N), a pedido del usuario ("Gantt y PERT/CPM como Microsoft
       Project en versión de alto impacto y mejorado, con cronograma de
