@@ -11517,6 +11517,25 @@ class HydroAndinaProDialog(QDialog):
         v.addWidget(btn_generar_desde_presupuesto)
 
         # ------------------------------------------------------------
+        # 1c) Importar cronograma real de Microsoft Project (XML MSPDI)
+        # ------------------------------------------------------------
+        v.addWidget(QLabel(
+            "<hr><b>1c. Importar cronograma real (Microsoft Project)</b> — carga un archivo "
+            ".xml exportado de MS Project (Archivo → Guardar como... → tipo XML). Se importan las "
+            "tareas HOJA (los «resúmenes»/títulos de WBS no son actividades ejecutables) con su "
+            "duración real y sus predecesoras Fin-a-Inicio. IMPORTANTE: las fechas que calcule "
+            "este plugin (botón «Calcular CPM») pueden diferir de las de MS Project -- ese "
+            "considera calendarios, restricciones y nivelación de recursos que este importador NO "
+            "reproduce; útil para auditar la red lógica (duración + predecesoras), no como "
+            "reemplazo exacto. REEMPLAZA el contenido actual de la sección 1."))
+        btn_importar_mspdi = QPushButton("📂 Importar cronograma real desde MS Project (.xml)")
+        btn_importar_mspdi.clicked.connect(self._on_importar_mspdi)
+        v.addWidget(btn_importar_mspdi)
+        self.lbl_estado_importar_mspdi = QLabel("Estado: sin importar.")
+        self.lbl_estado_importar_mspdi.setWordWrap(True)
+        v.addWidget(self.lbl_estado_importar_mspdi)
+
+        # ------------------------------------------------------------
         # 2) Calcular CPM
         # ------------------------------------------------------------
         f_cron = QFormLayout()
@@ -11649,6 +11668,44 @@ class HydroAndinaProDialog(QDialog):
             f"Estado: {len(orden_partidas)} actividad(es) generada(s) desde el Presupuesto -- "
             f"duración inicial 1 día para todas, AJÚSTELA según el rendimiento real de cada "
             f"partida y agregue las precedencias que correspondan antes de calcular el CPM.")
+
+    def _on_importar_mspdi(self):
+        ruta, _ = QFileDialog.getOpenFileName(
+            self, "Importar cronograma de MS Project", "", "MS Project XML (*.xml)")
+        if not ruta:
+            return
+        try:
+            cron_importado, advertencias = cronograma.importar_mspdi(ruta)
+        except cronograma.CronogramaError as e:
+            self.lbl_estado_importar_mspdi.setText(f"Estado: ERROR -- {e}")
+            return
+        except Exception as e:
+            self.lbl_estado_importar_mspdi.setText(f"Estado: ERROR inesperado -- {e}")
+            return
+
+        # NOTA: se listan las actividades TAL COMO se importaron (código, nombre, duración,
+        # predecesoras) -- todavía SIN calcular el CPM (resumen_actividades() necesita
+        # Cronograma.calcular() ya ejecutado, y aquí solo se está poblando la tabla editable).
+        actividades = sorted(cron_importado.actividades.values(), key=lambda a: a.codigo)
+        self.tabla_actividades_cron.setRowCount(len(actividades))
+        for fila, act in enumerate(actividades):
+            self.tabla_actividades_cron.setItem(fila, 0, QTableWidgetItem(act.codigo))
+            self.tabla_actividades_cron.setItem(fila, 1, QTableWidgetItem(act.nombre))
+            self.tabla_actividades_cron.setItem(fila, 2, QTableWidgetItem(f"{act.duracion_dias:g}"))
+            self.tabla_actividades_cron.setItem(fila, 3, QTableWidgetItem(";".join(act.predecesoras)))
+            self.tabla_actividades_cron.setItem(fila, 4, QTableWidgetItem(""))
+        self._on_actualizar_actividades_cron()
+        if cron_importado.fecha_inicio:
+            self.fecha_inicio_cron.setDate(QDate(cron_importado.fecha_inicio.year,
+                                                  cron_importado.fecha_inicio.month,
+                                                  cron_importado.fecha_inicio.day))
+
+        nota_advertencia = f" {advertencias[0]}" if advertencias else ""
+        n_otras = len(advertencias) - 1 if advertencias else 0
+        nota_otras = f" ({n_otras} advertencia(s) adicional(es) sobre predecesoras omitidas.)" if n_otras else ""
+        self.lbl_estado_importar_mspdi.setText(
+            f"Estado: {len(actividades)} actividad(es) importada(s) desde «{cron_importado.nombre}»."
+            f"{nota_advertencia}{nota_otras}")
 
     def _on_generar_adquisicion_materiales(self):
         if self._ultimo_cronograma is None:

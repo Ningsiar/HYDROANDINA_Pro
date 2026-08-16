@@ -50,6 +50,7 @@ ALCANCE Y LIMITACIONES:
     cronograma contractual definitivo.
 """
 import datetime
+import re
 
 DIAS_POR_MES = 30  # aproximación simple para reportes en meses (igual que un cronograma de
 # desembolsos típico de obra, ver Módulo Presupuesto) -- no calendario real
@@ -264,3 +265,137 @@ def cronograma_adquisicion_materiales(cronograma_calculado: "Cronograma", partid
     } for datos in acumulado.values()]
     filas.sort(key=lambda f: f["fecha_requerida"])
     return filas
+
+
+# ======================================================================
+# Importación de un cronograma real de Microsoft Project (MSPDI --
+# Microsoft Project Data Interchange, el formato XML que MS Project
+# exporta con "Guardar como... XML") -- SOLO con la librería estándar
+# de Python (xml.etree.ElementTree), sin dependencias externas.
+# ======================================================================
+def _parsear_duracion_mspdi_horas(texto: str) -> float:
+    """«PT2864H0M0S» (formato de duración MSPDI, similar a ISO 8601)
+    -> horas totales (float). Devuelve 0.0 si el texto es None/vacío o
+    no tiene el formato esperado."""
+    if not texto:
+        return 0.0
+    m = re.match(r"P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?", texto)
+    if not m:
+        return 0.0
+    dias, horas, minutos, segundos = (float(g) if g else 0.0 for g in m.groups())
+    return dias * 24.0 + horas + minutos / 60.0 + segundos / 3600.0
+
+
+def importar_mspdi(ruta_archivo: str):
+    """Importa un cronograma real exportado de Microsoft Project en
+    formato XML (MSPDI), usando SOLO xml.etree.ElementTree (librería
+    estándar, sin dependencias externas).
+
+    Se importan las tareas HOJA (Summary=0) como Actividad -- las
+    tareas RESUMEN (agrupadores de WBS, Summary=1) se omiten como
+    actividades independientes del CPM porque su duración es la suma
+    de sus tareas hijas, no una duración propia programable (mismo
+    criterio que un presupuesto de obra real: sus "Títulos/Subtítulos"
+    no son partidas ejecutables, ver core/presupuesto.py). El CÓDIGO de
+    cada Actividad es el UID de la tarea en el XML (estable -- a
+    diferencia del ID visible en pantalla, que cambia si se reordenan
+    filas en MS Project), así que NO va a coincidir con el código de
+    una Partida de S10 a menos que se arme el archivo a propósito para
+    eso.
+
+    DURACIÓN: convertida de horas (formato MSPDI «PTxHxMxSxS») a DÍAS
+    usando 8 horas = 1 día -- la misma convención de jornada que el
+    resto del plugin (ver core/presupuesto.py::JORNADA_HORAS). Coincide
+    exactamente con un calendario de "días corridos" (semana completa,
+    sin fines de semana descontados), pero puede no coincidir con un
+    calendario de 5 días laborables real si el archivo lo usa --
+    verifique contra el calendario real del proyecto.
+
+    PREDECESORAS: se importan TODAS como relación Fin-a-Inicio (FS) --
+    el único tipo que soporta este módulo por ahora -- sin distinguir
+    Inicio-a-Inicio/Fin-a-Fin/Inicio-a-Fin si el archivo original los
+    usa (limitación conocida). Las predecesoras que apuntan a una tarea
+    RESUMEN (o a una tarea que no quedó entre las hojas importadas) se
+    omiten, con una advertencia -- en vez de fallar todo el import.
+
+    Devuelve (Cronograma, advertencias) -- `advertencias` es una lista
+    de mensajes (str) sobre datos que se omitieron o aproximaron."""
+    import xml.etree.ElementTree as ET
+
+    try:
+        tree = ET.parse(ruta_archivo)
+    except (ET.ParseError, OSError) as e:
+        raise CronogramaError(f"no se pudo leer el archivo MSPDI -- {e}") from e
+    root = tree.getroot()
+    ns_uri = root.tag.split("}")[0].strip("{") if root.tag.startswith("{") else ""
+
+    def tag(t):
+        return f"{{{ns_uri}}}{t}" if ns_uri else t
+
+    tareas_el = root.find(tag("Tasks"))
+    if tareas_el is None:
+        raise CronogramaError(
+            "el archivo no tiene ninguna sección <Tasks> -- no parece un MSPDI válido "
+            "(en MS Project: Archivo > Guardar como... > tipo XML).")
+
+    fecha_inicio_proyecto = None
+    texto_fecha = root.findtext(tag("StartDate"))
+    if texto_fecha:
+        try:
+            fecha_inicio_proyecto = datetime.date.fromisoformat(texto_fecha[:10])
+        except ValueError:
+            pass
+    fecha_fin_proyecto_mspdi = None
+    texto_fecha_fin = root.findtext(tag("FinishDate"))
+    if texto_fecha_fin:
+        try:
+            fecha_fin_proyecto_mspdi = datetime.date.fromisoformat(texto_fecha_fin[:10])
+        except ValueError:
+            pass
+
+    datos_por_uid = {}
+    for t in tareas_el.findall(tag("Task")):
+        uid = t.findtext(tag("UID"))
+        if uid is None:
+            continue
+        predecesoras = [p.findtext(tag("PredecessorUID")) for p in t.findall(tag("PredecessorLink"))]
+        datos_por_uid[uid] = {
+            "nombre": t.findtext(tag("Name")) or f"Tarea {uid}",
+            "es_resumen": t.findtext(tag("Summary")) == "1",
+            "duracion_dias": _parsear_duracion_mspdi_horas(t.findtext(tag("Duration"))) / 8.0,
+            "predecesoras": [p for p in predecesoras if p],
+        }
+
+    uids_hoja = {u for u, d in datos_por_uid.items() if not d["es_resumen"]}
+    advertencias = []
+    actividades = []
+    for uid, d in datos_por_uid.items():
+        if d["es_resumen"]:
+            continue
+        predecesoras_validas = [p for p in d["predecesoras"] if p in uids_hoja]
+        omitidas = len(d["predecesoras"]) - len(predecesoras_validas)
+        if omitidas:
+            advertencias.append(
+                f"la tarea «{d['nombre']}» (UID {uid}) tenía {omitidas} predecesora(s) que son "
+                f"tareas resumen (o no quedaron entre las hojas importadas) -- se omitieron.")
+        actividades.append(Actividad(uid, d["nombre"], max(d["duracion_dias"], 0.0),
+                                      predecesoras=predecesoras_validas))
+
+    if not actividades:
+        raise CronogramaError(
+            "no se encontró ninguna tarea hoja (Summary=0) en el archivo -- ¿es un MSPDI vacío?")
+
+    if fecha_inicio_proyecto and fecha_fin_proyecto_mspdi:
+        advertencias.insert(0, (
+            f"MS Project calculó este cronograma del {fecha_inicio_proyecto:%d-%m-%Y} al "
+            f"{fecha_fin_proyecto_mspdi:%d-%m-%Y} ({(fecha_fin_proyecto_mspdi - fecha_inicio_proyecto).days} "
+            f"días) -- considerando calendarios, restricciones y nivelación de recursos que este "
+            f"importador NO reproduce. Al presionar «Calcular CPM» en este plugin, la duración "
+            f"total y las fechas de cada actividad se RECALCULAN desde cero, solo a partir de las "
+            f"duraciones y relaciones Fin-a-Inicio de este archivo -- pueden diferir sustancialmente "
+            f"de las fechas originales de MS Project. Útil para auditar la red lógica "
+            f"(duración + predecesoras) del cronograma real, no como reemplazo exacto."))
+
+    nombre_proyecto = root.findtext(tag("Name")) or root.findtext(tag("Title")) or "Cronograma importado"
+    cron = Cronograma(nombre_proyecto, actividades, fecha_inicio=fecha_inicio_proyecto)
+    return cron, advertencias

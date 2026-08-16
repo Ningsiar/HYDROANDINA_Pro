@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.3.31
+version=0.3.32
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,58 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.3.32: Módulo "Programación y Cronogramas" -- fase 4, la
+      ÚLTIMA planeada: importar un cronograma REAL de Microsoft
+      Project (archivo .xml MSPDI), probado contra el cronograma Gantt
+      real de 745 tareas del proyecto de referencia (Cajamarca) que el
+      usuario aportó en esta misma sesión.
+      Nueva sección "1c. Importar cronograma real (Microsoft Project)"
+      y core/cronograma.py::importar_mspdi() -- lee el XML con
+      xml.etree.ElementTree (librería estándar, SIN dependencias
+      externas): importa las tareas HOJA (Summary=0) con su duración
+      real (convertida de horas a días, 8 horas = 1 día, misma
+      convención de jornada que el Módulo Presupuesto) y sus
+      predecesoras Fin-a-Inicio -- las tareas RESUMEN (agrupadores de
+      WBS) se omiten como actividades programables, igual que los
+      "Títulos/Subtítulos" de un presupuesto real no son partidas
+      ejecutables. Código de cada Actividad = UID de la tarea
+      (estable, a diferencia del ID visible que cambia al reordenar
+      filas en MS Project).
+      HALLAZGO IMPORTANTE de la propia prueba contra el archivo real
+      (no un supuesto): el CPM recalculado por este plugin, a partir
+      SOLO de duración + predecesoras Fin-a-Inicio, da una duración
+      total MUY distinta de la que calculó MS Project (2552 días
+      recalculados vs. 364 días reales) -- porque MS Project considera
+      calendarios, restricciones y nivelación de recursos que este
+      importador no reproduce. Se agregó una advertencia EXPLÍCITA
+      (primera de la lista que devuelve la función, mostrada en la
+      interfaz) explicando esta diferencia con las fechas reales de
+      MS Project incluidas, en vez de dejar que el usuario descubra la
+      discrepancia por su cuenta y desconfíe del resto del plugin -- el
+      importador sigue siendo útil para auditar la red lógica
+      (duración + predecesoras) de un cronograma real, no como
+      reemplazo exacto de MS Project.
+      Verificado con QGIS 3.40.1 real en modo headless (18
+      comprobaciones: 7 del núcleo + 11 de la interfaz) contra el
+      archivo REAL de 22 MB del usuario (no un archivo de prueba
+      sintético): 745 tareas hoja importadas exacto (873 totales menos
+      128 resúmenes), fecha de inicio del proyecto correcta, duración
+      de una tarea puntual verificada exacta contra su valor bruto en
+      horas del archivo (2776h/8=347 días), el CPM corriendo sin
+      excepción sobre las 745 actividades reales con predecesoras
+      reales, y el flujo completo a través del botón real de la
+      interfaz (incluido el diálogo de selección de archivo) con los
+      casos de error (archivo inexistente, diálogo cancelado).
+      Bug real corregido por la propia prueba de integración: el
+      primer intento de _on_importar_mspdi() llamaba a
+      resumen_actividades() (que necesita fechas ES/EF, calculadas
+      recién por Cronograma.calcular()) ANTES de que el usuario
+      calculara nada -- reventaba con "NoneType doesn't define
+      __round__". Corregido para listar las actividades recién
+      importadas directamente (código/nombre/duración/predecesoras),
+      sin necesitar el CPM ya calculado.
+      Con esto quedan completas las 4 fases planeadas del Módulo de
+      Programación y Cronogramas.
     - v0.3.31: Módulo "Programación y Cronogramas" -- fase 3: generar
       actividades directamente desde las partidas del Módulo
       Presupuesto (Pestaña 9) y cronograma de adquisición de
