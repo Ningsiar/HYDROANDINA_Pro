@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.3.32
+version=0.3.33
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,40 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.3.33: dos complementos a pedido del usuario -- "complementar
+      con el cronograma de adquisiciones, también fórmula polinómica".
+      1) FÓRMULA POLINÓMICA -- interfaz nueva (el núcleo ya existía
+      desde v0.3.26 sin UI): sección "5b. Fórmula Polinómica de
+      reajuste" en la Pestaña 9, después de la Relación de Insumos.
+      Paso 1: botón que calcula la participación de cada Índice
+      Unificado INEI sobre el costo directo (requiere que los insumos
+      tengan su índice asignado, columna ya existente en la Librería).
+      Paso 2: tabla editable de monomios (Símbolo | Factor |
+      Componentes "índice:peso%;...") -- arma y valida la
+      FormulaPolinomica (Σfactores=1.000, Σpesos por monomio=100%,
+      máx. 8 monomios), muestra su texto "K = ...". Paso 3: tabla de
+      razones Ir/Io por índice (autocompletada desde la fórmula
+      armada, editable) + monto bruto de una valorización -> calcula
+      K y el monto reajustado (D.S. 011-79-VC).
+      2) CRONOGRAMA DE ADQUISICIÓN DE MATERIALES -- gráfico de alto
+      impacto nuevo (ya existía como tabla desde v0.3.31): nuevo
+      ui/cronograma_canvas.py::graficar_adquisicion() -- línea de
+      tiempo con un punto por insumo en su fecha requerida (coloreado
+      por tipo, misma paleta que la Relación de Insumos), ordenada de
+      lo más urgente a lo menos urgente, con leyenda por tipo. Se
+      dispara automáticamente al generar el cronograma de adquisición
+      en la Pestaña 10.
+      Verificado con QGIS 3.40.1 real en modo headless (26
+      comprobaciones: 19 de la Fórmula Polinómica + 7 del gráfico de
+      adquisición): participación por índice reproduciendo el caso ya
+      verificado a mano (cemento ≈64.85%), fórmula de 2 monomios
+      armada y validada, coeficiente K y monto reajustado calculados a
+      mano de forma independiente (K=1.0598, monto reajustado
+      S/.10,598.00 sobre una valorización de S/.10,000.00) coincidiendo
+      exacto, los 4 casos de error (sin presupuesto calculado, sin
+      fórmula armada, pesos que no suman 100%, factores que no suman
+      1.000), y el gráfico de adquisición renderizando sin excepción
+      con las 626 partidas reales del ejemplo de referencia.
     - v0.3.32: Módulo "Programación y Cronogramas" -- fase 4, la
       ÚLTIMA planeada: importar un cronograma REAL de Microsoft
       Project (archivo .xml MSPDI), probado contra el cronograma Gantt

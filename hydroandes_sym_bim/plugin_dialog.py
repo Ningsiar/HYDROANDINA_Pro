@@ -10958,6 +10958,69 @@ class HydroAndinaProDialog(QDialog):
         v.addWidget(self.tabla_relacion_insumos_pres)
 
         # ------------------------------------------------------------
+        # 5b) Fórmula Polinómica de reajuste (D.S. 011-79-VC) -- ver
+        # core/formula_polinomica.py para el alcance exacto.
+        # ------------------------------------------------------------
+        v.addWidget(QLabel(
+            "<hr><b>5b. Fórmula Polinómica de reajuste</b> — reajuste de precios para contratos "
+            "de obra pública (D.S. 011-79-VC). Requiere la Relación de Insumos ya generada "
+            "(sección 5) y que cada insumo tenga su Índice Unificado INEI asignado (columna "
+            "«Índice INEI» de la sección 1)."))
+        v.addWidget(QLabel(
+            "<b>Paso 1 -- Participación por índice</b> (agrupamiento preliminar): % del costo "
+            "directo que corresponde a cada índice INEI, para decidir cómo agruparlos en monomios."))
+        btn_participacion_indice = QPushButton("📊 Calcular participación por índice INEI")
+        btn_participacion_indice.clicked.connect(self._on_calcular_participacion_indice)
+        v.addWidget(btn_participacion_indice)
+        self.lbl_estado_participacion_indice = QLabel("Estado: sin calcular.")
+        self.lbl_estado_participacion_indice.setWordWrap(True)
+        v.addWidget(self.lbl_estado_participacion_indice)
+        self.tabla_participacion_indice = QTableWidget(0, 3, objectName="tabla_participacion_indice")
+        self.tabla_participacion_indice.setHorizontalHeaderLabels(["Índice INEI", "Descripción", "% Participación"])
+        aplicar_columna_elastica(self.tabla_participacion_indice, 1)
+        v.addWidget(self.tabla_participacion_indice)
+
+        v.addWidget(QLabel(
+            "<b>Paso 2 -- Armar la fórmula final</b> (agrupamiento en monomios, máximo 8, "
+            "requiere su criterio técnico-económico -- qué índice pequeño se agrupa con cuál "
+            "mayor, según el Paso 1): Símbolo | Factor (Σ debe dar 1.000) | Componentes "
+            "(«índice:peso%;índice:peso%», el peso de los componentes de UN monomio debe sumar 100)."))
+        self.tabla_monomios_formula = TablaPegable(6, 3)
+        self.tabla_monomios_formula.setHorizontalHeaderLabels(["Símbolo", "Factor", "Componentes (índice:peso%;...)"])
+        v.addWidget(self.tabla_monomios_formula)
+        btn_armar_formula = QPushButton("🧮 Armar fórmula polinómica")
+        btn_armar_formula.clicked.connect(self._on_armar_formula_polinomica)
+        v.addWidget(btn_armar_formula)
+        self.lbl_estado_formula_polinomica = QLabel("Estado: sin armar.")
+        self.lbl_estado_formula_polinomica.setWordWrap(True)
+        v.addWidget(self.lbl_estado_formula_polinomica)
+
+        v.addWidget(QLabel(
+            "<b>Paso 3 -- Reajustar una valorización</b>: complete la razón Ir/Io (índice del mes "
+            "de la valorización sobre el índice del mes base, del Boletín de Índices Unificados "
+            "de Precios de la Construcción del INEI vigente para cada mes) de cada índice de la "
+            "fórmula -- 1.0 = sin variación."))
+        self.tabla_razones_indices = TablaPegable(0, 3)
+        self.tabla_razones_indices.setHorizontalHeaderLabels(["Índice INEI", "Descripción", "Ir/Io"])
+        v.addWidget(self.tabla_razones_indices)
+        f_reajuste = QFormLayout()
+        f_reajuste.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.spin_monto_valorizacion = QDoubleSpinBox()
+        self.spin_monto_valorizacion.setRange(0.0, 1e12)
+        self.spin_monto_valorizacion.setDecimals(2)
+        self.spin_monto_valorizacion.setSuffix(" S/.")
+        f_reajuste.addRow("Monto bruto de la valorización:", self.spin_monto_valorizacion)
+        v.addLayout(f_reajuste)
+        btn_calcular_reajuste = QPushButton("💰 Calcular reajuste (K)")
+        btn_calcular_reajuste.clicked.connect(self._on_calcular_reajuste)
+        v.addWidget(btn_calcular_reajuste)
+        self.lbl_estado_reajuste = QLabel("Estado: sin calcular.")
+        self.lbl_estado_reajuste.setWordWrap(True)
+        v.addWidget(self.lbl_estado_reajuste)
+        self.tabla_resultado_reajuste = crear_tabla_parametros(con_comentario=False)
+        v.addWidget(self.tabla_resultado_reajuste)
+
+        # ------------------------------------------------------------
         # 6) Inversión pública (opcional) -- Supervisión, Expediente
         # Técnico, Gestión del Proyecto, Control Concurrente -- ver
         # core/presupuesto.py::resumen_inversion_publica().
@@ -11009,6 +11072,7 @@ class HydroAndinaProDialog(QDialog):
         self._apus_por_partida_pres = {}
         self._orden_partidas_pres = []
         self._ultimo_presupuesto_pres = None
+        self._ultima_formula_polinomica = None
         v.addStretch()
         self._agregar_pestaña_con_scroll(tab, "9. Presupuesto, APU e Insumos")
 
@@ -11455,6 +11519,140 @@ class HydroAndinaProDialog(QDialog):
         self.lbl_estado_inversion_publica.setText(
             f"Estado: Presupuesto Total (inversión pública) = S/.{r['presupuesto_total']:,.2f}.")
 
+    def _on_calcular_participacion_indice(self):
+        if self._ultimo_presupuesto_pres is None:
+            self.lbl_estado_participacion_indice.setText(
+                "Estado: calcule el presupuesto primero (sección 4).")
+            return
+        try:
+            relacion = self._ultimo_presupuesto_pres.relacion_insumos()
+            participacion = formula_polinomica.participacion_por_indice(relacion)
+        except formula_polinomica.FormulaPolinomicaError as e:
+            self.tabla_participacion_indice.setRowCount(0)
+            self.lbl_estado_participacion_indice.setText(f"Estado: ERROR -- {e}")
+            return
+        except Exception as e:
+            self.tabla_participacion_indice.setRowCount(0)
+            self.lbl_estado_participacion_indice.setText(f"Estado: ERROR inesperado -- {e}")
+            return
+        filas = sorted(participacion.items(), key=lambda kv: -kv[1])
+        self.tabla_participacion_indice.setRowCount(len(filas))
+        for fila, (indice, pct) in enumerate(filas):
+            self.tabla_participacion_indice.setItem(fila, 0, QTableWidgetItem(str(indice)))
+            self.tabla_participacion_indice.setItem(
+                fila, 1, QTableWidgetItem(formula_polinomica.INDICES_INEI.get(indice, "")))
+            self.tabla_participacion_indice.setItem(fila, 2, QTableWidgetItem(f"{pct:.3f}"))
+        ajustar_alto_tabla(self.tabla_participacion_indice, filas_visibles_max=20)
+        self.lbl_estado_participacion_indice.setText(
+            f"Estado: {len(filas)} índice(s) con participación -- agrúpelos en monomios (Paso 2).")
+
+    def _on_armar_formula_polinomica(self):
+        try:
+            monomios = []
+            for fila in range(self.tabla_monomios_formula.rowCount()):
+                simbolo_item = self.tabla_monomios_formula.item(fila, 0)
+                factor_item = self.tabla_monomios_formula.item(fila, 1)
+                comp_item = self.tabla_monomios_formula.item(fila, 2)
+                simbolo = simbolo_item.text().strip() if simbolo_item else ""
+                if not simbolo:
+                    continue
+                factor_txt = factor_item.text().strip() if factor_item else ""
+                comp_txt = comp_item.text().strip() if comp_item else ""
+                if not factor_txt or not comp_txt:
+                    raise formula_polinomica.FormulaPolinomicaError(
+                        f"falta el factor o los componentes del monomio «{simbolo}» (fila {fila + 1}).")
+                try:
+                    factor = float(factor_txt.replace(",", "."))
+                except ValueError:
+                    raise formula_polinomica.FormulaPolinomicaError(
+                        f"factor no numérico en el monomio «{simbolo}» (fila {fila + 1}).")
+                componentes = []
+                for parte in comp_txt.split(";"):
+                    parte = parte.strip()
+                    if not parte:
+                        continue
+                    if ":" not in parte:
+                        raise formula_polinomica.FormulaPolinomicaError(
+                            f"componente «{parte}» del monomio «{simbolo}» debe tener el formato "
+                            f"«índice:peso%» (fila {fila + 1}).")
+                    indice_txt, peso_txt = parte.split(":", 1)
+                    try:
+                        indice = int(indice_txt.strip())
+                        peso = float(peso_txt.strip().replace(",", "."))
+                    except ValueError:
+                        raise formula_polinomica.FormulaPolinomicaError(
+                            f"componente «{parte}» del monomio «{simbolo}» no es numérico "
+                            f"(fila {fila + 1}).")
+                    componentes.append(formula_polinomica.ComponenteMonomio(indice, peso))
+                monomios.append(formula_polinomica.Monomio(simbolo, factor, componentes))
+            if not monomios:
+                raise formula_polinomica.FormulaPolinomicaError(
+                    "no hay ningún monomio -- complete la tabla primero.")
+            formula = formula_polinomica.FormulaPolinomica(monomios)
+        except formula_polinomica.FormulaPolinomicaError as e:
+            self.lbl_estado_formula_polinomica.setText(f"Estado: ERROR -- {e}")
+            return
+        except Exception as e:
+            self.lbl_estado_formula_polinomica.setText(f"Estado: ERROR inesperado -- {e}")
+            return
+
+        self._ultima_formula_polinomica = formula
+        self.lbl_estado_formula_polinomica.setText(f"Estado: {formula.formula_texto()}")
+
+        indices_formula = sorted({c.indice for m in formula.monomios for c in m.componentes})
+        self.tabla_razones_indices.setRowCount(len(indices_formula))
+        for fila, indice in enumerate(indices_formula):
+            self.tabla_razones_indices.setItem(fila, 0, QTableWidgetItem(str(indice)))
+            self.tabla_razones_indices.setItem(
+                fila, 1, QTableWidgetItem(formula_polinomica.INDICES_INEI.get(indice, "")))
+            self.tabla_razones_indices.setItem(fila, 2, QTableWidgetItem("1.0"))
+
+    def _on_calcular_reajuste(self):
+        if self._ultima_formula_polinomica is None:
+            self.lbl_estado_reajuste.setText("Estado: arme la fórmula primero (Paso 2).")
+            return
+        razones = {}
+        try:
+            for fila in range(self.tabla_razones_indices.rowCount()):
+                indice_item = self.tabla_razones_indices.item(fila, 0)
+                razon_item = self.tabla_razones_indices.item(fila, 2)
+                if not indice_item or not indice_item.text().strip():
+                    continue
+                indice = int(indice_item.text().strip())
+                razon_txt = razon_item.text().strip() if razon_item else ""
+                if not razon_txt:
+                    raise formula_polinomica.FormulaPolinomicaError(
+                        f"falta la razón Ir/Io del índice {indice}.")
+                razones[indice] = float(razon_txt.replace(",", "."))
+        except formula_polinomica.FormulaPolinomicaError as e:
+            self.tabla_resultado_reajuste.setRowCount(0)
+            self.lbl_estado_reajuste.setText(f"Estado: ERROR -- {e}")
+            return
+        except ValueError as e:
+            self.tabla_resultado_reajuste.setRowCount(0)
+            self.lbl_estado_reajuste.setText(f"Estado: ERROR -- razón Ir/Io no numérica ({e}).")
+            return
+        try:
+            k = self._ultima_formula_polinomica.calcular_k(razones)
+            monto_reajustado = formula_polinomica.reajustar_valorizacion(
+                self.spin_monto_valorizacion.value(), k)
+        except formula_polinomica.FormulaPolinomicaError as e:
+            self.tabla_resultado_reajuste.setRowCount(0)
+            self.lbl_estado_reajuste.setText(f"Estado: ERROR -- {e}")
+            return
+        except Exception as e:
+            self.tabla_resultado_reajuste.setRowCount(0)
+            self.lbl_estado_reajuste.setText(f"Estado: ERROR inesperado -- {e}")
+            return
+        filas = [
+            ("Coeficiente de reajuste K", round(k, 6), ""),
+            ("Monto bruto de la valorización", self.spin_monto_valorizacion.value(), "S/."),
+            ("Monto reajustado", monto_reajustado, "S/."),
+            ("Diferencia (reajuste)", round(monto_reajustado - self.spin_monto_valorizacion.value(), 2), "S/."),
+        ]
+        poblar_tabla_parametros(self.tabla_resultado_reajuste, filas)
+        self.lbl_estado_reajuste.setText(f"Estado: K={k:.6f} -- monto reajustado S/.{monto_reajustado:,.2f}.")
+
     # ==================================================================
     # Módulo "Programación y Cronogramas" -- fase 2 (interfaz). Ver
     # core/cronograma.py para el motor CPM/PERT.
@@ -11599,6 +11797,8 @@ class HydroAndinaProDialog(QDialog):
             ["Código", "Descripción", "Tipo", "Unidad", "Cantidad Total", "Fecha requerida"])
         aplicar_columna_elastica(self.tabla_adquisicion_materiales, 1)
         v.addWidget(self.tabla_adquisicion_materiales)
+        self.canvas_adquisicion_materiales = CronogramaCanvas(width=7.6, height=6.0)
+        v.addWidget(self.canvas_adquisicion_materiales)
 
         self._actividades_meta_cron = {}
         self._orden_actividades_cron = []
@@ -11734,6 +11934,10 @@ class HydroAndinaProDialog(QDialog):
             self.tabla_adquisicion_materiales.setItem(
                 fila, 5, QTableWidgetItem(f["fecha_requerida"].strftime("%d-%m-%Y")))
         ajustar_alto_tabla(self.tabla_adquisicion_materiales, filas_visibles_max=20)
+        try:
+            self.canvas_adquisicion_materiales.graficar_adquisicion(filas)
+        except Exception:
+            pass  # el gráfico es un plus visual -- nunca debe romper el cálculo ya hecho
         if filas:
             self.lbl_estado_adquisicion.setText(
                 f"Estado: {len(filas)} insumo(s) programado(s) -- el más urgente: «{filas[0]['descripcion']}» "
