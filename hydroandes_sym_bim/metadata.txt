@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.3.35
+version=0.3.36
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,45 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.3.36: NUEVO -- Guardar/Cargar Proyecto Completo (archivo
+      .json portátil), tercera de las 6 mejoras priorizadas por el
+      usuario (1 y 6 ya entregadas, ahora el 4).
+      Nuevo core/proyecto_io.py: guardar_proyecto()/cargar_proyecto()
+      -- sobre JSON con metadatos (versión de formato, versión del
+      plugin, nombre de proyecto, fecha) más una sección "datos" de
+      estructura libre. Validación explícita de 4 casos de error
+      (archivo inexistente, JSON inválido, formato no reconocido,
+      versión de formato futura). Alcance explícito: cubre Presupuesto
+      (insumos, partidas, APUs, resumen), Cronograma (actividades),
+      Fórmula Polinómica y los calculadores de Estabilidad de Muros/
+      Zapatas -- NO las pestañas de Hidrología (se re-derivan de un
+      MDE/CSV/NetCDF externo). Portátil pero SIN integración nativa de
+      nube (ninguna API/OAuth): para tenerlo en la nube, guárdelo
+      dentro de una carpeta ya sincronizada por Drive/OneDrive.
+      Botones "💾 Guardar Proyecto"/"📂 Cargar Proyecto" en la Pestaña
+      9, reutilizando los MISMOS manejadores «_on_actualizar_*» que ya
+      validan los datos cuando el usuario los ingresa a mano (no
+      duplica esa lógica de parseo/validación).
+      Bug real encontrado y corregido durante la verificación (no
+      introducido por este cambio, ya afectaba al editor de APU): un
+      insumo tipo Equipos con CANTIDAD DIRECTA (sin cuadrilla/
+      rendimiento -- válido y presente en el dataset real de
+      referencia, 573 de 626 partidas lo usan en al menos un insumo)
+      se mostraba/guardaba con las 4 columnas en blanco, porque la
+      UI decidía qué columnas usar por el TIPO de insumo en vez de por
+      qué campo estaba realmente poblado (ver ItemApu.cantidad_por_unidad()
+      en core/presupuesto.py, que sí usa la regla correcta). Corregido
+      en _on_cambiar_partida_apu y _on_guardar_apu para decidir por
+      item.rendimiento/rendimiento_txt, no por insumo.tipo -- con un
+      nuevo helper compartido _filas_de_apu().
+      Verificado con guardado/carga REAL de las 626 partidas del
+      presupuesto de referencia (Cajamarca) entre DOS instancias del
+      diálogo -- 626/626 partidas recuperadas (antes del fix del bug
+      de arriba, solo 24/626 se recuperaban), costo directo total
+      exactamente igual (S/.3,756,285 vs. S/.3,756,282, diferencia por
+      redondeo de formato de celda, no por pérdida de datos) -- 23/23
+      comprobaciones de integración UI + 15/15 del núcleo (roundtrip,
+      acentos/símbolos, y los 4 casos de error).
     - v0.3.35: NUEVO -- Diseño de Zapata Aislada (E.050/E.060/E.030),
       segunda de las 6 mejoras priorizadas por el usuario (1 ya
       entregada, ahora el 6). Reutiliza el motor de capacidad portante

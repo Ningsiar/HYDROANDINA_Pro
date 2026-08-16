@@ -50,7 +50,7 @@ from .core import (delineation, morphometry, curve_number, tc_methods, dem_downl
                     runoff_coefficient, roughness_methods, roughness_materials,
                     iila_senamhi_zones, bim_metrados, bim_ifc, bim_refuerzo, bim_geometry,
                     lateral_pressures, reinforced_concrete_e060, presupuesto, formula_polinomica,
-                    apu_referencia, cronograma, geotecnia_e050, estabilidad_muros, zapatas)
+                    apu_referencia, cronograma, geotecnia_e050, estabilidad_muros, zapatas, proyecto_io)
 from .core.qgis_layer_utils import obtener_capa
 from .ui.hypsometric_canvas import HypsometricCanvas
 from .ui.hydrograph_canvas import HydrographCanvas
@@ -11213,6 +11213,215 @@ class HydroAndinaProDialog(QDialog):
             f"Estado: diseño completo -- {'CUMPLE todas las verificaciones' if resultado['cumple_todo'] else 'NO CUMPLE alguna verificación (revise la tabla)'}.")
 
     # ==================================================================
+    # Guardar/Cargar Proyecto Completo -- ver core/proyecto_io.py para
+    # el formato del archivo. Aquí solo la recolección/aplicación del
+    # estado real de los widgets (Qt), que core/proyecto_io.py no
+    # conoce (se mantiene libre de dependencias de Qt).
+    # ==================================================================
+    _CAMPOS_ESTABILIDAD_MUROS = (
+        "spin_em_altura_relleno", "spin_em_espesor_pantalla", "spin_em_b_puntera", "spin_em_b_talon",
+        "spin_em_espesor_zapata", "spin_em_df", "spin_em_gamma_concreto", "spin_em_gamma_suelo",
+        "spin_em_phi_suelo", "spin_em_c_suelo", "combo_em_metodo_empuje", "spin_em_delta_muro",
+        "spin_em_i_relleno", "spin_em_sobrecarga", "check_em_empuje_pasivo", "spin_em_factor_pasivo",
+        "spin_em_factor_delta_desliz", "combo_em_zona_sismica",
+    )
+    _CAMPOS_ZAPATAS = (
+        "spin_zap_pu", "spin_zap_servicio", "spin_zap_b_columna", "spin_zap_h_columna", "spin_zap_q_adm",
+        "spin_zap_b_tanteo", "spin_zap_df", "spin_zap_h_zapata", "spin_zap_fc", "spin_zap_fy",
+        "spin_zap_recubrimiento", "combo_zap_barra", "combo_zap_tipo_columna", "check_zap_sobre_pilotes",
+        "combo_zap_zona_sismica", "combo_zap_perfil_suelo",
+    )
+
+    def _filas_de_apu(self, apu):
+        """Filas (5 columnas, formato de tabla_apu_items) a partir de un
+        Apu -- compartido entre _on_cambiar_partida_apu (mostrar en la
+        UI) y _recopilar_estado_proyecto (Guardar Proyecto), para no
+        duplicar la regla de qué columnas usar. La columna real que
+        decide es item.rendimiento (no el insumo.tipo): un Equipos con
+        cantidad DIRECTA, sin cuadrilla/rendimiento, es válido -- ver
+        ItemApu.cantidad_por_unidad() en core/presupuesto.py. El
+        inverso (parsear estas filas de vuelta a un Apu) está en
+        _on_guardar_apu, con la misma regla."""
+        filas = []
+        for item in apu.items:
+            usa_rendimiento = item.rendimiento is not None
+            filas.append([
+                item.insumo.codigo,
+                f"{item.cuadrilla:g}" if usa_rendimiento and item.cuadrilla is not None else "",
+                f"{item.rendimiento:g}" if usa_rendimiento else "",
+                "" if usa_rendimiento else f"{item.cantidad:g}" if item.cantidad is not None else "",
+                "" if usa_rendimiento else f"{item.desperdicio_pct:g}",
+            ])
+        return filas
+
+    def _leer_filas_tabla(self, tabla):
+        """Extrae el contenido de una QTableWidget como lista de listas
+        de texto (una lista por fila, se omiten las filas totalmente
+        vacías) -- reutilizado por Guardar/Cargar Proyecto."""
+        filas = []
+        for f in range(tabla.rowCount()):
+            fila = []
+            vacia = True
+            for c in range(tabla.columnCount()):
+                item = tabla.item(f, c)
+                texto = item.text() if item else ""
+                if texto.strip():
+                    vacia = False
+                fila.append(texto)
+            if not vacia:
+                filas.append(fila)
+        return filas
+
+    def _escribir_filas_tabla(self, tabla, filas):
+        """Inverso de _leer_filas_tabla -- repuebla una QTableWidget."""
+        tabla.setRowCount(len(filas))
+        for f, fila in enumerate(filas):
+            for c, texto in enumerate(fila):
+                if c < tabla.columnCount():
+                    tabla.setItem(f, c, QTableWidgetItem(texto))
+
+    def _leer_campo_widget(self, nombre_atributo):
+        widget = getattr(self, nombre_atributo, None)
+        if isinstance(widget, QDoubleSpinBox):
+            return widget.value()
+        if isinstance(widget, QComboBox):
+            return widget.currentText()
+        if isinstance(widget, QCheckBox):
+            return widget.isChecked()
+        return None
+
+    def _escribir_campo_widget(self, nombre_atributo, valor):
+        widget = getattr(self, nombre_atributo, None)
+        if widget is None or valor is None:
+            return
+        if isinstance(widget, QDoubleSpinBox):
+            widget.setValue(float(valor))
+        elif isinstance(widget, QComboBox):
+            idx = widget.findText(str(valor))
+            if idx >= 0:
+                widget.setCurrentIndex(idx)
+        elif isinstance(widget, QCheckBox):
+            widget.setChecked(bool(valor))
+
+    def _version_plugin_actual(self):
+        try:
+            ruta_meta = os.path.join(os.path.dirname(__file__), "metadata.txt")
+            with open(ruta_meta, "r", encoding="utf-8") as f:
+                for linea in f:
+                    if linea.startswith("version="):
+                        return linea.strip().split("=", 1)[1]
+        except OSError:
+            pass
+        return ""
+
+    def _recopilar_estado_proyecto(self):
+        """Arma el dict "datos" que se guarda en el archivo de proyecto
+        -- ver docstring de core/proyecto_io.py para el alcance exacto
+        (qué secciones cubre y por qué)."""
+        return {
+            "presupuesto": {
+                "insumos_lib": self._leer_filas_tabla(self.tabla_insumos_lib),
+                "partidas": self._leer_filas_tabla(self.tabla_partidas_pres),
+                "apus_por_partida": {
+                    codigo: self._filas_de_apu(apu) for codigo, apu in self._apus_por_partida_pres.items()},
+                "gg_pct": self.spin_pres_gg.value(), "ut_pct": self.spin_pres_ut.value(),
+                "igv_pct": self.spin_pres_igv.value(),
+                "gestion_proyecto": self._leer_filas_tabla(self.tabla_gestion_proyecto_pres),
+                "supervision_pct": self.spin_pres_supervision.value(),
+                "expediente_tecnico": self.spin_pres_expediente.value(),
+                "control_concurrente_pct": self.spin_pres_control_concurrente.value(),
+            },
+            "formula_polinomica": {"monomios": self._leer_filas_tabla(self.tabla_monomios_formula)},
+            "cronograma": {"actividades": self._leer_filas_tabla(self.tabla_actividades_cron)},
+            "estabilidad_muros": {c: self._leer_campo_widget(c) for c in self._CAMPOS_ESTABILIDAD_MUROS},
+            "zapatas": {c: self._leer_campo_widget(c) for c in self._CAMPOS_ZAPATAS},
+        }
+
+    def _aplicar_estado_proyecto(self, datos):
+        """Inverso de _recopilar_estado_proyecto -- repuebla todos los
+        widgets y reconstruye el estado interno reutilizando los MISMOS
+        manejadores «_on_actualizar_*» que ya validan/parsean los datos
+        cuando el usuario los ingresa a mano (no duplica esa lógica)."""
+        pres = datos.get("presupuesto", {})
+        if "insumos_lib" in pres:
+            self._escribir_filas_tabla(self.tabla_insumos_lib, pres["insumos_lib"])
+            self._on_actualizar_insumos_lib()
+        if "partidas" in pres:
+            self._escribir_filas_tabla(self.tabla_partidas_pres, pres["partidas"])
+            self._on_actualizar_partidas_pres()
+        for codigo, filas_apu in pres.get("apus_por_partida", {}).items():
+            idx = self.combo_apu_partida.findData(codigo)
+            if idx < 0:
+                continue  # la partida ya no existe (no debería pasar si "partidas" se cargó antes)
+            self.combo_apu_partida.setCurrentIndex(idx)
+            self._escribir_filas_tabla(self.tabla_apu_items, filas_apu)
+            self._on_guardar_apu()
+        if pres.get("gg_pct") is not None:
+            self.spin_pres_gg.setValue(pres["gg_pct"])
+        if pres.get("ut_pct") is not None:
+            self.spin_pres_ut.setValue(pres["ut_pct"])
+        if pres.get("igv_pct") is not None:
+            self.spin_pres_igv.setValue(pres["igv_pct"])
+        if "gestion_proyecto" in pres:
+            self._escribir_filas_tabla(self.tabla_gestion_proyecto_pres, pres["gestion_proyecto"])
+        if pres.get("supervision_pct") is not None:
+            self.spin_pres_supervision.setValue(pres["supervision_pct"])
+        if pres.get("expediente_tecnico") is not None:
+            self.spin_pres_expediente.setValue(pres["expediente_tecnico"])
+        if pres.get("control_concurrente_pct") is not None:
+            self.spin_pres_control_concurrente.setValue(pres["control_concurrente_pct"])
+
+        formula = datos.get("formula_polinomica", {})
+        if "monomios" in formula:
+            self._escribir_filas_tabla(self.tabla_monomios_formula, formula["monomios"])
+
+        cron = datos.get("cronograma", {})
+        if "actividades" in cron:
+            self._escribir_filas_tabla(self.tabla_actividades_cron, cron["actividades"])
+
+        for c, valor in datos.get("estabilidad_muros", {}).items():
+            self._escribir_campo_widget(c, valor)
+        for c, valor in datos.get("zapatas", {}).items():
+            self._escribir_campo_widget(c, valor)
+
+    def _on_guardar_proyecto(self):
+        ruta, _ = QFileDialog.getSaveFileName(
+            self, "Guardar Proyecto Completo", "proyecto_hydroandes.json", "Proyecto HydroAndes (*.json)")
+        if not ruta:
+            return
+        nombre_proyecto = os.path.splitext(os.path.basename(ruta))[0]
+        try:
+            datos = self._recopilar_estado_proyecto()
+            proyecto_io.guardar_proyecto(ruta, datos, nombre_proyecto=nombre_proyecto,
+                                          version_plugin=self._version_plugin_actual())
+        except proyecto_io.ProyectoIOError as e:
+            self.lbl_estado_proyecto_io.setText(f"Estado: no se pudo guardar -- {e}")
+            return
+        except Exception as e:
+            self.lbl_estado_proyecto_io.setText(f"Estado: ERROR inesperado al guardar -- {e}")
+            return
+        self.lbl_estado_proyecto_io.setText(f"Estado: proyecto guardado en «{ruta}».")
+
+    def _on_cargar_proyecto(self):
+        ruta, _ = QFileDialog.getOpenFileName(
+            self, "Cargar Proyecto Completo", "", "Proyecto HydroAndes (*.json)")
+        if not ruta:
+            return
+        try:
+            sobre = proyecto_io.cargar_proyecto(ruta)
+            self._aplicar_estado_proyecto(sobre["datos"])
+        except proyecto_io.ProyectoIOError as e:
+            self.lbl_estado_proyecto_io.setText(f"Estado: no se pudo cargar -- {e}")
+            return
+        except Exception as e:
+            self.lbl_estado_proyecto_io.setText(f"Estado: ERROR inesperado al cargar -- {e}")
+            return
+        self.lbl_estado_proyecto_io.setText(
+            f"Estado: proyecto «{sobre.get('nombre_proyecto', '')}» cargado (guardado el "
+            f"{sobre.get('fecha_guardado', '?')} con la versión {sobre.get('version_plugin', '?')} "
+            f"del plugin).")
+
+    # ==================================================================
     # Módulo "Presupuesto, APU e Insumos" -- fase 2 (interfaz). Ver
     # core/presupuesto.py para el modelo de datos y las fórmulas.
     # ==================================================================
@@ -11233,6 +11442,32 @@ class HydroAndinaProDialog(QDialog):
         )
         _lbl_intro_pres.setWordWrap(True)
         v.addWidget(_lbl_intro_pres)
+
+        # ------------------------------------------------------------
+        # 00) Guardar/Cargar Proyecto Completo -- archivo .json
+        # portátil (Presupuesto, Cronograma, Fórmula Polinómica,
+        # Estabilidad de Muros, Zapatas). Ver core/proyecto_io.py.
+        # ------------------------------------------------------------
+        v.addWidget(QLabel(
+            "<hr><b>💾 Guardar / Cargar Proyecto Completo</b> — guarda en UN archivo .json portátil "
+            "el estado de esta pestaña (Presupuesto, Fórmula Polinómica), Cronograma, y los "
+            "calculadores de Estabilidad de Muros y Diseño de Zapatas (Pestaña 8b) -- para "
+            "continuar el proyecto en otra sesión, o llevarlo a otra PC. NO incluye las pestañas de "
+            "Hidrología/Hidráulica (se re-derivan de un MDE/CSV/NetCDF externo que usted vuelve a "
+            "cargar directamente). El archivo es texto plano, revisable a mano; para tenerlo en la "
+            "nube, guárdelo dentro de una carpeta ya sincronizada por su cliente de Drive/OneDrive "
+            "(este plugin no pide credenciales de ninguna nube)."))
+        f_proyecto_io = QHBoxLayout()
+        btn_guardar_proyecto = QPushButton("💾 Guardar Proyecto...")
+        btn_guardar_proyecto.clicked.connect(self._on_guardar_proyecto)
+        f_proyecto_io.addWidget(btn_guardar_proyecto)
+        btn_cargar_proyecto = QPushButton("📂 Cargar Proyecto...")
+        btn_cargar_proyecto.clicked.connect(self._on_cargar_proyecto)
+        f_proyecto_io.addWidget(btn_cargar_proyecto)
+        v.addLayout(f_proyecto_io)
+        self.lbl_estado_proyecto_io = QLabel("Estado: sin guardar/cargar en esta sesión.")
+        self.lbl_estado_proyecto_io.setWordWrap(True)
+        v.addWidget(self.lbl_estado_proyecto_io)
 
         # ------------------------------------------------------------
         # 0) Cargar ejemplo real de referencia (Cajamarca, dic-2025)
@@ -11771,18 +12006,7 @@ class HydroAndinaProDialog(QDialog):
         if apu is None:
             self.lbl_estado_apu.setText(f"Estado: la partida «{codigo}» todavía no tiene APU guardado.")
             return
-        self.tabla_apu_items.setRowCount(len(apu.items))
-        for fila, item in enumerate(apu.items):
-            usa_rendimiento = item.insumo.tipo in (presupuesto.TipoInsumo.MANO_DE_OBRA, presupuesto.TipoInsumo.EQUIPOS)
-            self.tabla_apu_items.setItem(fila, 0, QTableWidgetItem(item.insumo.codigo))
-            self.tabla_apu_items.setItem(fila, 1, QTableWidgetItem(
-                f"{item.cuadrilla:g}" if usa_rendimiento and item.cuadrilla is not None else ""))
-            self.tabla_apu_items.setItem(fila, 2, QTableWidgetItem(
-                f"{item.rendimiento:g}" if usa_rendimiento and item.rendimiento is not None else ""))
-            self.tabla_apu_items.setItem(fila, 3, QTableWidgetItem(
-                "" if usa_rendimiento else f"{item.cantidad:g}" if item.cantidad is not None else ""))
-            self.tabla_apu_items.setItem(fila, 4, QTableWidgetItem(
-                "" if usa_rendimiento else f"{item.desperdicio_pct:g}"))
+        self._escribir_filas_tabla(self.tabla_apu_items, self._filas_de_apu(apu))
         self._mostrar_resumen_apu(apu, codigo)
 
     def _mostrar_resumen_apu(self, apu, codigo):
@@ -11811,19 +12035,21 @@ class HydroAndinaProDialog(QDialog):
                     raise presupuesto.PresupuestoError(
                         f"el insumo «{codigo_insumo}» (fila {fila + 1} del APU) no está en la librería "
                         f"-- actualícela en la sección 1 primero.")
-                usa_rendimiento = insumo.tipo in (presupuesto.TipoInsumo.MANO_DE_OBRA, presupuesto.TipoInsumo.EQUIPOS)
+                # Qué columnas usar lo decide cuál está REALMENTE llena (rendimiento
+                # vs. cantidad), no el insumo.tipo -- un Equipos con cantidad DIRECTA
+                # (sin cuadrilla/rendimiento) es válido, ver ItemApu.cantidad_por_unidad()
+                # en core/presupuesto.py y _on_cambiar_partida_apu (misma regla ahí).
+                usa_rendimiento = bool(rendimiento_txt)
                 try:
                     if usa_rendimiento:
                         cuadrilla = float(cuadrilla_txt.replace(",", ".")) if cuadrilla_txt else 1.0
-                        if not rendimiento_txt:
-                            raise presupuesto.PresupuestoError(
-                                f"falta el rendimiento para «{codigo_insumo}» (fila {fila + 1} del APU).")
                         rendimiento = float(rendimiento_txt.replace(",", "."))
                         apu.agregar(presupuesto.ItemApu(insumo, cuadrilla=cuadrilla, rendimiento=rendimiento))
                     else:
                         if not cantidad_txt:
                             raise presupuesto.PresupuestoError(
-                                f"falta la cantidad para «{codigo_insumo}» (fila {fila + 1} del APU).")
+                                f"falta el rendimiento o la cantidad para «{codigo_insumo}» "
+                                f"(fila {fila + 1} del APU).")
                         cantidad = float(cantidad_txt.replace(",", "."))
                         desperdicio = float(desperdicio_txt.replace(",", ".")) if desperdicio_txt else 0.0
                         apu.agregar(presupuesto.ItemApu(insumo, cantidad=cantidad, desperdicio_pct=desperdicio))
