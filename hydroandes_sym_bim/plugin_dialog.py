@@ -12424,9 +12424,10 @@ class HydroAndinaProDialog(QDialog):
             "<b>Programación y Cronogramas</b> — diagrama de Gantt y Método de la Ruta Crítica "
             "(CPM), con estimación PERT de 3 puntos opcional. Puede PEGAR datos copiados desde "
             "Excel directamente en la tabla (Ctrl+V). Relaciones Fin-a-Inicio (FS) con "
-            "adelanto/atraso (lag) opcional -- días CORRIDOS, sin calendario laboral. No reemplaza "
-            "el criterio de un ingeniero de planificación de obra ni sustituye Microsoft Project/"
-            "Primavera para un cronograma contractual definitivo."
+            "adelanto/atraso (lag) opcional -- días CORRIDOS por defecto, con calendario laboral "
+            "opcional (sección 1d) para saltar fines de semana/feriados. No reemplaza el criterio "
+            "de un ingeniero de planificación de obra ni sustituye Microsoft Project/Primavera para "
+            "un cronograma contractual definitivo."
         )
         _lbl_intro_cron.setWordWrap(True)
         v.addWidget(_lbl_intro_cron)
@@ -12489,6 +12490,30 @@ class HydroAndinaProDialog(QDialog):
         self.lbl_estado_importar_mspdi = QLabel("Estado: sin importar.")
         self.lbl_estado_importar_mspdi.setWordWrap(True)
         v.addWidget(self.lbl_estado_importar_mspdi)
+
+        # ------------------------------------------------------------
+        # 1d) Calendario laboral -- convierte los días de CPM a fechas
+        # reales saltando fines de semana/feriados, en vez de días
+        # corridos. Ver core/cronograma.py::CalendarioLaboral.
+        # ------------------------------------------------------------
+        v.addWidget(QLabel(
+            "<hr><b>1d. Calendario laboral (opcional)</b> — el CPM en sí (holgura, ruta crítica) "
+            "no cambia: esto solo afecta cómo se convierten los días de cada actividad a fechas de "
+            "calendario reales. «Ninguno» (por defecto) usa días CORRIDOS, igual que antes."))
+        f_calendario_cron = QFormLayout()
+        f_calendario_cron.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.combo_cron_calendario = QComboBox()
+        self.combo_cron_calendario.addItems([
+            "Ninguno (días corridos)",
+            "Lunes a Sábado (solo domingo libre)",
+            "Lunes a Viernes (sábado y domingo libres)",
+        ])
+        f_calendario_cron.addRow("Días laborables:", self.combo_cron_calendario)
+        self.check_cron_feriados_peru = QCheckBox(
+            "Incluir feriados nacionales del Perú (fijos + Semana Santa, no incluye feriados "
+            "regionales ni «puente»)")
+        f_calendario_cron.addRow("", self.check_cron_feriados_peru)
+        v.addLayout(f_calendario_cron)
 
         # ------------------------------------------------------------
         # 2) Calcular CPM
@@ -12705,6 +12730,25 @@ class HydroAndinaProDialog(QDialog):
                 "actividad con el mismo código en este cronograma (genérelas con el botón de la "
                 "sección 1b, o revise que los códigos coincidan).")
 
+    def _construir_calendario_laboral_cron(self):
+        """None (días corridos) si el combo está en «Ninguno», o un
+        CalendarioLaboral según el patrón elegido + feriados del Perú
+        si se marcó el checkbox (para los años que cubre el
+        cronograma: el de inicio y, por si el proyecto cruza de año,
+        también el del año de fin estimado a partir de la fecha de
+        inicio + 2 años de margen -- feriados_peru() es barato de
+        calcular, no hace falta ser exacto aquí)."""
+        idx = self.combo_cron_calendario.currentIndex()
+        if idx == 0:
+            return None
+        dias_libres = {6} if idx == 1 else {5, 6}
+        feriados = set()
+        if self.check_cron_feriados_peru.isChecked():
+            anio_inicio = self.fecha_inicio_cron.date().year()
+            for anio in range(anio_inicio, anio_inicio + 3):
+                feriados.update(cronograma.feriados_peru(anio))
+        return cronograma.CalendarioLaboral(dias_libres_semana=dias_libres, feriados=feriados)
+
     def _construir_cronograma(self):
         if not self._orden_actividades_cron:
             raise cronograma.CronogramaError(
@@ -12715,7 +12759,9 @@ class HydroAndinaProDialog(QDialog):
             for codigo, meta in self._actividades_meta_cron.items()
         ]
         fecha_inicio = self.fecha_inicio_cron.date().toPyDate()
-        return cronograma.Cronograma("Cronograma", actividades, fecha_inicio=fecha_inicio)
+        calendario = self._construir_calendario_laboral_cron()
+        return cronograma.Cronograma("Cronograma", actividades, fecha_inicio=fecha_inicio,
+                                      calendario=calendario)
 
     def _on_calcular_cronograma(self):
         try:

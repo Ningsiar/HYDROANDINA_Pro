@@ -37,14 +37,34 @@ asumida, la aproximación clásica de PERT). Opcional: si se dan los 3
 valores, se usa duración_esperada; si se da una sola duración, se usa
 tal cual (CPM determinístico puro).
 
+CALENDARIO LABORAL (opcional, ver `CalendarioLaboral`): el CPM en sí
+(pase adelante/atrás, holgura, ruta crítica) SIEMPRE trabaja en
+"unidades de día" abstractas -- eso NO cambia con o sin calendario. Lo
+que sí cambia es `Cronograma.fecha_de()`, que convierte esas unidades
+a una fecha de calendario real: SIN calendario (por defecto,
+`calendario=None`), suma días CORRIDOS tal cual (comportamiento
+histórico de este módulo); CON un `CalendarioLaboral`, cuenta esa
+cantidad de días SALTÁNDOSE los no laborables (fines de semana según
+el patrón elegido, más los feriados indicados) -- es decir, la
+DURACIÓN de cada actividad se sigue interpretando en días de trabajo
+(igual que en la práctica: "esta partida toma 5 días" significa 5 días
+trabajados, no 5 días de calendario), y es la conversión a fecha la
+que ahora respeta qué días son laborables.
+
 ALCANCE Y LIMITACIONES:
   - Relaciones Fin-a-Inicio (FS) únicamente por ahora, con lag/lead
     opcional -- Inicio-a-Inicio (SS), Fin-a-Fin (FF) e Inicio-a-Fin
     (SF) quedan para una fase posterior si hace falta.
-  - Días CORRIDOS, no días hábiles -- sin calendario laboral (fines de
-    semana/feriados). Para un cronograma contractual definitivo,
-    ajuste las duraciones considerando los días no laborables de su
-    calendario real.
+  - El calendario laboral solo distingue día laborable/no laborable
+    (para saltarlo al convertir a fecha) -- NO modela turnos parciales,
+    horas efectivas por día, ni calendarios DISTINTOS por actividad o
+    por recurso (MS Project/Primavera sí lo hacen) -- un único
+    calendario para todo el proyecto.
+  - `feriados_peru()` solo cubre los feriados NACIONALES fijos más
+    Jueves/Viernes Santo (movibles, calculados) -- NO incluye feriados
+    regionales/locales (varían por departamento) ni los "feriados
+    puente" que el Gobierno a veces decreta año a año (no son
+    predecibles de antemano); agréguelos a mano si aplican a su obra.
   - NO reemplaza el criterio de un ingeniero de planificación de obra
     ni sustituye una revisión con Microsoft Project/Primavera para un
     cronograma contractual definitivo.
@@ -54,6 +74,94 @@ import re
 
 DIAS_POR_MES = 30  # aproximación simple para reportes en meses (igual que un cronograma de
 # desembolsos típico de obra, ver Módulo Presupuesto) -- no calendario real
+
+# Feriados NACIONALES fijos de Perú (mes, día) -- hechos de dominio
+# público (calendario oficial), no cubre feriados regionales/locales
+# ni "feriados puente" decretados año a año.
+FERIADOS_FIJOS_PERU = (
+    (1, 1),    # Año Nuevo
+    (5, 1),    # Día del Trabajo
+    (6, 29),   # San Pedro y San Pablo
+    (7, 28),   # Fiestas Patrias
+    (7, 29),   # Fiestas Patrias
+    (8, 30),   # Santa Rosa de Lima
+    (10, 8),   # Combate de Angamos
+    (11, 1),   # Todos los Santos
+    (12, 8),   # Inmaculada Concepción
+    (12, 9),   # Batalla de Ayacucho
+    (12, 25),  # Navidad
+)
+
+
+def _domingo_pascua(anio: int) -> datetime.date:
+    """Domingo de Pascua para `anio` (calendario gregoriano) --
+    algoritmo anónimo de Gauss/Meeus (computus), el estándar de
+    dominio público para esta fecha movible."""
+    a = anio % 19
+    b = anio // 100
+    c = anio % 100
+    d = b // 4
+    e = b % 4
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i = c // 4
+    k = c % 4
+    m = (32 + 2 * e + 2 * i - h - k) % 7
+    n = (a + 11 * h + 22 * m) // 451
+    mes = (h + m - 7 * n + 114) // 31
+    dia = ((h + m - 7 * n + 114) % 31) + 1
+    return datetime.date(anio, mes, dia)
+
+
+def feriados_peru(anio: int, incluir_semana_santa: bool = True) -> list:
+    """Feriados NACIONALES de Perú para `anio` -- los fijos
+    (FERIADOS_FIJOS_PERU) más, opcionalmente, Jueves y Viernes Santo
+    (movibles, calculados desde el Domingo de Pascua). Ver alcance
+    exacto en el docstring del módulo."""
+    feriados = [datetime.date(anio, mes, dia) for mes, dia in FERIADOS_FIJOS_PERU]
+    if incluir_semana_santa:
+        pascua = _domingo_pascua(anio)
+        feriados.append(pascua - datetime.timedelta(days=3))  # Jueves Santo
+        feriados.append(pascua - datetime.timedelta(days=2))  # Viernes Santo
+    return feriados
+
+
+class CalendarioLaboral:
+    """Calendario de días laborables para convertir "días de CPM" a
+    fechas de calendario reales (ver Cronograma.fecha_de()).
+    `dias_libres_semana`: conjunto de índices de date.weekday()
+    (0=Lunes ... 6=Domingo) que NO se trabajan -- por defecto {6}
+    (solo domingo libre, Lunes a Sábado, el patrón más común en
+    construcción civil peruana). `feriados`: colección de
+    datetime.date adicionales que tampoco se trabajan (ver
+    feriados_peru() para poblarlo con los feriados nacionales)."""
+
+    def __init__(self, dias_libres_semana=None, feriados=None):
+        self.dias_libres_semana = set(dias_libres_semana) if dias_libres_semana is not None else {6}
+        self.feriados = set(feriados) if feriados else set()
+
+    def es_laborable(self, fecha: datetime.date) -> bool:
+        return fecha.weekday() not in self.dias_libres_semana and fecha not in self.feriados
+
+    def avanzar_dias_laborables(self, fecha_inicio: datetime.date, n_dias_laborables) -> datetime.date:
+        """Fecha resultante de avanzar `n_dias_laborables` días
+        LABORABLES desde `fecha_inicio` (si `fecha_inicio` mismo cae
+        en un día no laborable, se adelanta primero al siguiente día
+        laborable -- ese pasa a contar como el día 0). `n_dias_laborables`
+        se redondea al entero más cercano (mismo criterio que el
+        Cronograma sin calendario, que ya redondea el día relativo del
+        CPM al convertirlo a fecha)."""
+        fecha = fecha_inicio
+        while not self.es_laborable(fecha):
+            fecha += datetime.timedelta(days=1)
+        restantes = round(n_dias_laborables)
+        paso = 1 if restantes >= 0 else -1
+        while restantes != 0:
+            fecha += datetime.timedelta(days=paso)
+            if self.es_laborable(fecha):
+                restantes -= paso
+        return fecha
 
 
 class CronogramaError(Exception):
@@ -106,7 +214,8 @@ class Cronograma:
     más la fecha de inicio real del proyecto (para convertir los días
     relativos del CPM a fechas de calendario)."""
 
-    def __init__(self, nombre: str, actividades: list, fecha_inicio: datetime.date = None):
+    def __init__(self, nombre: str, actividades: list, fecha_inicio: datetime.date = None,
+                 calendario: "CalendarioLaboral" = None):
         self.nombre = nombre
         self.actividades = {}
         for a in actividades:
@@ -114,6 +223,7 @@ class Cronograma:
                 raise CronogramaError(f"código de actividad duplicado: «{a.codigo}»")
             self.actividades[a.codigo] = a
         self.fecha_inicio = fecha_inicio or datetime.date.today()
+        self.calendario = calendario  # None = días CORRIDOS (comportamiento histórico), ver fecha_de()
 
     def _orden_topologico(self) -> list:
         """Orden de las actividades tal que toda predecesora aparece
@@ -197,8 +307,13 @@ class Cronograma:
 
     def fecha_de(self, dia_relativo: float) -> datetime.date:
         """Convierte un día relativo del CPM (0 = inicio del proyecto)
-        a una fecha de calendario real, sumando días corridos."""
-        return self.fecha_inicio + datetime.timedelta(days=round(dia_relativo))
+        a una fecha de calendario real. SIN calendario laboral (por
+        defecto): suma días CORRIDOS. CON `self.calendario` asignado:
+        cuenta esa cantidad de días LABORABLES desde `fecha_inicio`,
+        saltándose fines de semana/feriados -- ver CalendarioLaboral."""
+        if self.calendario is None:
+            return self.fecha_inicio + datetime.timedelta(days=round(dia_relativo))
+        return self.calendario.avanzar_dias_laborables(self.fecha_inicio, dia_relativo)
 
     def resumen_actividades(self) -> list:
         """Lista de dicts (uno por actividad, en orden de ES) lista

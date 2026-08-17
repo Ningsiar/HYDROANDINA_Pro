@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.3.37
+version=0.3.38
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,32 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.3.38: NUEVO -- Calendario Laboral en el Cronograma (CPM),
+      quinta de las 6 mejoras priorizadas por el usuario (1, 6, 4 y 5
+      ya entregadas, ahora el 3 -- solo queda el 2, Curva S).
+      core/cronograma.py: nueva clase `CalendarioLaboral` (patrón de
+      días libres por semana configurable -- por defecto solo domingo,
+      Lun-Sáb, el más común en construcción civil peruana -- más
+      feriados adicionales) y `feriados_peru(año)` (feriados
+      NACIONALES fijos + Jueves/Viernes Santo, calculados con el
+      algoritmo de Gauss/Meeus del Domingo de Pascua -- verificado
+      contra las fechas REALES conocidas de Pascua 2020-2026, las 7
+      coinciden exacto). El CPM en sí (pase adelante/atrás, holgura,
+      ruta crítica) sigue trabajando en días abstractos, SIN cambios
+      -- lo único que cambia es `Cronograma.fecha_de()`, que ahora
+      puede convertir esos días a fecha real saltando los no
+      laborables en vez de sumar días corridos (comportamiento por
+      defecto sin cambios si no se asigna un calendario).
+      Nueva sección "1d. Calendario laboral" en la Pestaña 10 --
+      selector de patrón (Ninguno/Lun-Sáb/Lun-Vie) + casilla de
+      feriados del Perú (cubre 3 años desde la fecha de inicio, por si
+      el proyecto cruza de año).
+      Verificado con 25/25 comprobaciones de núcleo (7 fechas de
+      Pascua reales, feriados 2026, 3 escenarios de
+      avanzar_dias_laborables() calculados a mano) y 12/12 de
+      integración UI (mismo escenario reproducido a través de los
+      controles reales, confirmando que el CPM no cambia entre
+      escenarios y que el Gantt sigue graficando sin romperse).
     - v0.3.37: NUEVO -- Exportación de Presupuesto a S10 (Excel) y a
       un formato genérico (Delphin Xpress u otro), cuarta de las 6
       mejoras priorizadas por el usuario (1, 6 y 4 ya entregadas,
