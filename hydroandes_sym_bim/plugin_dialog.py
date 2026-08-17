@@ -351,6 +351,7 @@ class HydroAndinaProDialog(QDialog):
         self.red_drenaje_layer = None
         self.morfometria_resultados = {}
         self.cn_resultados = None
+        self.cn_resultados_corregido_pendiente = None
         self.tc_resultados = {}
         self.hidrograma_resultado = {}
         self.serie_precip_anual = None
@@ -1423,6 +1424,7 @@ class HydroAndinaProDialog(QDialog):
         # usuario recalcularlos para la cuenca recién seleccionada.
         self.morfometria_resultados = {}
         self.cn_resultados = None
+        self.cn_resultados_corregido_pendiente = None
         self.tc_resultados = {}
         self.hidrograma_resultado = {}
 
@@ -1954,6 +1956,72 @@ class HydroAndinaProDialog(QDialog):
         self.tabla_amc.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         v.addWidget(self.tabla_amc)
 
+        # =============================================================
+        # AJUSTES AVANZADOS PARA ENTORNO ANDINO -- se aplican sobre el
+        # CN_II YA calculado arriba (self.cn_resultados), sin importar
+        # cuál de los 3 métodos lo produjo (matriz manual, CN Generator,
+        # o LULC+HSG automático). Ver core/curve_number.py.
+        # =============================================================
+        gb_avanzado_cn = QGroupBox("🏔 Ajustes avanzados para entorno andino")
+        v_avz = QVBoxLayout(gb_avanzado_cn)
+
+        lbl_avz = QLabel(
+            "Requiere haber calculado el CN_II arriba (por cualquiera de los 3 métodos). Ninguno de "
+            "estos ajustes modifica la tabla de arriba -- se muestran aparte para no perder el CN_II "
+            "base."
+        )
+        lbl_avz.setWordWrap(True)
+        v_avz.addWidget(lbl_avz)
+
+        v_avz.addWidget(QLabel(
+            "<b>Corrección por pendiente (Williams, 1995)</b> — la metodología NRCS original se "
+            "calibró para pendientes ~5%, insuficiente en la cordillera andina."))
+        f_pend = QFormLayout()
+        f_pend.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        h_pend = QHBoxLayout()
+        self.spin_pendiente_cn = QDoubleSpinBox()
+        self.spin_pendiente_cn.setRange(0.0, 200.0)
+        self.spin_pendiente_cn.setDecimals(2)
+        self.spin_pendiente_cn.setValue(5.0)
+        self.spin_pendiente_cn.setSuffix(" %")
+        h_pend.addWidget(self.spin_pendiente_cn)
+        btn_usar_pendiente_p2 = QPushButton("Usar la de la Pestaña 2 (Grupo 4)")
+        btn_usar_pendiente_p2.clicked.connect(self._on_usar_pendiente_pestana2)
+        h_pend.addWidget(btn_usar_pendiente_p2)
+        f_pend.addRow("Pendiente media de la cuenca:", h_pend)
+        v_avz.addLayout(f_pend)
+        btn_aplicar_pendiente = QPushButton("Aplicar corrección de pendiente")
+        btn_aplicar_pendiente.clicked.connect(self._on_aplicar_correccion_pendiente_cn)
+        v_avz.addWidget(btn_aplicar_pendiente)
+        self.lbl_resultado_pendiente_cn = QLabel("Estado: sin aplicar.")
+        self.lbl_resultado_pendiente_cn.setWordWrap(True)
+        v_avz.addWidget(self.lbl_resultado_pendiente_cn)
+
+        v_avz.addWidget(QLabel(
+            "<hr><b>AMC automático por lluvia antecedente (Tabla 4-1, NRCS)</b> — clasifica la "
+            "condición de humedad antecedente a partir de la lluvia acumulada en los 5 días previos "
+            "al evento de diseño, en vez de elegirla a mano."))
+        f_amc_auto = QFormLayout()
+        f_amc_auto.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.spin_precip5dias_cn = QDoubleSpinBox()
+        self.spin_precip5dias_cn.setRange(0.0, 500.0)
+        self.spin_precip5dias_cn.setDecimals(1)
+        self.spin_precip5dias_cn.setValue(20.0)
+        self.spin_precip5dias_cn.setSuffix(" mm")
+        f_amc_auto.addRow("Precipitación de los 5 días previos:", self.spin_precip5dias_cn)
+        self.combo_temporada_cn = QComboBox()
+        self.combo_temporada_cn.addItems(["Vegetativa (growing)", "No vegetativa (dormant)"])
+        f_amc_auto.addRow("Temporada:", self.combo_temporada_cn)
+        v_avz.addLayout(f_amc_auto)
+        btn_amc_auto = QPushButton("Calcular AMC aplicable")
+        btn_amc_auto.clicked.connect(self._on_calcular_amc_automatico_cn)
+        v_avz.addWidget(btn_amc_auto)
+        self.lbl_resultado_amc_auto_cn = QLabel("Estado: sin calcular.")
+        self.lbl_resultado_amc_auto_cn.setWordWrap(True)
+        v_avz.addWidget(self.lbl_resultado_amc_auto_cn)
+
+        v.addWidget(gb_avanzado_cn)
+
         gb_cn_generator = QGroupBox(
             "Generar CN automáticamente (RECOMENDADO) — plugin de terceros 'Curve Number Generator' "
             "(ESA & ORNL), de Abdul Raheem Siddiqui"
@@ -2000,9 +2068,10 @@ class HydroAndinaProDialog(QDialog):
             "A. Uso y cobertura de suelo (LULC): ESA WorldCover 10 m, obtenido automáticamente vía "
             "el catálogo STAC de AWS Earth Search (recorte remoto a la cuenca, sin descargar el "
             "mosaico global completo).\n"
-            "B. Grupo Hidrológico de Suelo (HSG A/B/C/D): HYSOGs250m (ORNL DAAC) — indique abajo la "
-            "ruta local o URL del GeoTIFF (no se encontró un catálogo STAC público estable para "
-            "este dataset; ver docstring de core/landcover_soils.py)."
+            "B. Grupo Hidrológico de Suelo (HSG A/B/C/D): dos opciones -- B1) indique abajo la ruta/"
+            "URL de un ráster YA clasificado (HYSOGs250m u otro), o B2) 100% AUTÓNOMO: se deriva de "
+            "la textura del suelo (SoilGrids, arena+arcilla a 0-30 cm) sin que aporte ningún ráster "
+            "propio (ver core/pedotransfer_soilgrids.py para el método)."
         )
         lbl_auto_cn_info.setWordWrap(True)
         f_auto_cn.addRow(lbl_auto_cn_info)
@@ -2015,18 +2084,34 @@ class HydroAndinaProDialog(QDialog):
         btn_hsg = QPushButton("Examinar archivo local...")
         btn_hsg.clicked.connect(self._on_examinar_hsg)
         h_hsg.addWidget(btn_hsg)
-        f_auto_cn.addRow("Ráster de HSG (A/B/C/D):", h_hsg)
+        f_auto_cn.addRow("B1) Ráster de HSG ya clasificado (A/B/C/D):", h_hsg)
 
         self.btn_calc_cn_automatico = QPushButton(
-            "Obtener LULC + HSG automáticamente y calcular CN ponderado"
+            "Obtener LULC + HSG (B1, ráster indicado) y calcular CN ponderado"
         )
         self.btn_calc_cn_automatico.clicked.connect(self._on_calcular_cn_automatico)
         limitar_ancho_boton(self.btn_calc_cn_automatico)
         f_auto_cn.addRow(self.btn_calc_cn_automatico)
 
+        self.btn_calc_cn_soilgrids = QPushButton(
+            "🌍 Obtener LULC + HSG (B2, 100% autónomo vía SoilGrids) y calcular CN ponderado"
+        )
+        self.btn_calc_cn_soilgrids.clicked.connect(self._on_calcular_cn_soilgrids_automatico)
+        limitar_ancho_boton(self.btn_calc_cn_soilgrids)
+        f_auto_cn.addRow(self.btn_calc_cn_soilgrids)
+
         self.lbl_estado_cn_auto = QLabel("Estado: sin calcular.")
         self.lbl_estado_cn_auto.setWordWrap(True)
         f_auto_cn.addRow(self.lbl_estado_cn_auto)
+
+        btn_limpiar_cache_cn = QPushButton("🗑 Limpiar caché local de mosaicos descargados")
+        btn_limpiar_cache_cn.setToolTip(
+            "Borra los recortes de ESA WorldCover/SoilGrids/HSG ya descargados y guardados en caché "
+            "(evita volver a descargar/recortar en ejecuciones sucesivas sobre la misma cuenca) -- "
+            "úselo si un dataset remoto se actualizó y quiere forzar una redescarga.")
+        btn_limpiar_cache_cn.clicked.connect(self._on_limpiar_cache_cn)
+        limitar_ancho_boton(btn_limpiar_cache_cn)
+        f_auto_cn.addRow(btn_limpiar_cache_cn)
 
         v.addWidget(gb_auto_cn)
 
@@ -2749,6 +2834,120 @@ class HydroAndinaProDialog(QDialog):
         except Exception as e:
             self.lbl_estado_cn_auto.setText("Estado: error (ver mensaje).")
             QMessageBox.critical(self, "Error obteniendo CN automático", str(e))
+
+    def _on_calcular_cn_soilgrids_automatico(self):
+        """Igual que _on_calcular_cn_automatico(), pero el HSG se
+        deriva 100% AUTÓNOMO de SoilGrids (core.landcover_soils.
+        obtener_hsg_soilgrids_automatico) en vez de requerir que el
+        usuario aporte un ráster ya clasificado."""
+        if self.cuenca_layer is None:
+            QMessageBox.warning(self, "Falta la delimitación",
+                                 "Ejecute primero la delimitación en la pestaña 1.")
+            return
+        try:
+            self.lbl_estado_cn_auto.setText("Estado: buscando y recortando ESA WorldCover (STAC)...")
+            QApplication.processEvents()
+            context = QgsProcessingContext()
+            feedback = QgsProcessingFeedback()
+
+            lulc_path = landcover_soils.obtener_lulc_esa_worldcover_recortado(
+                self.cuenca_layer, context, feedback
+            )
+            self.lbl_estado_cn_auto.setText(
+                "Estado: descargando y recortando SoilGrids (arena/arcilla, 0-30 cm)..."
+            )
+            QApplication.processEvents()
+            hsg_path = landcover_soils.obtener_hsg_soilgrids_automatico(
+                self.cuenca_layer, context, feedback
+            )
+
+            self.lbl_estado_cn_auto.setText("Estado: cruzando LULC x HSG y ponderando el CN...")
+            QApplication.processEvents()
+            resultado = landcover_soils.calcular_cn_ponderado_automatico(lulc_path, hsg_path)
+
+            self.tabla_desglose_cn_auto.setRowCount(0)
+            for fila in resultado["desglose"]:
+                r = self.tabla_desglose_cn_auto.rowCount()
+                self.tabla_desglose_cn_auto.insertRow(r)
+                self.tabla_desglose_cn_auto.setItem(r, 0, QTableWidgetItem(fila["lulc_nombre"]))
+                self.tabla_desglose_cn_auto.setItem(r, 1, QTableWidgetItem(fila["hsg"]))
+                self.tabla_desglose_cn_auto.setItem(r, 2, QTableWidgetItem(str(fila["area_km2"])))
+                self.tabla_desglose_cn_auto.setItem(r, 3, QTableWidgetItem(str(fila["cn"])))
+            ajustar_alto_tabla(self.tabla_desglose_cn_auto, filas_visibles_max=10)
+
+            cn_ii = resultado["cn_ii_ponderado"]
+            amc = curve_number.condiciones_amc(cn_ii)
+            self.cn_resultados = amc
+            self.tabla_amc.setItem(0, 0, QTableWidgetItem(str(amc["CN_I"])))
+            self.tabla_amc.setItem(0, 1, QTableWidgetItem(str(amc["CN_II"])))
+            self.tabla_amc.setItem(0, 2, QTableWidgetItem(str(amc["CN_III"])))
+            self.tabla_amc.setItem(0, 3, QTableWidgetItem(str(amc["S_mm"])))
+            self.tabla_amc.setItem(0, 4, QTableWidgetItem(str(amc["Ia_mm"])))
+
+            self.lbl_estado_cn_auto.setText(
+                f"Estado: CN_II ponderado = {cn_ii} (HSG 100% autónomo vía SoilGrids -- sin ráster "
+                f"propio; área total cruzada: {resultado['area_total_km2']} km², "
+                f"{len(resultado['desglose'])} combinaciones LULC x HSG)."
+            )
+        except Exception as e:
+            self.lbl_estado_cn_auto.setText("Estado: error (ver mensaje).")
+            QMessageBox.critical(self, "Error obteniendo CN automático (SoilGrids)", str(e))
+
+    def _on_limpiar_cache_cn(self):
+        n = landcover_soils.limpiar_cache()
+        QMessageBox.information(
+            self, "Caché limpiada",
+            f"Se borraron {n} archivo(s) de la caché local de mosaicos (ESA WorldCover/SoilGrids/HSG)."
+        )
+
+    def _on_usar_pendiente_pestana2(self):
+        g4 = self.morfometria_resultados.get("g4") if self.morfometria_resultados else None
+        if not g4:
+            QMessageBox.warning(
+                self, "Pendiente no disponible",
+                "Calcule primero la morfometría (Pestaña 2, Grupo 4: Pendiente media de la cuenca)."
+            )
+            return
+        self.spin_pendiente_cn.setValue(g4["S_cuenca_pct"])
+
+    def _on_aplicar_correccion_pendiente_cn(self):
+        if self.cn_resultados is None:
+            QMessageBox.warning(self, "Falta calcular el CN",
+                                 "Calcule primero el CN_II arriba (por cualquiera de los 3 métodos).")
+            return
+        try:
+            cn_ii = self.cn_resultados["CN_II"]
+            cn_iii = self.cn_resultados["CN_III"]
+            pendiente = self.spin_pendiente_cn.value()
+            cn_corregido = curve_number.correccion_pendiente_williams(cn_ii, cn_iii, pendiente)
+            amc_corregido = curve_number.condiciones_amc(cn_corregido)
+            self.cn_resultados_corregido_pendiente = amc_corregido
+            self.lbl_resultado_pendiente_cn.setText(
+                f"Estado: CN_II corregido por pendiente ({pendiente:.1f}%) = {cn_corregido:.2f} "
+                f"(sin corregir: {cn_ii:.2f}) -- CN_I={amc_corregido['CN_I']}, "
+                f"CN_III={amc_corregido['CN_III']}, S={amc_corregido['S_mm']} mm, "
+                f"Ia={amc_corregido['Ia_mm']} mm."
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Error aplicando la corrección de pendiente", str(e))
+
+    def _on_calcular_amc_automatico_cn(self):
+        if self.cn_resultados is None:
+            QMessageBox.warning(self, "Falta calcular el CN",
+                                 "Calcule primero el CN_II arriba (por cualquiera de los 3 métodos).")
+            return
+        try:
+            cn_ii = self.cn_resultados["CN_II"]
+            precip = self.spin_precip5dias_cn.value()
+            temporada = "growing" if self.combo_temporada_cn.currentIndex() == 0 else "dormant"
+            resultado = curve_number.cn_por_amc_automatico(cn_ii, precip, temporada)
+            self.lbl_resultado_amc_auto_cn.setText(
+                f"Estado: con {precip:.1f} mm en los 5 días previos "
+                f"({self.combo_temporada_cn.currentText()}) -> AMC "
+                f"{resultado['clase_amc_seleccionada']} -> CN aplicable = {resultado['CN_aplicable']:.2f}."
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Error calculando el AMC automático", str(e))
 
     def _on_distribuir_area_por_porcentaje(self):
         """

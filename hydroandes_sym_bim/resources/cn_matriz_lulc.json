@@ -1,0 +1,14 @@
+{
+  "_comentario": "Matriz de equivalencia clase LULC (ESA WorldCover) -> CN por Grupo Hidrológico de Suelo (A/B/C/D), TR-55/NRCS. Editable a mano -- vea Pestaña 3, sección 'Matriz LULC -> CN'. Clave = código de clase ESA WorldCover.",
+  "10": {"nombre": "Bosque / cobertura arbórea", "cn_a": 30, "cn_b": 55, "cn_c": 70, "cn_d": 77},
+  "20": {"nombre": "Matorral (shrubland)", "cn_a": 35, "cn_b": 56, "cn_c": 70, "cn_d": 77},
+  "30": {"nombre": "Pastizal (grassland)", "cn_a": 39, "cn_b": 61, "cn_c": 74, "cn_d": 80},
+  "40": {"nombre": "Cultivos (cropland)", "cn_a": 67, "cn_b": 78, "cn_c": 85, "cn_d": 89},
+  "50": {"nombre": "Área construida (built-up)", "cn_a": 77, "cn_b": 85, "cn_c": 90, "cn_d": 92},
+  "60": {"nombre": "Suelo desnudo / vegetación escasa", "cn_a": 77, "cn_b": 86, "cn_c": 91, "cn_d": 94},
+  "70": {"nombre": "Nieve / hielo", "cn_a": 100, "cn_b": 100, "cn_c": 100, "cn_d": 100},
+  "80": {"nombre": "Cuerpo de agua", "cn_a": 100, "cn_b": 100, "cn_c": 100, "cn_d": 100},
+  "90": {"nombre": "Humedal herbáceo (bofedal)", "cn_a": 30, "cn_b": 50, "cn_c": 65, "cn_d": 75},
+  "95": {"nombre": "Manglar", "cn_a": 30, "cn_b": 50, "cn_c": 65, "cn_d": 75},
+  "100": {"nombre": "Musgo / liquen", "cn_a": 35, "cn_b": 56, "cn_c": 70, "cn_d": 77}
+}

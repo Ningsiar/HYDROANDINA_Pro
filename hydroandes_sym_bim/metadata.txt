@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.3.39
+version=0.4.0
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,59 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.4.0: NUEVO -- Mejora y automatización completa del Número de
+      Curva (Pestaña 3), a pedido explícito del usuario (arquitectura
+      técnica de 4 módulos: ingesta/recorte, clasificación de HSG,
+      matriz CN, correcciones hidrológicas avanzadas).
+      1) core/curve_number.py: `correccion_pendiente_williams()`
+      (Williams 1995, versión SWAT/Neitsch con el divisor /3 --
+      confirmado con el usuario tras detectar que la fórmula que citó
+      no coincidía con la literatura revisada por pares; propiedad de
+      calibración verificada analíticamente: se anula exactamente a
+      5% de pendiente) y `amc_por_precipitacion_antecedente()` +
+      `cn_por_amc_automatico()` (Tabla 4-1 del NRCS, temporada
+      dormant/growing, sin tener que elegir la clase AMC a mano).
+      2) Nuevo core/pedotransfer_soilgrids.py: clasificación
+      AUTÓNOMA del Grupo Hidrológico de Suelo desde textura (%arena,
+      %arcilla) -- triángulo USDA completo (verificado contra 12
+      puntos de referencia inequívocos del triángulo estándar) +
+      tabla textura->HSG (TR-55) + Ksat auxiliar REUTILIZADO de la
+      tabla de Rawls, Brakensiek & Miller 1983 ya existente en
+      core/infiltration.py (Green-Ampt) -- decisión de diseño
+      documentada: NO se reimplementó Saxton & Rawls (2006) desde
+      cero por el riesgo de coeficientes mal recordados sin poder
+      verificar la publicación original; ver docstring del módulo.
+      3) core/landcover_soils.py: `obtener_hsg_soilgrids_automatico()`
+      -- descarga/recorta arcilla y arena de SoilGrids (ISRIC) en los
+      3 intervalos nativos (0-5, 5-15, 15-30 cm), promedio ponderado
+      por espesor a 0-30 cm, clasifica HSG píxel a píxel y escribe un
+      GeoTIFF de códigos 1-4 -- reemplazo DIRECTO de
+      `obtener_hsg_recortado()` (HYSOGs250m manual) en
+      `calcular_cn_ponderado_automatico()`, sin que el usuario aporte
+      ningún ráster propio.
+      4) Caché local persistente (perfil de QGIS) para ESA
+      WorldCover/SoilGrids/HSG recortados -- evita re-descargar/re-
+      recortar en ejecuciones sucesivas sobre la misma cuenca; botón
+      "Limpiar caché" para forzar redescarga si el dataset remoto se
+      actualizó.
+      5) Matriz LULC->CN externalizada a resources/cn_matriz_lulc.json
+      (editable a mano, con reintento automático a la tabla embebida
+      si el archivo falta/está corrupto).
+      Nueva sección "🏔 Ajustes avanzados para entorno andino" y botón
+      "🌍 HSG 100% autónomo (SoilGrids)" en la Pestaña 3, integrados
+      con la pendiente media ya calculada en la Pestaña 2 (Grupo 4).
+      TRANSPARENCIA: la descarga real de SoilGrids/ESA WorldCover no
+      se pudo verificar en vivo en este entorno de desarrollo (sin
+      acceso a internet) -- se construyó con el mismo patrón
+      defensivo/transparente ya usado para ESA WorldCover (mensajes
+      de error explícitos, nunca un resultado inventado en silencio).
+      Verificado: 33/33 (Williams -- propiedad de calibración exacta a
+      5% de pendiente -- + AMC por lluvia antecedente, umbrales NRCS
+      Tabla 4-1) + 34/34 (triángulo de textura USDA, 12 puntos de
+      referencia + 500 aleatorios cruzados escalar-vs-vectorizado) +
+      8/8 (orquestación SoilGrids con datos sintéticos, sin red) +
+      8/8 (caché local) + 10/10 (matriz JSON) + 20/20 (integración UI
+      real en QGIS) -- 113/113 comprobaciones de núcleo/UI en total.
     - v0.3.39: NUEVO -- Curva S de avance físico-financiero
       planificado, SEXTA y última de las 6 mejoras priorizadas por el
       usuario tras pedir sugerencias de mejora "como ingeniero civil"

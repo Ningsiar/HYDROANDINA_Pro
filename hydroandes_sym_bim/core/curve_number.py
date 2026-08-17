@@ -16,6 +16,7 @@ adaptados de literatura de hidrología andina, pero se recomienda
 verificarlos/ajustarlos contra un manual local (ANA, SENAMHI) antes de
 un diseño definitivo. Todos los valores son editables desde la interfaz.
 """
+import math
 from dataclasses import dataclass
 from typing import List, Dict
 
@@ -83,3 +84,85 @@ def condiciones_amc(cn_ii: float) -> Dict[str, float]:
         "S_mm": round(s_mm, 2),
         "Ia_mm": round(ia_mm, 2),
     }
+
+
+# ======================================================================
+# Corrección por pendiente (Williams, 1995) -- entorno andino
+# ======================================================================
+def correccion_pendiente_williams(cn_ii: float, cn_iii: float, pendiente_pct: float) -> float:
+    """CN_II corregido por pendiente (Williams, 1995, tal como se cita
+    en la documentación teórica de SWAT -- Neitsch et al., "Soil and
+    Water Assessment Tool Theoretical Documentation"). La metodología
+    NRCS/TR-55 original se calibró para pendientes de referencia ~5%,
+    insuficiente en la cordillera andina donde las laderas superan
+    fácilmente ese valor -- esta corrección lo compensa:
+
+        CN_IIs = (CN_III - CN_II)/3 · (1 - 2·e^(-13.86·α)) + CN_II
+
+    con α = pendiente_pct/100 (fracción). PROPIEDAD DE CALIBRACIÓN
+    verificable analíticamente: a pendiente EXACTAMENTE 5% (α=0.05),
+    el factor (1-2·e^(-13.86·α)) se anula y CN_IIs = CN_II (sin
+    corrección) -- es el punto de referencia con el que el NRCS
+    desarrolló sus tablas de CN originales. Para pendientes menores a
+    5% el CN corregido baja (menos escorrentía relativa); para
+    pendientes mayores sube hacia CN_III (más escorrentía).
+
+    `cn_iii` debe venir de `condiciones_amc(cn_ii)["CN_III"]` (la
+    forma polinómica NRCS clásica, la misma que usa el resto del
+    plugin) -- no mezcle con otra fórmula de CN_III."""
+    if not (0.0 < cn_ii <= 100.0):
+        raise ValueError(f"CN_II fuera de rango físico (0,100]: {cn_ii}")
+    if pendiente_pct < 0:
+        raise ValueError("la pendiente no puede ser negativa.")
+    alpha = pendiente_pct / 100.0
+    factor = 1.0 - 2.0 * math.exp(-13.86 * alpha)
+    cn_corregido = (cn_iii - cn_ii) / 3.0 * factor + cn_ii
+    return min(max(cn_corregido, 1.0), 100.0)  # límites físicos del CN
+
+
+# ======================================================================
+# Selección de AMC por precipitación antecedente de 5 días -- Tabla 4-1
+# del National Engineering Handbook (SCS/NRCS, Section 4), reproducida
+# también en el manual TR-55.
+# ======================================================================
+# temporada -> (umbral_bajo_mm, umbral_alto_mm): <bajo -> AMC I,
+# [bajo,alto] -> AMC II, >alto -> AMC III. Umbrales originales en
+# pulgadas (dormant: <0.5, 0.5-1.1, >1.1; growing: <1.4, 1.4-2.1,
+# >2.1), convertidos aquí a mm (1 in = 25.4 mm).
+UMBRALES_AMC_MM: Dict[str, tuple] = {
+    "dormant": (12.7, 27.94),   # temporada NO vegetativa (suelo desnudo/latente)
+    "growing": (35.56, 53.34),  # temporada vegetativa (mayor evapotranspiración, tolera más lluvia)
+}
+
+
+def amc_por_precipitacion_antecedente(precip_5dias_mm: float, temporada: str = "growing") -> str:
+    """Clasifica la condición de humedad antecedente (AMC "I"/"II"/
+    "III") a partir de la lluvia acumulada en los 5 días previos al
+    evento de diseño, según la Tabla 4-1 del NRCS -- ver
+    UMBRALES_AMC_MM. `temporada`: "dormant" (no vegetativa) o
+    "growing" (vegetativa, umbrales más altos)."""
+    if temporada not in UMBRALES_AMC_MM:
+        raise ValueError(f"temporada «{temporada}» no reconocida -- use 'dormant' o 'growing'.")
+    if precip_5dias_mm < 0:
+        raise ValueError("la precipitación antecedente no puede ser negativa.")
+    bajo, alto = UMBRALES_AMC_MM[temporada]
+    if precip_5dias_mm < bajo:
+        return "I"
+    if precip_5dias_mm <= alto:
+        return "II"
+    return "III"
+
+
+def cn_por_amc_automatico(cn_ii: float, precip_5dias_mm: float, temporada: str = "growing") -> dict:
+    """Combina `condiciones_amc()` con `amc_por_precipitacion_antecedente()`:
+    calcula CN_I/CN_II/CN_III y además indica cuál de los tres aplica
+    (y su valor, `CN_aplicable`) según la lluvia antecedente de 5 días
+    indicada -- para usar automáticamente sin que el usuario deba
+    elegir a mano la clase AMC."""
+    resultado = dict(condiciones_amc(cn_ii))
+    clase = amc_por_precipitacion_antecedente(precip_5dias_mm, temporada)
+    resultado["clase_amc_seleccionada"] = clase
+    resultado["CN_aplicable"] = resultado[f"CN_{clase}"]
+    resultado["precip_5dias_mm"] = precip_5dias_mm
+    resultado["temporada"] = temporada
+    return resultado

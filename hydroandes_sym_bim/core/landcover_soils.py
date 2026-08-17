@@ -47,8 +47,8 @@ TRANSPARENCIA IMPORTANTE (léase antes de usar en producción):
      codificación, ajuste `mapeo_codigo_hsg` al llamar a
      calcular_cn_ponderado_automatico().
 """
+import hashlib
 import json
-import math
 import os
 import tempfile
 import urllib.request
@@ -66,6 +66,62 @@ except ImportError:
 
 class LandcoverSoilsError(Exception):
     pass
+
+
+# ---------------------------------------------------------------------
+# Caché local de mosaicos descargados/recortados -- evita re-descargar
+# y re-recortar ESA WorldCover/SoilGrids en ejecuciones sucesivas sobre
+# la MISMA extensión de cuenca (recomendación de desarrollo del
+# usuario). El directorio vive en el perfil de QGIS (persiste entre
+# sesiones, a diferencia del directorio temporal del sistema operativo,
+# que el SO puede limpiar en cualquier momento).
+# ---------------------------------------------------------------------
+def _directorio_cache() -> str:
+    base = None
+    try:
+        from qgis.core import QgsApplication
+        base = QgsApplication.qgisSettingsDirPath()
+    except Exception:
+        base = None
+    # qgisSettingsDirPath() puede devolver "" (cadena vacía, no una
+    # excepción) si se llama sobre una QgsApplication sin perfil real
+    # configurado -- os.path.join con base="" resolvería relativo al
+    # directorio de trabajo actual (podría terminar escribiendo DENTRO
+    # del repositorio del plugin en vez de un lugar persistente), así
+    # que se exige un valor no vacío explícitamente.
+    if not base:
+        base = tempfile.gettempdir()
+    directorio = os.path.join(base, "hydroandes_sym_bim_cache_cn")
+    os.makedirs(directorio, exist_ok=True)
+    return directorio
+
+
+def _ruta_cache(nombre_dataset: str, bbox_wgs84: Tuple[float, float, float, float]) -> str:
+    """Ruta determinística de caché para `nombre_dataset` recortado al
+    `bbox_wgs84` indicado (west,south,east,north) -- el mismo bbox
+    (redondeado a 6 decimales, ~0.1 m de tolerancia en el ecuador)
+    siempre produce la misma ruta."""
+    bbox_redondeado = tuple(round(v, 6) for v in bbox_wgs84)
+    clave = f"{nombre_dataset}_{bbox_redondeado}"
+    hash_clave = hashlib.md5(clave.encode("utf-8")).hexdigest()[:16]
+    return os.path.join(_directorio_cache(), f"{nombre_dataset}_{hash_clave}.tif")
+
+
+def limpiar_cache() -> int:
+    """Borra todos los archivos del directorio de caché (LULC/HSG
+    descargados y recortados) -- devuelve cuántos se borraron. Úselo si
+    un dataset remoto se actualizó (nueva versión de ESA WorldCover/
+    SoilGrids) y quiere forzar una redescarga en la próxima ejecución."""
+    directorio = _directorio_cache()
+    n = 0
+    for nombre in os.listdir(directorio):
+        ruta = os.path.join(directorio, nombre)
+        try:
+            os.remove(ruta)
+            n += 1
+        except OSError:
+            pass
+    return n
 
 
 # ---------------------------------------------------------------------
@@ -89,6 +145,38 @@ TABLA_CN_ESA_WORLDCOVER: Dict[int, dict] = {
     95: {"nombre": "Manglar", "cn_a": 30, "cn_b": 50, "cn_c": 65, "cn_d": 75},
     100: {"nombre": "Musgo / liquen", "cn_a": 35, "cn_b": 56, "cn_c": 70, "cn_d": 77},
 }
+
+
+def cargar_matriz_cn(ruta: Optional[str] = None) -> Dict[int, dict]:
+    """Carga la matriz LULC->CN desde resources/cn_matriz_lulc.json
+    (editable a mano por el usuario, ver Pestaña 3) -- si el archivo no
+    existe o no se puede leer, usa TABLA_CN_ESA_WORLDCOVER (los mismos
+    valores, embebidos como respaldo) para que el plugin nunca se
+    quede sin matriz utilizable."""
+    if ruta is None:
+        ruta = os.path.join(os.path.dirname(__file__), "..", "resources", "cn_matriz_lulc.json")
+    try:
+        with open(ruta, "r", encoding="utf-8") as f:
+            datos = json.load(f)
+        return {int(k): v for k, v in datos.items() if not k.startswith("_")}
+    except (OSError, ValueError, json.JSONDecodeError):
+        return dict(TABLA_CN_ESA_WORLDCOVER)
+
+
+def guardar_matriz_cn(matriz: Dict[int, dict], ruta: Optional[str] = None) -> str:
+    """Inverso de cargar_matriz_cn() -- persiste `matriz` (dict
+    código_lulc -> {"nombre","cn_a","cn_b","cn_c","cn_d"}) al JSON
+    editable. Devuelve la ruta escrita."""
+    if ruta is None:
+        ruta = os.path.join(os.path.dirname(__file__), "..", "resources", "cn_matriz_lulc.json")
+    datos = {"_comentario": "Matriz de equivalencia clase LULC (ESA WorldCover) -> CN por Grupo "
+                            "Hidrológico de Suelo (A/B/C/D), TR-55/NRCS. Editable a mano desde la "
+                            "Pestaña 3."}
+    datos.update({str(k): v for k, v in matriz.items()})
+    os.makedirs(os.path.dirname(ruta), exist_ok=True)
+    with open(ruta, "w", encoding="utf-8") as f:
+        json.dump(datos, f, indent=2, ensure_ascii=False)
+    return ruta
 
 
 def _bbox_wgs84_de_capa(cuenca_layer) -> Tuple[float, float, float, float]:
@@ -158,16 +246,23 @@ def buscar_coleccion_esa_worldcover(bbox_wgs84: Tuple[float, float, float, float
 
 
 def obtener_lulc_esa_worldcover_recortado(cuenca_layer, context, feedback,
-                                           destino_tif: Optional[str] = None) -> str:
+                                           destino_tif: Optional[str] = None,
+                                           usar_cache: bool = True) -> str:
     """
     Localiza el/los mosaico(s) COG de ESA WorldCover que cubren la
     cuenca, los recorta a la extensión/máscara de la cuenca (con
     lectura remota vía /vsicurl/, sin descargar el mosaico global) y,
     si son varios tiles, los combina en un único ráster. Devuelve la
-    ruta del GeoTIFF final recortado.
+    ruta del GeoTIFF final recortado. `usar_cache`: si el recorte para
+    esta MISMA extensión de cuenca ya existe en la caché local (ver
+    `_directorio_cache()`), lo reutiliza sin volver a descargar/recortar.
     """
-    import processing
     bbox = _bbox_wgs84_de_capa(cuenca_layer)
+    if usar_cache and destino_tif is None:
+        destino_tif = _ruta_cache("esa_worldcover", bbox)
+        if os.path.isfile(destino_tif) and os.path.getsize(destino_tif) > 0:
+            return destino_tif
+    import processing
     _, urls_cog = buscar_coleccion_esa_worldcover(bbox)
 
     rutas_recortadas = []
@@ -217,19 +312,27 @@ def obtener_lulc_esa_worldcover_recortado(cuenca_layer, context, feedback,
 # B) Grupos Hidrológicos de Suelo (HSG) — HYSOGs250m / SoilGrids
 # ---------------------------------------------------------------------
 def obtener_hsg_recortado(ruta_o_url_hsg: str, cuenca_layer, context, feedback,
-                           destino_tif: Optional[str] = None) -> str:
+                           destino_tif: Optional[str] = None, usar_cache: bool = True) -> str:
     """
     Recorta el ráster de Grupos Hidrológicos de Suelo (HYSOGs250m u otro
     ya reclasificado a A/B/C/D) a la cuenca. Acepta tanto una ruta local
     como una URL http(s) (leída vía /vsicurl/ sin descarga completa, si
     el servidor soporta rangos HTTP — la mayoría de servidores de
-    ORNL DAAC lo soportan).
+    ORNL DAAC lo soportan). `usar_cache`: ver `obtener_lulc_esa_worldcover_recortado()`
+    -- la clave de caché aquí incluye la ruta/URL indicada, así que un
+    cambio de fuente no reutiliza por error el recorte de otra.
     """
-    import processing
     entrada = ruta_o_url_hsg
     if entrada.lower().startswith("http://") or entrada.lower().startswith("https://"):
         entrada = f"/vsicurl/{entrada}"
 
+    if usar_cache and destino_tif is None:
+        hash_fuente = hashlib.md5(ruta_o_url_hsg.encode("utf-8")).hexdigest()[:10]
+        destino_tif = _ruta_cache(f"hsg_manual_{hash_fuente}", _bbox_wgs84_de_capa(cuenca_layer))
+        if os.path.isfile(destino_tif) and os.path.getsize(destino_tif) > 0:
+            return destino_tif
+
+    import processing
     if destino_tif is None:
         destino_tif = os.path.join(tempfile.gettempdir(), "hydroandina_hsg_recortado.tif")
 
@@ -249,6 +352,152 @@ def obtener_hsg_recortado(ruta_o_url_hsg: str, cuenca_layer, context, feedback,
             "correcta y accesible, y que el ráster cubra efectivamente la extensión de la cuenca."
         )
     return ruta_out
+
+
+# ---------------------------------------------------------------------
+# B2) HSG 100% AUTÓNOMO vía SoilGrids (ISRIC) + textura USDA -- sin que
+# el usuario tenga que aportar un ráster de HSG ya clasificado.
+# ---------------------------------------------------------------------
+# TRANSPARENCIA IMPORTANTE (léase antes de usar en producción, mismo
+# criterio que la nota #1 de ESA WorldCover arriba):
+#
+#   SoilGrids v2.0 (ISRIC) publica sus mapas globales como VRT/COG en
+#   https://files.isric.org/soilgrids/latest/data/<propiedad>/<propiedad>_<profundidad>_mean.vrt
+#   (p.ej. .../clay/clay_0-5cm_mean.vrt) accesibles vía /vsicurl/ igual
+#   que ESA WorldCover -- esta es la ruta documentada por ISRIC al
+#   redactar este módulo, pero NO se pudo verificar en vivo (sin acceso
+#   de red desde este entorno) que siga vigente. Si
+#   `obtener_hsg_soilgrids_automatico()` falla al abrir un VRT, revise
+#   https://www.isric.org/explore/soilgrids/faq-soilgrids en un
+#   navegador y ajuste `_URL_SOILGRIDS_VRT` abajo.
+#
+#   CRS: SoilGrids se distribuye en la proyección Homolosine
+#   interrumpida de Goode (no WGS84) -- se asume que el VRT trae su
+#   propia georreferenciación embebida (como cualquier COG bien
+#   formado) y que `gdal:cliprasterbymasklayer` la reproyecta
+#   correctamente al recortar contra la máscara de la cuenca (mismo
+#   mecanismo que ya usa `obtener_lulc_esa_worldcover_recortado`).
+#
+#   ESCALA DE LOS VALORES: SoilGrids expresa arcilla/arena/limo en
+#   g/kg × 10 (es decir, valor de píxel / 10 = %) -- se aplica esa
+#   conversión aquí. Verifique contra la documentación de ISRIC si el
+#   resultado da porcentajes que no cuadran (p.ej. muy por encima de
+#   100%, señal de que el factor de escala cambió).
+_URL_SOILGRIDS_VRT = "https://files.isric.org/soilgrids/latest/data/{propiedad}/{propiedad}_{profundidad}_mean.vrt"
+_PROFUNDIDADES_SOILGRIDS_0_30CM = (("0-5cm", 5.0), ("5-15cm", 10.0), ("15-30cm", 15.0))  # (etiqueta, espesor_cm)
+
+
+def obtener_propiedad_suelo_soilgrids_recortada(propiedad: str, profundidad: str, cuenca_layer,
+                                                 context, feedback, destino_tif: Optional[str] = None,
+                                                 usar_cache: bool = True) -> str:
+    """Recorta UN mapa de SoilGrids (una propiedad -- "clay"/"sand" -- a
+    una profundidad nativa -- "0-5cm"/"5-15cm"/"15-30cm") a la cuenca,
+    leyendo el VRT remoto vía /vsicurl/ (sin descargar el mosaico
+    global). Ver la nota de transparencia arriba. `usar_cache`: ver
+    `obtener_lulc_esa_worldcover_recortado()`."""
+    url = _URL_SOILGRIDS_VRT.format(propiedad=propiedad, profundidad=profundidad)
+    bbox = _bbox_wgs84_de_capa(cuenca_layer)
+    if usar_cache and destino_tif is None:
+        destino_tif = _ruta_cache(f"soilgrids_{propiedad}_{profundidad}", bbox)
+        if os.path.isfile(destino_tif) and os.path.getsize(destino_tif) > 0:
+            return destino_tif
+    import processing
+    if destino_tif is None:
+        destino_tif = os.path.join(
+            tempfile.gettempdir(), f"hydroandina_soilgrids_{propiedad}_{profundidad}.tif")
+    resultado = processing.run(
+        "gdal:cliprasterbymasklayer",
+        {
+            "INPUT": f"/vsicurl/{url}", "MASK": cuenca_layer, "SOURCE_CRS": None, "TARGET_CRS": None,
+            "NODATA": None, "ALPHA_BAND": False, "CROP_TO_CUTLINE": True,
+            "KEEP_RESOLUTION": True, "OUTPUT": destino_tif,
+        },
+        context=context, feedback=feedback, is_child_algorithm=True,
+    )
+    ruta_out = resultado.get("OUTPUT")
+    if not ruta_out:
+        raise LandcoverSoilsError(
+            f"No se pudo recortar SoilGrids ({propiedad}, {profundidad}) a la cuenca -- verifique "
+            f"conectividad a {url} (ver nota de transparencia en core/landcover_soils.py)."
+        )
+    return ruta_out
+
+
+def _promedio_ponderado_0_30cm(propiedad: str, cuenca_layer, context, feedback) -> np.ndarray:
+    """Recorta los 3 intervalos nativos de SoilGrids (0-5, 5-15, 15-30
+    cm) de `propiedad` y devuelve el array 0-30 cm ponderado por
+    espesor, ya en % (valor de píxel SoilGrids / 10, ver nota de
+    transparencia arriba)."""
+    if gdal is None:
+        raise LandcoverSoilsError(
+            "No se encontraron los bindings de Python de GDAL (osgeo.gdal), necesarios para "
+            "combinar los intervalos de profundidad de SoilGrids."
+        )
+    arrays_y_pesos = []
+    forma_referencia = None
+    for etiqueta_profundidad, espesor_cm in _PROFUNDIDADES_SOILGRIDS_0_30CM:
+        ruta = obtener_propiedad_suelo_soilgrids_recortada(propiedad, etiqueta_profundidad, cuenca_layer,
+                                                            context, feedback)
+        ds = gdal.Open(ruta)
+        if ds is None:
+            raise LandcoverSoilsError(f"No se pudo abrir el recorte de SoilGrids {ruta}.")
+        arr = ds.GetRasterBand(1).ReadAsArray().astype(np.float64)
+        if forma_referencia is None:
+            forma_referencia = arr.shape
+            geotransform, proyeccion = ds.GetGeoTransform(), ds.GetProjection()
+        elif arr.shape != forma_referencia:
+            raise LandcoverSoilsError(
+                f"Los 3 intervalos de profundidad de SoilGrids ({propiedad}) no coinciden en "
+                f"tamaño de grilla ({arr.shape} vs {forma_referencia}) -- inusual, revise que el "
+                f"recorte se haya hecho con la misma extensión en los 3 casos."
+            )
+        arrays_y_pesos.append((arr, espesor_cm))
+
+    espesor_total_cm = sum(e for _, e in arrays_y_pesos)
+    suma_ponderada = sum(arr * e for arr, e in arrays_y_pesos)
+    valor_pct = (suma_ponderada / espesor_total_cm) / 10.0  # g/kg*10 -> % (ver nota de transparencia)
+    return valor_pct, geotransform, proyeccion
+
+
+def obtener_hsg_soilgrids_automatico(cuenca_layer, context, feedback,
+                                      destino_tif: Optional[str] = None) -> str:
+    """Deriva el HSG (A/B/C/D) 100% AUTÓNOMO -- sin que el usuario
+    aporte ningún ráster propio -- descargando/recortando arcilla y
+    arena de SoilGrids (0-30 cm, promedio ponderado de los 3
+    intervalos nativos), clasificando textura USDA + HSG píxel a píxel
+    (core/pedotransfer_soilgrids.py) y escribiendo el resultado como
+    un GeoTIFF de códigos 1-4 (mismo convenio que
+    `obtener_hsg_recortado()`, así que es un reemplazo DIRECTO de esa
+    función en `calcular_cn_ponderado_automatico()`)."""
+    if gdal is None:
+        raise LandcoverSoilsError(
+            "No se encontraron los bindings de Python de GDAL (osgeo.gdal), necesarios para "
+            "escribir el ráster de HSG resultante."
+        )
+    from . import pedotransfer_soilgrids as pedo
+
+    arena_pct, geotransform, proyeccion = _promedio_ponderado_0_30cm("sand", cuenca_layer, context, feedback)
+    arcilla_pct, _, _ = _promedio_ponderado_0_30cm("clay", cuenca_layer, context, feedback)
+    if arena_pct.shape != arcilla_pct.shape:
+        raise LandcoverSoilsError(
+            f"Los recortes de arena ({arena_pct.shape}) y arcilla ({arcilla_pct.shape}) de "
+            f"SoilGrids no coinciden en tamaño de grilla -- inusual, revise la extensión del recorte."
+        )
+
+    hsg_arr = pedo.clasificar_hsg_raster(arena_pct, arcilla_pct)
+
+    if destino_tif is None:
+        destino_tif = os.path.join(tempfile.gettempdir(), "hydroandina_hsg_soilgrids.tif")
+    driver = gdal.GetDriverByName("GTiff")
+    out_ds = driver.Create(destino_tif, hsg_arr.shape[1], hsg_arr.shape[0], 1, gdal.GDT_Byte)
+    out_ds.SetGeoTransform(geotransform)
+    out_ds.SetProjection(proyeccion)
+    out_band = out_ds.GetRasterBand(1)
+    out_band.WriteArray(hsg_arr)
+    out_band.SetNoDataValue(0)
+    out_ds.FlushCache()
+    out_ds = None
+    return destino_tif
 
 
 # ---------------------------------------------------------------------
@@ -275,7 +524,7 @@ def calcular_cn_ponderado_automatico(lulc_clip_path: str, hsg_clip_path: str,
             "QGIS; verifique la instalación."
         )
     mapeo_codigo_hsg = mapeo_codigo_hsg or {1: "A", 2: "B", 3: "C", 4: "D"}
-    tabla_cn = tabla_cn or TABLA_CN_ESA_WORLDCOVER
+    tabla_cn = tabla_cn or cargar_matriz_cn()
 
     ds_lulc = gdal.Open(lulc_clip_path)
     if ds_lulc is None:
