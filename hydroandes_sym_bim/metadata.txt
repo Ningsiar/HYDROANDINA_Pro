@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.4.2
+version=0.4.3
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,45 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.4.3: NUEVO -- Pestaña "Mapas Temáticos", Fase 3 de la serie:
+      Precipitación y Clima. Reutiliza directamente las estaciones YA
+      ingresadas por el usuario en «Módulos Avanzados (Beta) >
+      Precipitación Areal» (self.edit_areal_estaciones,
+      self._parsear_estaciones_areal()) -- no las vuelve a pedir.
+      Nuevo core/areal_precipitation.py::generar_raster_precipitacion_idw():
+      a diferencia de precipitacion_idw() (que solo promedia una nube
+      de puntos dentro del polígono de la cuenca y no produce un
+      ráster), esta función interpola con la MISMA fórmula de pesos
+      1/d^potencia ya usada y verificada, pero sobre una grilla
+      rectangular regular completa, escrita como GeoTIFF.
+      Nuevas funciones en core/mapas_tematicos.py:
+      generar_capa_estaciones() (capa de puntos con nombre/valor_mm),
+      generar_thiessen_recortado() (native:voronoipolygons +
+      native:clip a la cuenca -- con cálculo DINÁMICO del parámetro
+      BUFFER, necesario porque QGIS lo define como % de la extensión
+      de las ESTACIONES, no de la cuenca: con estaciones más adentro
+      que el borde de la cuenca, un buffer fijo insuficiente deja
+      huecos sin polígono; bug real encontrado y corregido durante la
+      verificación, con la extensión exacta de la cuenca ahora
+      garantizada), y generar_isoyetas() (gdal:contour sobre el ráster
+      IDW, mismo patrón que las curvas de nivel de la Fase 1).
+      Nuevas 4 capas en la pestaña (checkboxes independientes):
+      estaciones (puntos, graduado por valor_mm), polígonos de
+      Thiessen (relleno graduado), precipitación interpolada
+      (pseudocolor continuo) e isoyetas (líneas graduadas),
+      organizadas en el grupo «Mapas Temáticos > Precipitación y
+      Clima», con exportación PDF/PNG. Isotermas confirmado fuera de
+      alcance (sin fuente de datos de temperatura en el plugin).
+      Verificado: 13/13 (generar_raster_precipitacion_idw, fórmula IDW
+      calculada a mano en un punto de control) + 18/18 (estaciones/
+      Thiessen/isoyetas núcleo, con las áreas de los polígonos de
+      Thiessen verificadas por DERIVACIÓN ANALÍTICA EXACTA a mano
+      contra la geometría de Voronoi de una configuración simétrica de
+      5 estaciones) + 24/24 (integración UI real en QGIS, incluidos
+      los 2 casos de advertencia sin cuenca/sin estaciones) -- 55/55
+      en total.
+      PENDIENTE (próximas fases, mismo pedido): peligro hidráulico
+      (SWE2D) y estructuras, codificación Pfafstetter.
     - v0.4.2: NUEVO -- Pestaña "Mapas Temáticos", Fase 2 de la serie:
       Número de Curva y Suelos. Reutiliza directamente el LULC y el
       HSG ya obtenidos en la Pestaña 3 (self._ultimo_lulc_path/

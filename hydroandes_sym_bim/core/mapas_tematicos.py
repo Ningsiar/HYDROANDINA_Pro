@@ -13,7 +13,9 @@ estilizan con core/map_styling.py, sin pasar por este módulo.
 
 Depende de qgis.core/processing -- solo se importa dentro de QGIS.
 """
-from qgis.core import QgsVectorLayer, QgsFeature, QgsRasterLayer, QgsPointXY
+from typing import Dict, Tuple
+
+from qgis.core import QgsVectorLayer, QgsFeature, QgsRasterLayer, QgsPointXY, QgsGeometry
 
 from .qgis_layer_utils import obtener_capa
 from . import morphometry
@@ -111,3 +113,112 @@ def calcular_orden_strahler_en_capa(red_drenaje_layer: QgsVectorLayer,
     prov_salida.addFeatures(nuevas_feats)
     capa_salida.updateExtents()
     return capa_salida
+
+
+# ==========================================================================
+# Precipitación y clima -- reutiliza los datos de estaciones YA
+# ingresados por el usuario en "Módulos Avanzados (Beta) > Precipitación
+# Areal" (self.edit_areal_estaciones / self._parsear_estaciones_areal()
+# en plugin_dialog.py), sin pedirlos de nuevo.
+# ==========================================================================
+def generar_capa_estaciones(valores_estaciones: Dict[str, float],
+                             coordenadas: Dict[str, Tuple[float, float]],
+                             crs_id: str) -> QgsVectorLayer:
+    """Capa de puntos en memoria, una entidad por estación, con campos
+    "nombre" (texto) y "valor_mm" (precipitación puntual, el mismo dato
+    ya ingresado por el usuario)."""
+    capa = QgsVectorLayer(
+        f"Point?crs={crs_id}&field=nombre:string&field=valor_mm:double",
+        "Estaciones pluviométricas", "memory")
+    prov = capa.dataProvider()
+    feats = []
+    for nombre, (x, y) in coordenadas.items():
+        f = QgsFeature()
+        f.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(x, y)))
+        f.setAttributes([nombre, valores_estaciones.get(nombre)])
+        feats.append(f)
+    if not feats:
+        raise MapasTematicosError("no hay estaciones para generar la capa de puntos.")
+    prov.addFeatures(feats)
+    capa.updateExtents()
+    return capa
+
+
+def generar_thiessen_recortado(capa_estaciones: QgsVectorLayer, cuenca_layer: QgsVectorLayer,
+                                context, feedback) -> QgsVectorLayer:
+    """Polígonos de Thiessen (native:voronoipolygons) de `capa_estaciones`,
+    recortados a `cuenca_layer` (native:clip) -- cada polígono conserva
+    los campos "nombre"/"valor_mm" de su estación de origen (comportamiento
+    nativo de voronoipolygons: un polígono por punto de entrada)."""
+    import processing
+    if capa_estaciones.featureCount() < 3:
+        raise MapasTematicosError(
+            "se necesitan al menos 3 estaciones para construir polígonos de Thiessen "
+            f"(hay {capa_estaciones.featureCount()}).")
+
+    # BUFFER de native:voronoipolygons es un % de la EXTENSIÓN DE LOS
+    # PUNTOS (no de la cuenca) -- con BUFFER=0 el diagrama de Voronoi
+    # queda acotado exactamente al bounding box de las estaciones, y si
+    # la cuenca se extiende más allá de ese bbox (caso normal: las
+    # estaciones rara vez caen justo en el borde de la cuenca), el
+    # recorte posterior deja huecos SIN ningún polígono ahí -- se
+    # calcula dinámicamente el buffer mínimo necesario para que el
+    # diagrama cubra la extensión completa de la cuenca, con margen de
+    # seguridad, en vez de un valor fijo que podría no alcanzar.
+    extent_estaciones = capa_estaciones.extent()
+    extent_cuenca = cuenca_layer.extent()
+    ancho_e = max(extent_estaciones.width(), 1e-6)
+    alto_e = max(extent_estaciones.height(), 1e-6)
+    margen_izq = max(0.0, extent_estaciones.xMinimum() - extent_cuenca.xMinimum())
+    margen_der = max(0.0, extent_cuenca.xMaximum() - extent_estaciones.xMaximum())
+    margen_inf = max(0.0, extent_estaciones.yMinimum() - extent_cuenca.yMinimum())
+    margen_sup = max(0.0, extent_cuenca.yMaximum() - extent_estaciones.yMaximum())
+    buffer_pct_x = 100.0 * max(margen_izq, margen_der) / ancho_e
+    buffer_pct_y = 100.0 * max(margen_inf, margen_sup) / alto_e
+    buffer_pct = max(buffer_pct_x, buffer_pct_y) * 1.5 + 20.0  # factor de seguridad + piso mínimo
+
+    resultado_voronoi = processing.run(
+        "native:voronoipolygons",
+        {"INPUT": capa_estaciones, "BUFFER": buffer_pct, "OUTPUT": "TEMPORARY_OUTPUT"},
+        context=context, feedback=feedback, is_child_algorithm=True,
+    )
+    capa_voronoi = obtener_capa(resultado_voronoi.get("OUTPUT"), context, es_raster=False,
+                                 nombre="thiessen_bruto")
+    resultado_clip = processing.run(
+        "native:clip",
+        {"INPUT": capa_voronoi, "OVERLAY": cuenca_layer, "OUTPUT": "TEMPORARY_OUTPUT"},
+        context=context, feedback=feedback, is_child_algorithm=True,
+    )
+    capa_recortada = obtener_capa(resultado_clip.get("OUTPUT"), context, es_raster=False,
+                                   nombre="Polígonos de Thiessen")
+    # obtener_capa() solo aplica el nombre `nombre=` cuando la salida es
+    # una ruta de archivo (algoritmos gdal:*/grass7:*) -- las salidas de
+    # algoritmos native:* (como voronoipolygons/clip) quedan registradas
+    # como sink en el contexto y NO se renombran por ese camino; se fija
+    # el nombre explícitamente aquí para que sea consistente en ambos
+    # casos.
+    capa_recortada.setName("Polígonos de Thiessen")
+    if capa_recortada.featureCount() == 0:
+        raise MapasTematicosError(
+            "el recorte de los polígonos de Thiessen a la cuenca no produjo ningún polígono -- "
+            "revise que las estaciones estén cerca de la cuenca delimitada.")
+    return capa_recortada
+
+
+def generar_isoyetas(raster_precipitacion_path: str, intervalo_mm: float, context, feedback):
+    """Isoyetas (curvas de igual precipitación, gdal:contour) a partir
+    del ráster ya interpolado (ver areal_precipitation.generar_raster_precipitacion_idw()),
+    cada `intervalo_mm` -- devuelve la capa vectorial de líneas
+    resultante (campo "PRECIP_MM" con el valor de cada isoyeta), mismo
+    patrón que generar_curvas_nivel()."""
+    import processing
+    if intervalo_mm <= 0:
+        raise MapasTematicosError("el intervalo de isoyetas debe ser mayor que 0.")
+    resultado = processing.run(
+        "gdal:contour",
+        {"INPUT": raster_precipitacion_path, "BAND": 1, "INTERVAL": intervalo_mm,
+         "FIELD_NAME": "PRECIP_MM", "CREATE_3D": False, "IGNORE_NODATA": False,
+         "OUTPUT": "TEMPORARY_OUTPUT"},
+        context=context, feedback=feedback, is_child_algorithm=True,
+    )
+    return obtener_capa(resultado.get("OUTPUT"), context, es_raster=False, nombre="Isoyetas")

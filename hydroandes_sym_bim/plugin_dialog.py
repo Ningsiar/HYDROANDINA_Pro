@@ -17304,6 +17304,61 @@ class HydroAndinaProDialog(QDialog):
         v_cn.addLayout(h_export_cn)
 
         v.addWidget(gb_cn)
+
+        # ------------------------------------------------------------
+        # 3) Precipitación y Clima
+        # ------------------------------------------------------------
+        gb_precip = QGroupBox("3. Precipitación y Clima")
+        v_precip = QVBoxLayout(gb_precip)
+        v_precip.addWidget(QLabel(
+            "Reutiliza las estaciones YA ingresadas en «Módulos Avanzados (Beta) > Precipitación "
+            "Areal» (formato «nombre: valor_mm, x, y») -- no las vuelve a pedir. Isotermas queda "
+            "fuera de alcance: el plugin no tiene ninguna fuente de datos de temperatura."
+        ))
+        self.check_mt_estaciones = QCheckBox("Estaciones pluviométricas (puntos)")
+        self.check_mt_estaciones.setChecked(True)
+        v_precip.addWidget(self.check_mt_estaciones)
+        self.check_mt_thiessen = QCheckBox("Polígonos de Thiessen (recortados a la cuenca)")
+        self.check_mt_thiessen.setChecked(True)
+        v_precip.addWidget(self.check_mt_thiessen)
+        h_isoyetas = QHBoxLayout()
+        self.check_mt_isoyetas = QCheckBox("Isoyetas (precipitación interpolada por IDW), intervalo:")
+        self.check_mt_isoyetas.setChecked(True)
+        h_isoyetas.addWidget(self.check_mt_isoyetas)
+        self.spin_mt_intervalo_isoyetas = QDoubleSpinBox()
+        self.spin_mt_intervalo_isoyetas.setRange(0.5, 500.0)
+        self.spin_mt_intervalo_isoyetas.setValue(10.0)
+        self.spin_mt_intervalo_isoyetas.setSuffix(" mm")
+        h_isoyetas.addWidget(self.spin_mt_intervalo_isoyetas)
+        h_isoyetas.addStretch()
+        v_precip.addLayout(h_isoyetas)
+        h_res_precip = QHBoxLayout()
+        h_res_precip.addWidget(QLabel("Resolución de grilla de interpolación:"))
+        self.spin_mt_resolucion_precip = QDoubleSpinBox()
+        self.spin_mt_resolucion_precip.setRange(5.0, 5000.0)
+        self.spin_mt_resolucion_precip.setValue(100.0)
+        self.spin_mt_resolucion_precip.setSuffix(" m")
+        h_res_precip.addWidget(self.spin_mt_resolucion_precip)
+        h_res_precip.addStretch()
+        v_precip.addLayout(h_res_precip)
+
+        btn_generar_precip = QPushButton("🗺 Generar capas de Precipitación y Clima")
+        btn_generar_precip.clicked.connect(self._on_generar_mapa_precipitacion)
+        v_precip.addWidget(btn_generar_precip)
+        self.lbl_estado_mt_precip = QLabel("Estado: sin generar.")
+        self.lbl_estado_mt_precip.setWordWrap(True)
+        v_precip.addWidget(self.lbl_estado_mt_precip)
+
+        h_export_precip = QHBoxLayout()
+        btn_pdf_precip = QPushButton("📄 Exportar lámina PDF")
+        btn_pdf_precip.clicked.connect(lambda: self._on_exportar_layout_mapa_tematico("precipitacion", "pdf"))
+        h_export_precip.addWidget(btn_pdf_precip)
+        btn_png_precip = QPushButton("🖼 Exportar PNG")
+        btn_png_precip.clicked.connect(lambda: self._on_exportar_layout_mapa_tematico("precipitacion", "png"))
+        h_export_precip.addWidget(btn_png_precip)
+        v_precip.addLayout(h_export_precip)
+
+        v.addWidget(gb_precip)
         v.addStretch()
 
         self._capas_mapas_tematicos = {}  # clave_sección -> [QgsMapLayer,...] ya estilizadas
@@ -17424,9 +17479,92 @@ class HydroAndinaProDialog(QDialog):
             self.lbl_estado_mt_cn.setText("Estado: error (ver mensaje).")
             QMessageBox.critical(self, "Error generando el mapa de CN y suelos", str(e))
 
+    def _on_generar_mapa_precipitacion(self):
+        if self.cuenca_layer is None:
+            QMessageBox.warning(self, "Falta la delimitación",
+                                 "Delimite la cuenca primero (Pestaña 1).")
+            return
+        texto_estaciones = (self.edit_areal_estaciones.toPlainText()
+                             if hasattr(self, "edit_areal_estaciones") else "")
+        if not texto_estaciones.strip():
+            QMessageBox.warning(
+                self, "Faltan estaciones",
+                "Ingrese las estaciones en «Módulos Avanzados (Beta) > Precipitación Areal» "
+                "(formato «nombre: valor_mm, x, y», una por línea) -- esta pestaña las reutiliza "
+                "directamente, sin volver a pedirlas.")
+            return
+        try:
+            valores, coords = self._parsear_estaciones_areal(texto_estaciones)
+            crs_id = self.cuenca_layer.crs().authid()
+            crs_wkt = self.cuenca_layer.crs().toWkt()
+            context = QgsProcessingContext()
+            feedback = QgsProcessingFeedback()
+            capas = []
+            self.lbl_estado_mt_precip.setText("Estado: generando capas...")
+            QApplication.processEvents()
+
+            n_clases_valor = min(max(len(valores), 1), 5)
+            capa_estaciones_base = None
+            if self.check_mt_estaciones.isChecked() or self.check_mt_thiessen.isChecked():
+                capa_estaciones_base = mapas_tematicos.generar_capa_estaciones(valores, coords, crs_id)
+
+            if self.check_mt_estaciones.isChecked():
+                map_styling.estilizar_vector_graduado(
+                    capa_estaciones_base, "valor_mm", rampa="Blues", n_clases=n_clases_valor,
+                    tipo_simbolo="marker")
+                map_styling.agregar_capa_a_grupo(capa_estaciones_base, subgrupo="Precipitación y Clima")
+                capas.append(capa_estaciones_base)
+
+            if self.check_mt_thiessen.isChecked():
+                capa_thiessen = mapas_tematicos.generar_thiessen_recortado(
+                    capa_estaciones_base, self.cuenca_layer, context, feedback)
+                map_styling.estilizar_vector_graduado(
+                    capa_thiessen, "valor_mm", rampa="Blues", n_clases=n_clases_valor, tipo_simbolo="fill")
+                map_styling.agregar_capa_a_grupo(capa_thiessen, subgrupo="Precipitación y Clima")
+                capas.append(capa_thiessen)
+
+            if self.check_mt_isoyetas.isChecked():
+                extent_cuenca = self.cuenca_layer.extent()
+                extent_tupla = (extent_cuenca.xMinimum(), extent_cuenca.yMinimum(),
+                                 extent_cuenca.xMaximum(), extent_cuenca.yMaximum())
+                ruta_precip = areal_precipitation.generar_raster_precipitacion_idw(
+                    valores, coords, extent_tupla, self.spin_mt_resolucion_precip.value(), crs_wkt)
+                capa_precip = obtener_capa(ruta_precip, context, es_raster=True,
+                                            nombre="Precipitación interpolada (IDW)")
+                map_styling.estilizar_raster_pseudocolor(capa_precip, rampa="Blues", n_clases=8)
+                map_styling.agregar_capa_a_grupo(capa_precip, subgrupo="Precipitación y Clima")
+                capas.append(capa_precip)
+
+                capa_isoyetas = mapas_tematicos.generar_isoyetas(
+                    ruta_precip, self.spin_mt_intervalo_isoyetas.value(), context, feedback)
+                n_isoyetas = len({round(f["PRECIP_MM"], 3) for f in capa_isoyetas.getFeatures()})
+                map_styling.estilizar_vector_graduado(
+                    capa_isoyetas, "PRECIP_MM", rampa="Blues",
+                    n_clases=max(min(n_isoyetas, 8), 1), tipo_simbolo="line")
+                map_styling.agregar_capa_a_grupo(capa_isoyetas, subgrupo="Precipitación y Clima")
+                capas.append(capa_isoyetas)
+
+            if not capas:
+                raise mapas_tematicos.MapasTematicosError(
+                    "no se marcó ninguna capa para generar -- active al menos una casilla.")
+
+            self._capas_mapas_tematicos["precipitacion"] = capas
+            self.lbl_estado_mt_precip.setText(
+                f"Estado: {len(capas)} capa(s) generada(s) y agregada(s) al grupo «Mapas Temáticos "
+                f"> Precipitación y Clima» del panel de capas."
+            )
+        except (ValueError, areal_precipitation.ArealPrecipitationError,
+                mapas_tematicos.MapasTematicosError, map_styling.MapStylingError) as e:
+            self.lbl_estado_mt_precip.setText("Estado: error (ver mensaje).")
+            QMessageBox.warning(self, "No se pudo generar el mapa de precipitación", str(e))
+        except Exception as e:
+            self.lbl_estado_mt_precip.setText("Estado: error (ver mensaje).")
+            QMessageBox.critical(self, "Error inesperado generando el mapa de precipitación", str(e))
+
     _TITULOS_MAPAS_TEMATICOS = {
         "morfo": "Mapa Físico — Morfometría y Terreno",
         "cn_suelos": "Número de Curva y Suelos",
+        "precipitacion": "Precipitación y Clima",
     }
 
     def _on_exportar_layout_mapa_tematico(self, clave: str, formato: str = "pdf"):

@@ -34,9 +34,17 @@ TRANSPARENCIA:
     verificable con certeza suficiente para un cálculo de diseño.
 """
 import math
+import os
+import tempfile
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
+
+try:
+    from osgeo import gdal
+    gdal.UseExceptions()
+except ImportError:
+    gdal = None
 
 
 class ArealPrecipitationError(Exception):
@@ -244,3 +252,65 @@ def precipitacion_kriging_ordinario(valores_estaciones: Dict[str, float], coorde
                   "propias estaciones; con pocas estaciones (<10-15) este ajuste es poco robusto — use con "
                   "cautela y compare contra IDW/Thiessen."),
     }
+
+
+def generar_raster_precipitacion_idw(valores_estaciones: Dict[str, float],
+                                      coordenadas: Dict[str, Tuple[float, float]],
+                                      extent: Tuple[float, float, float, float],
+                                      resolucion_m: float, crs_wkt: str,
+                                      potencia: float = 2.0,
+                                      destino_tif: Optional[str] = None) -> str:
+    """Genera un GeoTIFF con la precipitación interpolada por IDW sobre
+    una grilla RECTANGULAR REGULAR completa (a diferencia de
+    precipitacion_idw(), que solo promedia una nube de puntos dentro
+    del polígono de la cuenca y no produce un ráster) -- misma fórmula
+    de pesos (1/d^potencia) ya usada y verificada en precipitacion_idw().
+    Apto para estilizar como mapa temático (core/map_styling.py) y para
+    extraer isoyetas por contorno (gdal:contour).
+
+    `extent`: (xmin, ymin, xmax, ymax) en el mismo CRS que `coordenadas`
+    (normalmente el de la cuenca activa). `crs_wkt`: WKT del CRS de
+    salida (p.ej. capa_cuenca.crs().toWkt())."""
+    if gdal is None:
+        raise ArealPrecipitationError(
+            "GDAL no está disponible en este entorno; no se puede generar el ráster de precipitación.")
+    nombres = list(valores_estaciones.keys())
+    if len(nombres) < 2:
+        raise ArealPrecipitationError("Se requieren al menos 2 estaciones para generar el ráster IDW.")
+
+    xmin, ymin, xmax, ymax = extent
+    if xmax <= xmin or ymax <= ymin:
+        raise ArealPrecipitationError("La extensión indicada (extent) no es válida (xmax<=xmin o ymax<=ymin).")
+    ancho = max(int(round((xmax - xmin) / resolucion_m)), 1)
+    alto = max(int(round((ymax - ymin) / resolucion_m)), 1)
+
+    xs = xmin + (np.arange(ancho) + 0.5) * resolucion_m
+    ys = ymax - (np.arange(alto) + 0.5) * resolucion_m  # fila 0 = norte (arriba), como un ráster estándar
+    grid_x, grid_y = np.meshgrid(xs, ys)  # shape (alto, ancho)
+
+    suma_ponderada = np.zeros((alto, ancho), dtype=np.float64)
+    suma_pesos = np.zeros((alto, ancho), dtype=np.float64)
+    for nombre in nombres:
+        ex, ey = coordenadas[nombre]
+        d = np.sqrt((grid_x - ex) ** 2 + (grid_y - ey) ** 2)
+        d = np.maximum(d, 1e-3)
+        peso = 1.0 / (d ** potencia)
+        suma_ponderada += peso * valores_estaciones[nombre]
+        suma_pesos += peso
+    raster_idw = (suma_ponderada / suma_pesos).astype(np.float32)
+
+    if destino_tif is None:
+        destino_tif = os.path.join(
+            tempfile.mkdtemp(prefix="hydroandes_precip_idw_"), "precipitacion_idw.tif")
+
+    driver = gdal.GetDriverByName("GTiff")
+    ds = driver.Create(destino_tif, ancho, alto, 1, gdal.GDT_Float32)
+    gt = (xmin, resolucion_m, 0.0, ymax, 0.0, -resolucion_m)
+    ds.SetGeoTransform(gt)
+    ds.SetProjection(crs_wkt)
+    banda = ds.GetRasterBand(1)
+    banda.WriteArray(raster_idw)
+    banda.FlushCache()
+    ds = None
+
+    return destino_tif
