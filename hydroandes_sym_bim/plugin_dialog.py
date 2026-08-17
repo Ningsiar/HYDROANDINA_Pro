@@ -50,7 +50,8 @@ from .core import (delineation, morphometry, curve_number, tc_methods, dem_downl
                     runoff_coefficient, roughness_methods, roughness_materials,
                     iila_senamhi_zones, bim_metrados, bim_ifc, bim_refuerzo, bim_geometry,
                     lateral_pressures, reinforced_concrete_e060, presupuesto, formula_polinomica,
-                    apu_referencia, cronograma, geotecnia_e050, estabilidad_muros, zapatas, proyecto_io)
+                    apu_referencia, cronograma, geotecnia_e050, estabilidad_muros, zapatas, proyecto_io,
+                    exportar_presupuesto)
 from .core.qgis_layer_utils import obtener_capa
 from .ui.hypsometric_canvas import HypsometricCanvas
 from .ui.hydrograph_canvas import HydrographCanvas
@@ -11623,6 +11624,45 @@ class HydroAndinaProDialog(QDialog):
         v.addWidget(self.canvas_presupuesto)
 
         # ------------------------------------------------------------
+        # 4b) Exportar Presupuesto -- reporte S10 (3 hojas, mismo
+        # layout que un reporte real de S10 Presupuestos) y plantilla
+        # genérica (punto de partida para Delphin Xpress u otro
+        # software). Ver core/exportar_presupuesto.py.
+        # ------------------------------------------------------------
+        v.addWidget(QLabel(
+            "<hr><b>4b. Exportar Presupuesto</b> — requiere haber calculado el presupuesto arriba. "
+            "«Exportar a S10» genera un .xlsx de 3 hojas con el MISMO layout que un reporte real de "
+            "S10 Presupuestos (Presupuesto agrupado por Título/Subtítulo, APU detallado por "
+            "categoría, Relación de Insumos) -- no es un archivo importable de vuelta a S10 (ese "
+            "software usa una base de datos propietaria, no Excel), es un reporte de salida con la "
+            "misma apariencia. «Exportar formato genérico» es una plantilla tabular simple, punto de "
+            "partida para Delphin Xpress u otro software -- <u>sin verificar contra un archivo real "
+            "de Delphin Xpress</u> (no se contó con una muestra); si tiene una exportación real de "
+            "ese software, se puede ajustar para que coincida exactamente."))
+        self.txt_pres_obra = QLineEdit()
+        self.txt_pres_obra.setPlaceholderText("Nombre de la obra (opcional, solo para el reporte S10)")
+        v.addWidget(self.txt_pres_obra)
+        f_export_pres = QHBoxLayout()
+        self.txt_pres_cliente = QLineEdit()
+        self.txt_pres_cliente.setPlaceholderText("Cliente (opcional)")
+        f_export_pres.addWidget(self.txt_pres_cliente)
+        self.txt_pres_lugar = QLineEdit()
+        self.txt_pres_lugar.setPlaceholderText("Lugar (opcional)")
+        f_export_pres.addWidget(self.txt_pres_lugar)
+        v.addLayout(f_export_pres)
+        f_botones_export_pres = QHBoxLayout()
+        btn_exportar_s10 = QPushButton("📊 Exportar a S10 (Excel)...")
+        btn_exportar_s10.clicked.connect(self._on_exportar_s10)
+        f_botones_export_pres.addWidget(btn_exportar_s10)
+        btn_exportar_generico = QPushButton("📤 Exportar formato genérico (Delphin Xpress, Excel)...")
+        btn_exportar_generico.clicked.connect(self._on_exportar_generico)
+        f_botones_export_pres.addWidget(btn_exportar_generico)
+        v.addLayout(f_botones_export_pres)
+        self.lbl_estado_exportar_pres = QLabel("Estado: sin exportar.")
+        self.lbl_estado_exportar_pres.setWordWrap(True)
+        v.addWidget(self.lbl_estado_exportar_pres)
+
+        # ------------------------------------------------------------
         # 5) Relación de Insumos
         # ------------------------------------------------------------
         v.addWidget(QLabel(
@@ -12127,6 +12167,50 @@ class HydroAndinaProDialog(QDialog):
             self.canvas_presupuesto.graficar_composicion(r, relacion)
         except Exception:
             pass  # el gráfico es un plus visual -- nunca debe romper el cálculo ya hecho
+
+    def _on_exportar_s10(self):
+        if self._ultimo_presupuesto_pres is None:
+            self.lbl_estado_exportar_pres.setText(
+                "Estado: calcule el presupuesto primero (sección 4).")
+            return
+        ruta, _ = QFileDialog.getSaveFileName(
+            self, "Exportar a S10 (Excel)", "presupuesto_s10.xlsx", "Excel (*.xlsx)")
+        if not ruta:
+            return
+        datos_obra = {"obra": self.txt_pres_obra.text().strip(),
+                      "cliente": self.txt_pres_cliente.text().strip(),
+                      "lugar": self.txt_pres_lugar.text().strip()}
+        datos_obra = {k: v for k, v in datos_obra.items() if v}
+        try:
+            exportar_presupuesto.exportar_s10_xlsx(self._ultimo_presupuesto_pres, ruta, datos_obra)
+        except exportar_presupuesto.ExportarPresupuestoError as e:
+            self.lbl_estado_exportar_pres.setText(f"Estado: no se pudo exportar -- {e}")
+            return
+        except Exception as e:
+            self.lbl_estado_exportar_pres.setText(f"Estado: ERROR inesperado al exportar -- {e}")
+            return
+        self.lbl_estado_exportar_pres.setText(f"Estado: reporte S10 exportado en «{ruta}».")
+
+    def _on_exportar_generico(self):
+        if self._ultimo_presupuesto_pres is None:
+            self.lbl_estado_exportar_pres.setText(
+                "Estado: calcule el presupuesto primero (sección 4).")
+            return
+        ruta, _ = QFileDialog.getSaveFileName(
+            self, "Exportar formato genérico (Excel)", "presupuesto_generico.xlsx", "Excel (*.xlsx)")
+        if not ruta:
+            return
+        try:
+            exportar_presupuesto.exportar_generico_xlsx(self._ultimo_presupuesto_pres, ruta)
+        except exportar_presupuesto.ExportarPresupuestoError as e:
+            self.lbl_estado_exportar_pres.setText(f"Estado: no se pudo exportar -- {e}")
+            return
+        except Exception as e:
+            self.lbl_estado_exportar_pres.setText(f"Estado: ERROR inesperado al exportar -- {e}")
+            return
+        self.lbl_estado_exportar_pres.setText(
+            f"Estado: formato genérico exportado en «{ruta}» -- recuerde que NO está verificado "
+            f"contra una importación real a Delphin Xpress (ver nota arriba).")
 
     def _on_generar_relacion_insumos_pres(self):
         if self._ultimo_presupuesto_pres is None:

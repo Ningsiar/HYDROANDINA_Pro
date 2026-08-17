@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.3.36
+version=0.3.37
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,38 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.3.37: NUEVO -- Exportación de Presupuesto a S10 (Excel) y a
+      un formato genérico (Delphin Xpress u otro), cuarta de las 6
+      mejoras priorizadas por el usuario (1, 6 y 4 ya entregadas,
+      ahora el 5).
+      Nuevo core/exportar_presupuesto.py: `exportar_s10_xlsx()` -- un
+      .xlsx de 3 hojas (Presupuesto, Análisis de Precios Unitarios,
+      Relación de Insumos) con el MISMO layout que un reporte real de
+      S10 Presupuestos -- aprendido al parsear los PDF reales de la
+      Fase 4 del Módulo Presupuesto (proyecto Cajamarca): partidas
+      agrupadas por Título/Subtítulo con subtotal por grupo, APU
+      desglosado por categoría (Mano de Obra/Materiales/Equipos/
+      Herramienta Manual/Subcontratos/Subpartida) con subtotal por
+      categoría, y relación de insumos consolidada con total general.
+      Es un reporte de SALIDA con la misma apariencia -- NO un archivo
+      importable de vuelta a S10 (usa una base de datos propietaria,
+      no Excel).
+      `exportar_generico_xlsx()` -- plantilla tabular simple (2 hojas,
+      columnas planas) como punto de partida para Delphin Xpress u
+      otro software. Advertencia explícita y visible en la UI: NO
+      verificada contra un archivo de importación real de Delphin
+      Xpress (a diferencia de S10, no se contó con una muestra real de
+      ese software) -- se puede ajustar si el usuario aporta una
+      exportación real de esa aplicación.
+      Nueva sección "4b. Exportar Presupuesto" en la Pestaña 9, con
+      campos opcionales Obra/Cliente/Lugar y los dos botones.
+      Verificado con un presupuesto de juguete calculado a mano
+      (2 partidas, 2 insumos, costo directo=1788.75, total=2532.87) --
+      releyendo los .xlsx generados con openpyxl y comparando cada
+      celda contra el valor esperado (no solo que el archivo se creó),
+      32/32 comprobaciones; y con las 626 partidas reales de
+      Cajamarca a escala completa (6/6 núcleo + 7/7 UI), incluidos los
+      casos borde reales (ítems Subpartida, herramienta manual por %).
     - v0.3.36: NUEVO -- Guardar/Cargar Proyecto Completo (archivo
       .json portátil), tercera de las 6 mejoras priorizadas por el
       usuario (1 y 6 ya entregadas, ahora el 4).
