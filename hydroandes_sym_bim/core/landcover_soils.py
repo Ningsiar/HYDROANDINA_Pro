@@ -14,17 +14,33 @@ de ambos rásters, para la Pestaña 3 (Número de Curva SCS).
 
 TRANSPARENCIA IMPORTANTE (léase antes de usar en producción):
 
-  1. ESA WorldCover vía STAC: se implementa contra el endpoint público
-     documentado de Earth Search v1 (Element84):
+  1. ESA WorldCover vía STAC: se prueban DOS proveedores en orden,
+     porque un despliegue en vivo (feedback directo del usuario, con
+     acceso de red real) encontró que Earth Search v1 (Element84)
          https://earth-search.aws.element84.com/v1/search
-     con la colección "esa-worldcover" (mosaicos 2020/2021). No se pudo
-     verificar en vivo en este entorno (sin acceso de red a AWS desde
-     donde se escribió este módulo) que el nombre exacto de la colección
-     y de los assets ("map") siga siendo el mismo al momento en que este
-     plugin se ejecute — Element84 ha reorganizado colecciones STAC en
-     el pasado. Si `buscar_coleccion_esa_worldcover()` no encuentra la
-     colección, revise https://earth-search.aws.element84.com/v1 en un
-     navegador y ajuste `_CANDIDATOS_COLECCION_WORLDCOVER` abajo.
+     NO tiene una colección "esa-worldcover" a secas -- solo existen
+     "esa-worldcover-2021"/"esa-worldcover-2020" (mosaicos por año), y
+     una búsqueda con el nombre equivocado responde 200 OK con
+     `features: []` en vez de un error, así que el bbox llegaba bien
+     pero el bucle de colecciones se vaciaba en silencio. Si Earth
+     Search tampoco da resultados (bbox fuera de cobertura, colección
+     renombrada de nuevo, etc.), se reintenta contra Microsoft
+     Planetary Computer:
+         https://planetarycomputer.microsoft.com/api/stac/v1/search
+     con la colección "esa-worldcover" (esta sí existe ahí con ese
+     nombre). Los assets de Planetary Computer están firmados por SAS
+     token (Azure Blob Storage) -- `_firmar_href_planetary_computer()`
+     llama a su endpoint público de firma
+     (.../api/sas/v1/sign?href=...) antes de intentar leer el COG; si
+     la firma falla (p.ej. sin red), se seguirá usando el href sin
+     firmar como último recurso, que puede o no ser accesible según el
+     dataset. Este segundo proveedor y el paso de firma NO se pudieron
+     probar en vivo en este entorno (sin acceso de red desde donde se
+     escribió este módulo) -- si `buscar_coleccion_esa_worldcover()` no
+     encuentra la colección en NINGÚN proveedor, revise
+     https://earth-search.aws.element84.com/v1 y
+     https://planetarycomputer.microsoft.com/api/stac/v1 en un
+     navegador y ajuste `_STAC_PROVEEDORES_WORLDCOVER` abajo.
 
   2. HSG (HYSOGs250m / SoilGrids): a diferencia de ESA WorldCover, NO se
      encontró un catálogo STAC público estable para HYSOGs250m al
@@ -53,6 +69,7 @@ import os
 import tempfile
 import urllib.request
 import urllib.error
+import urllib.parse
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -125,10 +142,24 @@ def limpiar_cache() -> int:
 
 
 # ---------------------------------------------------------------------
-# A) ESA WorldCover vía STAC (Earth Search / AWS)
+# A) ESA WorldCover vía STAC (Earth Search / AWS, con respaldo en
+#    Microsoft Planetary Computer) -- ver nota de transparencia #1.
 # ---------------------------------------------------------------------
-_STAC_ENDPOINT_BUSQUEDA = "https://earth-search.aws.element84.com/v1/search"
-_CANDIDATOS_COLECCION_WORLDCOVER = ["esa-worldcover", "esa-worldcover-2021", "esa-worldcover-2020"]
+_STAC_PROVEEDORES_WORLDCOVER = [
+    {
+        "nombre": "Earth Search (Element84)",
+        "endpoint": "https://earth-search.aws.element84.com/v1/search",
+        "colecciones": ["esa-worldcover-2021", "esa-worldcover-2020"],
+        "requiere_firma": False,
+    },
+    {
+        "nombre": "Microsoft Planetary Computer",
+        "endpoint": "https://planetarycomputer.microsoft.com/api/stac/v1/search",
+        "colecciones": ["esa-worldcover"],
+        "requiere_firma": True,
+    },
+]
+_URL_FIRMA_PLANETARY_COMPUTER = "https://planetarycomputer.microsoft.com/api/sas/v1/sign?href={href}"
 
 # Clases ESA WorldCover (código -> nombre), y su mapeo a CN por grupo
 # hidrológico A/B/C/D. Ver nota de transparencia #3 del docstring.
@@ -192,55 +223,84 @@ def _bbox_wgs84_de_capa(cuenca_layer) -> Tuple[float, float, float, float]:
     return extent.xMinimum(), extent.yMinimum(), extent.xMaximum(), extent.yMaximum()
 
 
+def _firmar_href_planetary_computer(href: str, timeout_seg: int = 15) -> str:
+    """Firma `href` (asset de Planetary Computer, en Azure Blob Storage)
+    con su API pública de firma SAS -- sin la firma, muchos contenedores
+    de Planetary Computer devuelven 403 al leer directamente. Si la
+    firma falla (p.ej. sin red), se devuelve `href` SIN firmar como
+    último recurso -- puede o no ser accesible según el dataset, pero
+    es mejor que abortar aquí y perder el resto del flujo."""
+    try:
+        peticion = urllib.request.Request(
+            _URL_FIRMA_PLANETARY_COMPUTER.format(href=urllib.parse.quote(href, safe="")),
+            headers={"Accept": "application/json"},
+        )
+        with urllib.request.urlopen(peticion, timeout=timeout_seg) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        return data.get("href", href)
+    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, ValueError):
+        return href
+
+
 def buscar_coleccion_esa_worldcover(bbox_wgs84: Tuple[float, float, float, float],
                                      timeout_seg: int = 30) -> Tuple[str, List[str]]:
     """
-    Consulta el catálogo STAC de Earth Search y devuelve
-    (id_coleccion_encontrada, [urls_cog_de_los_items_que_cubren_el_bbox]).
+    Consulta los catálogos STAC de _STAC_PROVEEDORES_WORLDCOVER, EN
+    ORDEN (Earth Search primero, Planetary Computer como respaldo), y
+    devuelve (id_coleccion_encontrada, [urls_cog_de_los_items_que_cubren_el_bbox]).
+    Los assets de proveedores con `requiere_firma=True` se firman antes
+    de devolverse (ver `_firmar_href_planetary_computer()`), para que
+    la URL resultante sea directamente utilizable con /vsicurl/.
     """
     west, south, east, north = bbox_wgs84
     ultimo_error = None
-    for coleccion in _CANDIDATOS_COLECCION_WORLDCOVER:
-        payload = json.dumps({
-            "collections": [coleccion],
-            "bbox": [west, south, east, north],
-            "limit": 20,
-        }).encode("utf-8")
-        peticion = urllib.request.Request(
-            _STAC_ENDPOINT_BUSQUEDA, data=payload,
-            headers={"Content-Type": "application/json", "Accept": "application/json"},
-        )
-        try:
-            with urllib.request.urlopen(peticion, timeout=timeout_seg) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-            features = data.get("features", [])
-            if not features:
+    intentos = []  # (proveedor, colección) probados, para el mensaje de error final
+    for proveedor in _STAC_PROVEEDORES_WORLDCOVER:
+        for coleccion in proveedor["colecciones"]:
+            intentos.append(f"{proveedor['nombre']}/{coleccion}")
+            payload = json.dumps({
+                "collections": [coleccion],
+                "bbox": [west, south, east, north],
+                "limit": 20,
+            }).encode("utf-8")
+            peticion = urllib.request.Request(
+                proveedor["endpoint"], data=payload,
+                headers={"Content-Type": "application/json", "Accept": "application/json"},
+            )
+            try:
+                with urllib.request.urlopen(peticion, timeout=timeout_seg) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                features = data.get("features", [])
+                if not features:
+                    continue
+                urls = []
+                for feat in features:
+                    assets = feat.get("assets", {})
+                    # El nombre del asset del COG principal ha variado entre
+                    # versiones del catálogo ("map", "ESA_WORLDCOVER_10M_MAP", etc.);
+                    # se busca el primer asset cuyo media_type sea GeoTIFF/COG.
+                    href = None
+                    for clave, asset in assets.items():
+                        tipo = asset.get("type", "")
+                        if "tiff" in tipo.lower() or clave.lower() in ("map", "data"):
+                            href = asset.get("href")
+                            if href:
+                                break
+                    if href:
+                        if proveedor["requiere_firma"]:
+                            href = _firmar_href_planetary_computer(href, timeout_seg)
+                        urls.append(href)
+                if urls:
+                    return coleccion, urls
+            except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError) as e:
+                ultimo_error = e
                 continue
-            urls = []
-            for feat in features:
-                assets = feat.get("assets", {})
-                # El nombre del asset del COG principal ha variado entre
-                # versiones del catálogo ("map", "ESA_WORLDCOVER_10M_MAP", etc.);
-                # se busca el primer asset cuyo media_type sea GeoTIFF/COG.
-                href = None
-                for clave, asset in assets.items():
-                    tipo = asset.get("type", "")
-                    if "tiff" in tipo.lower() or clave.lower() in ("map", "data"):
-                        href = asset.get("href")
-                        if href:
-                            break
-                if href:
-                    urls.append(href)
-            if urls:
-                return coleccion, urls
-        except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError) as e:
-            ultimo_error = e
-            continue
     raise LandcoverSoilsError(
-        "No se encontró la colección ESA WorldCover en Earth Search para el bbox indicado "
-        f"(colecciones probadas: {_CANDIDATOS_COLECCION_WORLDCOVER}). "
-        "Verifique conectividad a https://earth-search.aws.element84.com/v1 y si el nombre "
-        "de la colección cambió (ver nota de transparencia #1 en core/landcover_soils.py). "
+        "No se encontró la colección ESA WorldCover en ningún proveedor STAC para el bbox "
+        f"indicado (probados: {', '.join(intentos)}). "
+        "Verifique conectividad a https://earth-search.aws.element84.com/v1 y "
+        "https://planetarycomputer.microsoft.com/api/stac/v1, y si algún nombre de colección "
+        "cambió (ver nota de transparencia #1 en core/landcover_soils.py). "
         f"Último error: {ultimo_error}"
     )
 
