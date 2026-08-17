@@ -2075,9 +2075,13 @@ class HydroAndinaProDialog(QDialog):
         f_auto_cn = QFormLayout(gb_auto_cn)
         f_auto_cn.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
         lbl_auto_cn_info = QLabel(
-            "A. Uso y cobertura de suelo (LULC): ESA WorldCover 10 m, obtenido automáticamente vía "
-            "el catálogo STAC de AWS Earth Search (recorte remoto a la cuenca, sin descargar el "
-            "mosaico global completo).\n"
+            "A. Uso y cobertura de suelo (LULC): ESA WorldCover 10 m -- por defecto se obtiene "
+            "automáticamente vía el catálogo STAC de AWS Earth Search (recorte remoto a la cuenca, "
+            "sin descargar el mosaico global completo). Si prefiere no depender de esa búsqueda en "
+            "vivo (o el catálogo remoto cambió de nombre otra vez), descargue el archivo una vez a "
+            "mano -- p.ej. desde https://esa-worldcover.org/en/data-access -- y guárdelo donde "
+            "quiera (puede ser dentro de la carpeta del plugin); indique esa ruta/URL abajo y se "
+            "usará esa en vez de buscar por STAC.\n"
             "B. Grupo Hidrológico de Suelo (HSG A/B/C/D): dos opciones -- B1) indique abajo la ruta/"
             "URL de un ráster YA clasificado (HYSOGs250m u otro), o B2) 100% AUTÓNOMO: se deriva de "
             "la textura del suelo (SoilGrids, arena+arcilla a 0-30 cm) sin que aporte ningún ráster "
@@ -2085,6 +2089,17 @@ class HydroAndinaProDialog(QDialog):
         )
         lbl_auto_cn_info.setWordWrap(True)
         f_auto_cn.addRow(lbl_auto_cn_info)
+        self.edit_lulc_ruta = QLineEdit()
+        self.edit_lulc_ruta.setPlaceholderText(
+            "Opcional -- ruta local o URL http(s) al GeoTIFF de ESA WorldCover ya descargado. "
+            "Vacío = buscar automáticamente vía STAC (comportamiento por defecto)."
+        )
+        h_lulc = QHBoxLayout()
+        h_lulc.addWidget(self.edit_lulc_ruta)
+        btn_lulc = QPushButton("Examinar archivo local...")
+        btn_lulc.clicked.connect(self._on_examinar_lulc)
+        h_lulc.addWidget(btn_lulc)
+        f_auto_cn.addRow("A) LULC ya descargado (opcional, en vez de buscar por STAC):", h_lulc)
         self.edit_hsg_ruta = QLineEdit()
         self.edit_hsg_ruta.setPlaceholderText(
             "Ruta local o URL http(s) al GeoTIFF de HYSOGs250m (p.ej. descargado de https://doi.org/10.3334/ORNLDAAC/1566)"
@@ -2790,6 +2805,27 @@ class HydroAndinaProDialog(QDialog):
         if ruta:
             self.edit_hsg_ruta.setText(ruta)
 
+    def _on_examinar_lulc(self):
+        ruta, _ = QFileDialog.getOpenFileName(
+            self, "Seleccionar ráster de LULC (ESA WorldCover u otro)", "", "GeoTIFF (*.tif *.tiff)")
+        if ruta:
+            self.edit_lulc_ruta.setText(ruta)
+
+    def _obtener_lulc_para_cn(self, context, feedback):
+        """Punto único de obtención del LULC para ambos handlers de CN
+        automático (B1 y B2): si el usuario indicó una ruta/URL manual
+        en la sección "A" de la pestaña, se usa esa (sin tocar la red
+        STAC); si no, se busca automáticamente como hasta ahora."""
+        ruta_lulc_manual = self.edit_lulc_ruta.text().strip()
+        if ruta_lulc_manual:
+            self.lbl_estado_cn_auto.setText("Estado: recortando el ráster de LULC indicado a la cuenca...")
+            QApplication.processEvents()
+            return landcover_soils.obtener_lulc_recortado(
+                ruta_lulc_manual, self.cuenca_layer, context, feedback)
+        self.lbl_estado_cn_auto.setText("Estado: buscando y recortando ESA WorldCover (STAC)...")
+        QApplication.processEvents()
+        return landcover_soils.obtener_lulc_esa_worldcover_recortado(self.cuenca_layer, context, feedback)
+
     def _on_calcular_cn_automatico(self):
         if self.cuenca_layer is None:
             QMessageBox.warning(self, "Falta la delimitación",
@@ -2802,14 +2838,10 @@ class HydroAndinaProDialog(QDialog):
                                  "Suelo (HYSOGs250m u otro ya reclasificado a A/B/C/D).")
             return
         try:
-            self.lbl_estado_cn_auto.setText("Estado: buscando y recortando ESA WorldCover (STAC)...")
-            QApplication.processEvents()
             context = QgsProcessingContext()
             feedback = QgsProcessingFeedback()
 
-            lulc_path = landcover_soils.obtener_lulc_esa_worldcover_recortado(
-                self.cuenca_layer, context, feedback
-            )
+            lulc_path = self._obtener_lulc_para_cn(context, feedback)
             self.lbl_estado_cn_auto.setText("Estado: recortando el ráster de HSG a la cuenca...")
             QApplication.processEvents()
             hsg_path = landcover_soils.obtener_hsg_recortado(ruta_hsg, self.cuenca_layer, context, feedback)
@@ -2857,14 +2889,10 @@ class HydroAndinaProDialog(QDialog):
                                  "Ejecute primero la delimitación en la pestaña 1.")
             return
         try:
-            self.lbl_estado_cn_auto.setText("Estado: buscando y recortando ESA WorldCover (STAC)...")
-            QApplication.processEvents()
             context = QgsProcessingContext()
             feedback = QgsProcessingFeedback()
 
-            lulc_path = landcover_soils.obtener_lulc_esa_worldcover_recortado(
-                self.cuenca_layer, context, feedback
-            )
+            lulc_path = self._obtener_lulc_para_cn(context, feedback)
             self.lbl_estado_cn_auto.setText(
                 "Estado: descargando y recortando SoilGrids (arena/arcilla, 0-30 cm)..."
             )

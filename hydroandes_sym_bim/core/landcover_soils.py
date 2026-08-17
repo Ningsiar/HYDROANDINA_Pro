@@ -370,7 +370,59 @@ def obtener_lulc_esa_worldcover_recortado(cuenca_layer, context, feedback,
 
 # ---------------------------------------------------------------------
 # B) Grupos Hidrológicos de Suelo (HSG) — HYSOGs250m / SoilGrids
+#    A2) LULC MANUAL -- alternativa a la búsqueda STAC automática, para
+#    cuando el usuario prefiere descargar el archivo una vez a mano y
+#    no depender de que el catálogo remoto siga disponible/con el
+#    mismo nombre. Ambas comparten la misma mecánica de recorte -- ver
+#    `_recortar_raster_a_cuenca()`.
 # ---------------------------------------------------------------------
+def _recortar_raster_a_cuenca(entrada: str, nombre_cache_base: str, cuenca_layer, context, feedback,
+                               destino_tif: Optional[str] = None, usar_cache: bool = True) -> str:
+    """Recorta CUALQUIER ráster (LULC, HSG, o cualquier otro ya
+    clasificado) a la cuenca, desde una ruta local o una URL http(s)
+    (leída vía /vsicurl/ sin descarga completa, si el servidor soporta
+    rangos HTTP). Lógica compartida entre `obtener_hsg_recortado()` y
+    `obtener_lulc_recortado()` -- ambas hacen exactamente lo mismo,
+    solo cambia qué dataset y qué clave de caché usan.
+
+    `usar_cache`: ver `obtener_lulc_esa_worldcover_recortado()` -- la
+    clave de caché incluye `entrada` (ruta/URL), así que un cambio de
+    fuente no reutiliza por error el recorte de otra.
+    """
+    ruta_gdal = entrada
+    if ruta_gdal.lower().startswith("http://") or ruta_gdal.lower().startswith("https://"):
+        ruta_gdal = f"/vsicurl/{ruta_gdal}"
+
+    if usar_cache and destino_tif is None:
+        hash_fuente = hashlib.md5(entrada.encode("utf-8")).hexdigest()[:10]
+        destino_tif = _ruta_cache(f"{nombre_cache_base}_{hash_fuente}", _bbox_wgs84_de_capa(cuenca_layer))
+        if os.path.isfile(destino_tif) and os.path.getsize(destino_tif) > 0:
+            return destino_tif
+
+    import processing
+    if destino_tif is None:
+        destino_tif = os.path.join(
+            tempfile.gettempdir(), f"hydroandina_{nombre_cache_base}_recortado.tif")
+
+    resultado = processing.run(
+        "gdal:cliprasterbymasklayer",
+        {
+            "INPUT": ruta_gdal, "MASK": cuenca_layer, "SOURCE_CRS": None, "TARGET_CRS": None,
+            "NODATA": None, "ALPHA_BAND": False, "CROP_TO_CUTLINE": True,
+            "KEEP_RESOLUTION": True, "OUTPUT": destino_tif,
+        },
+        context=context, feedback=feedback, is_child_algorithm=True,
+    )
+    ruta_out = resultado.get("OUTPUT")
+    if not ruta_out:
+        raise LandcoverSoilsError(
+            f"No se pudo recortar el ráster ({nombre_cache_base}) a la cuenca. Verifique que la "
+            "ruta/URL sea correcta y accesible, y que el ráster cubra efectivamente la extensión "
+            "de la cuenca."
+        )
+    return ruta_out
+
+
 def obtener_hsg_recortado(ruta_o_url_hsg: str, cuenca_layer, context, feedback,
                            destino_tif: Optional[str] = None, usar_cache: bool = True) -> str:
     """
@@ -382,36 +434,28 @@ def obtener_hsg_recortado(ruta_o_url_hsg: str, cuenca_layer, context, feedback,
     -- la clave de caché aquí incluye la ruta/URL indicada, así que un
     cambio de fuente no reutiliza por error el recorte de otra.
     """
-    entrada = ruta_o_url_hsg
-    if entrada.lower().startswith("http://") or entrada.lower().startswith("https://"):
-        entrada = f"/vsicurl/{entrada}"
+    return _recortar_raster_a_cuenca(ruta_o_url_hsg, "hsg_manual", cuenca_layer, context, feedback,
+                                      destino_tif, usar_cache)
 
-    if usar_cache and destino_tif is None:
-        hash_fuente = hashlib.md5(ruta_o_url_hsg.encode("utf-8")).hexdigest()[:10]
-        destino_tif = _ruta_cache(f"hsg_manual_{hash_fuente}", _bbox_wgs84_de_capa(cuenca_layer))
-        if os.path.isfile(destino_tif) and os.path.getsize(destino_tif) > 0:
-            return destino_tif
 
-    import processing
-    if destino_tif is None:
-        destino_tif = os.path.join(tempfile.gettempdir(), "hydroandina_hsg_recortado.tif")
-
-    resultado = processing.run(
-        "gdal:cliprasterbymasklayer",
-        {
-            "INPUT": entrada, "MASK": cuenca_layer, "SOURCE_CRS": None, "TARGET_CRS": None,
-            "NODATA": None, "ALPHA_BAND": False, "CROP_TO_CUTLINE": True,
-            "KEEP_RESOLUTION": True, "OUTPUT": destino_tif,
-        },
-        context=context, feedback=feedback, is_child_algorithm=True,
-    )
-    ruta_out = resultado.get("OUTPUT")
-    if not ruta_out:
-        raise LandcoverSoilsError(
-            "No se pudo recortar el ráster de HSG a la cuenca. Verifique que la ruta/URL sea "
-            "correcta y accesible, y que el ráster cubra efectivamente la extensión de la cuenca."
-        )
-    return ruta_out
+def obtener_lulc_recortado(ruta_o_url_lulc: str, cuenca_layer, context, feedback,
+                            destino_tif: Optional[str] = None, usar_cache: bool = True) -> str:
+    """
+    Recorta un ráster de LULC/Uso y Cobertura de Suelo YA DESCARGADO por
+    el usuario (ESA WorldCover -- p.ej. desde
+    https://esa-worldcover.org/en/data-access -- u otro con los mismos
+    códigos de clase que TABLA_CN_ESA_WORLDCOVER/resources/cn_matriz_lulc.json)
+    a la cuenca. Es la alternativa MANUAL a
+    `obtener_lulc_esa_worldcover_recortado()` (que busca y descarga
+    automáticamente vía STAC) -- útil cuando el usuario prefiere
+    descargar el archivo una sola vez y no depender de que el catálogo
+    STAC remoto siga disponible/con el mismo nombre de colección (ver
+    nota de transparencia #1 del módulo). Acepta ruta local o URL
+    http(s) (vía /vsicurl/, sin descarga completa si el servidor
+    soporta rangos HTTP).
+    """
+    return _recortar_raster_a_cuenca(ruta_o_url_lulc, "lulc_manual", cuenca_layer, context, feedback,
+                                      destino_tif, usar_cache)
 
 
 # ---------------------------------------------------------------------

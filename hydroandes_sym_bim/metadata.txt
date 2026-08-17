@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.4.10
+version=0.4.11
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,37 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.4.11: NUEVO -- LULC manual (archivo local/URL) como alternativa
+      a la búsqueda STAC en la Pestaña 3, a pedido explícito del
+      usuario ("o puedo descargar el archivo y tenerlo en la carpeta
+      de nuestro plugin"). Antes, el LULC de B1 y B2 SIEMPRE se
+      buscaba vía STAC (Earth Search/Planetary Computer, v0.4.10) sin
+      ninguna alternativa -- a diferencia del HSG, que ya aceptaba una
+      ruta/URL manual desde el inicio. Ahora el LULC tiene la misma
+      opción: nuevo campo "A) LULC ya descargado" en la Pestaña 3 --
+      si el usuario descarga el archivo una vez a mano (p.ej. desde
+      https://esa-worldcover.org/en/data-access, incluso guardándolo
+      dentro de la carpeta del plugin) e indica la ruta ahí, se usa
+      esa directamente y NO se toca la red STAC en absoluto; si el
+      campo queda vacío, el comportamiento es el de siempre (búsqueda
+      automática).
+      core/landcover_soils.py: nueva `obtener_lulc_recortado()`,
+      hermana de `obtener_hsg_recortado()` -- se extrajo la lógica de
+      recorte compartida a `_recortar_raster_a_cuenca()` (mismo
+      resultado que antes para HSG, ahora reutilizado también para
+      LULC, con claves de caché independientes para no mezclar
+      recortes de una fuente con la otra). plugin_dialog.py:
+      `_obtener_lulc_para_cn()` es el único punto de decisión
+      (manual vs. automático) para los dos handlers de CN (B1 y B2),
+      así ninguno puede quedar desincronizado.
+      Verificado: 10/10 (núcleo -- recorte real con GDAL de un LULC
+      sintético local, caché verificada por ruta idéntica en llamadas
+      repetidas, HSG confirmado sin cambio de comportamiento tras
+      compartir la lógica, claves de caché de LULC/HSG comprobadas
+      independientes) + 9/9 (integración UI real en QGIS headless --
+      enrutamiento manual/automático verificado por monkeypatching de
+      ambas funciones, incluida la limpieza de espacios en la ruta
+      ingresada) -- 19/19.
     - v0.4.10: CORRECCIÓN -- descarga automática de LULC/ESA WorldCover
       (Pestaña 3, B2) fallaba en vivo, a partir de un reporte del
       usuario con acceso de red real (este entorno de desarrollo no
