@@ -205,6 +205,25 @@ def generar_thiessen_recortado(capa_estaciones: QgsVectorLayer, cuenca_layer: Qg
     return capa_recortada
 
 
+def calcular_pesos_thiessen_estaciones(capa_estaciones: QgsVectorLayer, cuenca_layer: QgsVectorLayer,
+                                        context, feedback) -> Dict[str, float]:
+    """Pesos de Thiessen de cada estación para combinar series de
+    máximos anuales multi-estación (Pestaña 5, "1c. Múltiples
+    Estaciones") -- la fracción del área de la cuenca (ya recortada,
+    ver generar_thiessen_recortado()) que cae dentro del polígono de
+    cada estación. Requiere el campo "nombre" en `capa_estaciones`
+    (mismo campo que produce generar_capa_estaciones())."""
+    capa_thiessen = generar_thiessen_recortado(capa_estaciones, cuenca_layer, context, feedback)
+    areas: Dict[str, float] = {}
+    for feat in capa_thiessen.getFeatures():
+        nombre = feat["nombre"]
+        areas[nombre] = areas.get(nombre, 0.0) + feat.geometry().area()
+    area_total = sum(areas.values())
+    if area_total <= 0:
+        raise MapasTematicosError("el área total de los polígonos de Thiessen es cero.")
+    return {nombre: area / area_total for nombre, area in areas.items()}
+
+
 def generar_isoyetas(raster_precipitacion_path: str, intervalo_mm: float, context, feedback):
     """Isoyetas (curvas de igual precipitación, gdal:contour) a partir
     del ráster ya interpolado (ver areal_precipitation.generar_raster_precipitacion_idw()),

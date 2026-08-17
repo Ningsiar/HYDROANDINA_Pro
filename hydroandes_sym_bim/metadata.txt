@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.4.8
+version=0.4.9
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,49 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.4.9: NUEVO -- Serie de Máximos Anuales AREAL PONDERADA
+      multi-estación en la Pestaña 5 (Precipitación Máx 24h), a pedido
+      explícito del usuario ("cuando hay mas de 2 estaciones con
+      registros, que criterio podriamos implementar para tener un
+      PMAX24hr ponderado o areal").
+      DECISIÓN METODOLÓGICA (consultada y confirmada con el usuario):
+      se pondera el DATO de cada año, no los valores de diseño P24(Tr)
+      ya ajustados por estación -- promediar quantiles ya ajustados
+      sobreestima el extremo areal, porque asume (incorrectamente) que
+      todas las estaciones tuvieron su máximo anual el mismo día. La
+      serie combinada resultante se ajusta con el mismo motor de
+      siempre (9 distribuciones + outliers Grubbs-Beck), sin duplicar
+      nada.
+      Nueva sección "1c. Múltiples Estaciones — Serie Areal Ponderada"
+      en la Pestaña 5: tabla de estaciones (nombre + coordenadas) y
+      tabla de serie multi-estación (año × estación, con huecos
+      permitidos), ambos métodos de ponderación disponibles a elección
+      del usuario -- Thiessen (nuevo core/mapas_tematicos.py::
+      calcular_pesos_thiessen_estaciones(), reutiliza
+      generar_thiessen_recortado() ya construido para Mapas Temáticos)
+      e IDW (nuevo core/areal_precipitation.py::calcular_pesos_idw_estaciones(),
+      desde el centroide de la cuenca). Años con menos estaciones que
+      el mínimo indicado se excluyen; en años con huecos parciales, los
+      pesos se renormalizan SOLO entre las estaciones que sí reportan
+      ese año (nueva core/areal_precipitation.py::serie_anual_ponderada()).
+      Botón "Usar esta serie" adopta el resultado como
+      self.serie_precip_anual -- de ahí en más, outliers, ajuste de
+      distribuciones, P24-Tr, IDF y todo lo demás funcionan exactamente
+      igual que con cualquier otra fuente de datos.
+      LIMITACIÓN DOCUMENTADA (consultada y confirmada con el usuario):
+      no se aplica Factor de Reducción Areal (ARF, p.ej. NRCS TR-55) --
+      esas curvas están calibradas con datos de EE.UU./RU y aplicarlas
+      a cuencas andinas sin una fuente regional verificada sería una
+      corrección de origen incierto; queda como extensión futura.
+      Verificado: 23/23 (serie_anual_ponderada() y
+      calcular_pesos_idw_estaciones(), con años de huecos parciales
+      renormalizados y calculados EXACTAMENTE a mano) + 6/6 (pesos de
+      Thiessen contra la misma configuración de 5 estaciones con áreas
+      de Voronoi derivadas analíticamente en la Fase 3 de Mapas
+      Temáticos) + 24/24 (integración UI real en QGIS headless,
+      incluidos ambos métodos con y sin cuenca delimitada, huecos
+      parciales, adopción de la serie y su propagación al resto del
+      pipeline) -- 53/53 en total.
     - v0.4.8: NUEVO -- Análisis de Outliers (Grubbs-Beck, USWRC
       Bulletin 17B) en la Pestaña 5 (Precipitación Máx 24h), a pedido
       explícito del usuario, "conectado a los resultados y como dato

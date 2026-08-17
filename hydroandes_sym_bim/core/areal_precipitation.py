@@ -20,6 +20,28 @@ MÉTODOS IMPLEMENTADOS:
     ajuste razonable; con menos estaciones el variograma es poco
     confiable — se advierte en el resultado).
 
+SERIE DE MÁXIMOS ANUALES AREAL PONDERADA (Pestaña 5, "1c. Múltiples
+Estaciones"): distinto de los métodos de arriba, que arealizan UN
+evento (todas las estaciones midieron la misma tormenta). Aquí el
+problema es otro: se tienen N series de máximos anuales INDEPENDIENTES
+(el máximo anual de la estación A y el de la B casi nunca son la misma
+tormenta), y se quiere UNA sola serie representativa de la cuenca para
+el análisis de frecuencia. La práctica estándar (y la que se
+implementa aquí, ver serie_anual_ponderada()) es ponderar los DATOS
+año por año -- no promediar los valores de diseño P24(Tr) ya ajustados
+por estación, que sobreestimaría el extremo areal (es muy improbable
+que todas las estaciones tengan su máximo anual el mismo día; ver nota
+de Factor de Reducción Areal más abajo). La serie resultante se ajusta
+después con el mismo motor de 9 distribuciones de siempre
+(core/frequency_analysis.py) -- sin duplicar nada.
+
+LIMITACIÓN DOCUMENTADA: no se aplica ningún Factor de Reducción Areal
+(ARF, p.ej. NRCS TR-55 o el Flood Studies Report del Reino Unido) al
+resultado. Esas curvas están calibradas con datos de EE.UU./RU;
+aplicarlas a cuencas andinas sin una fuente regional verificada sería
+imponer una corrección de origen incierto. Se deja como extensión
+futura si se cuenta con una curva ARF calibrada localmente.
+
 TRANSPARENCIA:
   - Co-Kriging (con una variable auxiliar, p.ej. elevación) NO se
     implementa: requiere modelar la correlación cruzada entre dos
@@ -314,3 +336,106 @@ def generar_raster_precipitacion_idw(valores_estaciones: Dict[str, float],
     ds = None
 
     return destino_tif
+
+
+# ======================================================================
+# Serie de máximos anuales AREAL PONDERADA multi-estación -- ver nota
+# en el docstring del módulo. Los pesos de Thiessen (que requieren
+# generar el polígono de Voronoi recortado a la cuenca en QGIS) se
+# calculan aparte, en core/mapas_tematicos.py::calcular_pesos_thiessen_estaciones();
+# aquí solo IDW (puro Python/numpy) y la combinación año-por-año, que
+# es agnóstica de cómo se obtuvieron los pesos.
+# ======================================================================
+def calcular_pesos_idw_estaciones(coordenadas: Dict[str, Tuple[float, float]],
+                                   punto_referencia: Tuple[float, float],
+                                   potencia: float = 2.0) -> Dict[str, float]:
+    """Pesos IDW (inverso a la distancia) de cada estación respecto a
+    `punto_referencia` (típicamente el centroide de la cuenca),
+    normalizados a que sumen 1. Alternativa más simple que Thiessen
+    cuando no se cuenta con (o no se quiere generar) el polígono de
+    Voronoi recortado a la cuenca."""
+    nombres = list(coordenadas.keys())
+    if len(nombres) < 2:
+        raise ArealPrecipitationError("Se requieren al menos 2 estaciones para calcular pesos IDW.")
+    rx, ry = punto_referencia
+    pesos_brutos = {}
+    for nombre in nombres:
+        x, y = coordenadas[nombre]
+        d = max(math.hypot(x - rx, y - ry), 1e-3)
+        pesos_brutos[nombre] = 1.0 / (d ** potencia)
+    suma = sum(pesos_brutos.values())
+    return {nombre: p / suma for nombre, p in pesos_brutos.items()}
+
+
+def centroide_poligono(vertices: List[Tuple[float, float]]) -> Tuple[float, float]:
+    """Centroide (promedio simple de vértices) de un polígono simple --
+    suficiente como punto de referencia para IDW (no hace falta el
+    centroide exacto ponderado por área para este propósito)."""
+    if not vertices:
+        raise ArealPrecipitationError("la lista de vértices del polígono está vacía.")
+    xs = [v[0] for v in vertices]
+    ys = [v[1] for v in vertices]
+    return (sum(xs) / len(xs), sum(ys) / len(ys))
+
+
+def serie_anual_ponderada(datos_por_estacion: Dict[str, Dict[int, float]],
+                           pesos: Dict[str, float], minimo_estaciones: int = 2) -> dict:
+    """Combina las series de máximos anuales de varias estaciones en
+    UNA sola serie "areal ponderada", año por año: para cada año en el
+    que reportan al menos `minimo_estaciones` estaciones, se pondera
+    SOLO entre las que reportan ese año, RENORMALIZANDO sus pesos para
+    que sumen 1 entre ellas -- así un año con huecos en algunas
+    estaciones no queda ni excluido de más ni sesgado hacia cero por
+    los pesos "faltantes". Los años con menos de `minimo_estaciones`
+    estaciones se omiten de la serie resultante.
+
+    datos_por_estacion: {nombre_estación: {año: valor_mm, ...}, ...}
+        (con huecos: no todas las estaciones necesitan tener el mismo
+        conjunto de años).
+    pesos: {nombre_estación: peso}, deben sumar ~1 sobre TODAS las
+        estaciones de `datos_por_estacion` (los que devuelven
+        calcular_pesos_idw_estaciones() o los pesos de Thiessen
+        calculados en QGIS).
+    """
+    nombres_pesos = set(pesos.keys())
+    nombres_datos = set(datos_por_estacion.keys())
+    if nombres_pesos != nombres_datos:
+        raise ArealPrecipitationError(
+            f"las estaciones con pesos ({sorted(nombres_pesos)}) no coinciden con las estaciones "
+            f"con datos ({sorted(nombres_datos)}).")
+    if minimo_estaciones < 2:
+        raise ArealPrecipitationError("minimo_estaciones debe ser al menos 2.")
+
+    todos_los_anios = sorted({anio for serie in datos_por_estacion.values() for anio in serie.keys()})
+    anios_incluidos: List[int] = []
+    valores_ponderados: List[float] = []
+    detalle_por_anio: Dict[int, dict] = {}
+    for anio in todos_los_anios:
+        estaciones_reportando = sorted(n for n in nombres_datos if anio in datos_por_estacion[n])
+        if len(estaciones_reportando) < minimo_estaciones:
+            continue
+        peso_total_reportando = sum(pesos[n] for n in estaciones_reportando)
+        if peso_total_reportando <= 0:
+            continue
+        valor = sum(pesos[n] / peso_total_reportando * datos_por_estacion[n][anio]
+                    for n in estaciones_reportando)
+        anios_incluidos.append(anio)
+        valores_ponderados.append(round(valor, 3))
+        detalle_por_anio[anio] = {
+            "estaciones": estaciones_reportando,
+            "n_estaciones": len(estaciones_reportando),
+            "pesos_renormalizados": {n: round(pesos[n] / peso_total_reportando, 4)
+                                      for n in estaciones_reportando},
+        }
+
+    if not anios_incluidos:
+        raise ArealPrecipitationError(
+            f"ningún año tiene al menos {minimo_estaciones} estación(es) reportando -- no se puede "
+            "construir la serie areal ponderada; reduzca el mínimo de estaciones o revise los datos.")
+
+    return {
+        "anios": anios_incluidos, "valores_mm": valores_ponderados,
+        "n_anios": len(anios_incluidos), "detalle_por_anio": detalle_por_anio,
+        "anios_totales_disponibles": len(todos_los_anios),
+        "anios_excluidos_por_pocas_estaciones": len(todos_los_anios) - len(anios_incluidos),
+    }

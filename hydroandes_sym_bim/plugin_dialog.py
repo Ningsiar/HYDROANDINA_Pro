@@ -358,6 +358,7 @@ class HydroAndinaProDialog(QDialog):
         self.tc_resultados = {}
         self.hidrograma_resultado = {}
         self.serie_precip_anual = None
+        self.resultado_serie_areal_multi_p24 = None  # último resultado de serie_anual_ponderada() (multi-estación)
         self.resultado_outliers_p24 = None   # último resultado de detectar_outliers_grubbs_beck()
         self.datos_precip_ajustados = None   # serie REALMENTE usada en el último ajuste (con/sin outliers excluidos)
         self.anios_precip_ajustados = None
@@ -3987,12 +3988,98 @@ class HydroAndinaProDialog(QDialog):
         v.addWidget(gb_manual)
 
         # ------------------------------------------------------------
-        # 1b. Análisis de outliers (Grubbs-Beck, Bulletin 17B) -- ANTES
+        # 1c. Múltiples estaciones -- serie de máximos anuales AREAL
+        # PONDERADA, cuando hay 2+ estaciones con registro. Pondera los
+        # DATOS año por año (Thiessen/IDW), no los valores de diseño ya
+        # ajustados -- ver docstring de
+        # core/areal_precipitation.py::serie_anual_ponderada(). La
+        # serie resultante se puede "adoptar" como self.serie_precip_anual,
+        # reutilizando TODO el pipeline existente (outliers, 9
+        # distribuciones, IDF, Pestaña 6...) sin duplicar nada.
+        # ------------------------------------------------------------
+        gb_multi = QGroupBox("1c. Múltiples Estaciones — Serie Areal Ponderada (opcional)")
+        v_multi = QVBoxLayout(gb_multi)
+        _lbl_multi_intro = QLabel(
+            "Con 2 o más estaciones de registro, en vez de analizar cada una por separado (o promediar "
+            "sus P24-Tr ya ajustados, lo que sobreestima el extremo areal), se pondera el DATO de cada "
+            "año -- Thiessen (área de influencia recortada a la cuenca) o IDW (inverso a la distancia "
+            "desde el centroide) -- y esa serie combinada se ajusta con el mismo motor de siempre. "
+            "Años en los que reportan menos estaciones que el mínimo indicado se excluyen de la serie "
+            "resultante; en los años con huecos parciales, los pesos se renormalizan solo entre las "
+            "estaciones que sí reportan ese año."
+        )
+        _lbl_multi_intro.setWordWrap(True)
+        v_multi.addWidget(_lbl_multi_intro)
+
+        v_multi.addWidget(QLabel("<b>Estaciones</b> (nombre, coordenadas en el mismo CRS proyectado que la cuenca):"))
+        self.tabla_estaciones_p24_multi = TablaPegable(4, 3)
+        self.tabla_estaciones_p24_multi.setHorizontalHeaderLabels(["Nombre", "X (m)", "Y (m)"])
+        limitar_ancho_tabla(self.tabla_estaciones_p24_multi, ancho_maximo=420)
+        ajustar_alto_tabla(self.tabla_estaciones_p24_multi, filas_visibles_max=6)
+        h_estaciones_multi = QHBoxLayout()
+        h_estaciones_multi.addWidget(self.tabla_estaciones_p24_multi)
+        h_estaciones_multi.addStretch()
+        v_multi.addLayout(h_estaciones_multi)
+
+        btn_sincronizar_multi_p24 = QPushButton("🔄 Sincronizar columnas de la serie desde las estaciones")
+        btn_sincronizar_multi_p24.clicked.connect(self._on_sincronizar_columnas_multi_p24)
+        limitar_ancho_boton(btn_sincronizar_multi_p24)
+        v_multi.addWidget(btn_sincronizar_multi_p24)
+
+        v_multi.addWidget(QLabel(
+            "<b>Serie de máximos anuales por estación</b> (mm; deje vacío un año sin dato en esa "
+            "estación):"))
+        self.tabla_serie_p24_multi = TablaPegable(15, 2)
+        self.tabla_serie_p24_multi.setHorizontalHeaderLabels(["Año", "(sincronice las estaciones)"])
+        ajustar_alto_tabla(self.tabla_serie_p24_multi, filas_visibles_max=10)
+        v_multi.addWidget(self.tabla_serie_p24_multi)
+
+        f_multi = QFormLayout()
+        f_multi.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.combo_metodo_ponderacion_multi_p24 = QComboBox()
+        self.combo_metodo_ponderacion_multi_p24.addItem(
+            "Thiessen (polígonos recortados a la cuenca) — recomendado", "thiessen")
+        self.combo_metodo_ponderacion_multi_p24.addItem(
+            "IDW (inverso a la distancia desde el centroide de la cuenca)", "idw")
+        f_multi.addRow("Método de ponderación:", self.combo_metodo_ponderacion_multi_p24)
+        self.spin_minimo_estaciones_multi_p24 = QSpinBox()
+        self.spin_minimo_estaciones_multi_p24.setRange(2, 20)
+        self.spin_minimo_estaciones_multi_p24.setValue(2)
+        f_multi.addRow("Mínimo de estaciones reportando para incluir un año:",
+                        self.spin_minimo_estaciones_multi_p24)
+        v_multi.addLayout(f_multi)
+
+        btn_calcular_multi_p24 = QPushButton("📐 Calcular serie areal ponderada")
+        btn_calcular_multi_p24.clicked.connect(self._on_calcular_serie_areal_multi_p24)
+        limitar_ancho_boton(btn_calcular_multi_p24)
+        v_multi.addWidget(btn_calcular_multi_p24)
+        self.lbl_estado_multi_p24 = QLabel("Estado: sin calcular.")
+        self.lbl_estado_multi_p24.setWordWrap(True)
+        v_multi.addWidget(self.lbl_estado_multi_p24)
+
+        self.tabla_resumen_multi_p24 = crear_tabla_parametros()
+        v_multi.addWidget(self.tabla_resumen_multi_p24)
+
+        v_multi.addWidget(QLabel("<i>Serie areal ponderada resultante:</i>"))
+        self.tabla_resultado_serie_areal_multi_p24 = QTableWidget(0, 3)
+        self.tabla_resultado_serie_areal_multi_p24.setHorizontalHeaderLabels(
+            ["Año", "P24 areal (mm)", "N.° estaciones"])
+        v_multi.addWidget(self.tabla_resultado_serie_areal_multi_p24)
+
+        self.btn_usar_serie_areal_multi_p24 = QPushButton(
+            "✅ Usar esta serie areal para el análisis de frecuencia (secciones de abajo)")
+        self.btn_usar_serie_areal_multi_p24.clicked.connect(self._on_usar_serie_areal_multi_p24)
+        self.btn_usar_serie_areal_multi_p24.setEnabled(False)
+        v_multi.addWidget(self.btn_usar_serie_areal_multi_p24)
+        v.addWidget(gb_multi)
+
+        # ------------------------------------------------------------
+        # 1d. Análisis de outliers (Grubbs-Beck, Bulletin 17B) -- ANTES
         # del ajuste de distribuciones, para poder revisar/excluir años
         # atípicos de la serie antes de confiar en el ajuste. Ver
         # core/outlier_analysis.py.
         # ------------------------------------------------------------
-        gb_outliers = QGroupBox("1b. Análisis de Outliers (Grubbs-Beck, Bulletin 17B)")
+        gb_outliers = QGroupBox("1d. Análisis de Outliers (Grubbs-Beck, Bulletin 17B)")
         v_outliers = QVBoxLayout(gb_outliers)
         _lbl_outliers_intro = QLabel(
             "Prueba de outliers altos/bajos de Grubbs-Beck (USWRC Bulletin 17B, 1982), trabajando en "
@@ -5801,6 +5888,208 @@ class HydroAndinaProDialog(QDialog):
             ])
         except pmp_hershfield.PmpHershfieldError as e:
             QMessageBox.warning(self, "No se pudo calcular la PMP", str(e))
+
+    def _leer_estaciones_multi_p24(self):
+        """Lee la tabla de estaciones (nombre, x, y) de la sección "1c.
+        Múltiples Estaciones" -- devuelve {nombre: (x, y)} o lanza
+        ValueError con un mensaje claro sobre qué falta."""
+        coords = {}
+        for row in range(self.tabla_estaciones_p24_multi.rowCount()):
+            item_n = self.tabla_estaciones_p24_multi.item(row, 0)
+            if not (item_n and item_n.text().strip()):
+                continue
+            nombre = item_n.text().strip()
+            item_x = self.tabla_estaciones_p24_multi.item(row, 1)
+            item_y = self.tabla_estaciones_p24_multi.item(row, 2)
+            if not (item_x and item_x.text().strip() and item_y and item_y.text().strip()):
+                raise ValueError(f"la estación «{nombre}» no tiene coordenadas X/Y completas.")
+            try:
+                x = float(item_x.text().replace(",", "."))
+                y = float(item_y.text().replace(",", "."))
+            except ValueError:
+                raise ValueError(f"coordenadas no numéricas para la estación «{nombre}».")
+            if nombre in coords:
+                raise ValueError(f"el nombre de estación «{nombre}» está repetido.")
+            coords[nombre] = (x, y)
+        if len(coords) < 2:
+            raise ValueError("ingrese al menos 2 estaciones con nombre y coordenadas.")
+        return coords
+
+    def _on_sincronizar_columnas_multi_p24(self):
+        try:
+            coords = self._leer_estaciones_multi_p24()
+        except ValueError as e:
+            QMessageBox.warning(self, "No se pudo sincronizar", str(e))
+            return
+        nombres = list(coords.keys())
+        tabla = self.tabla_serie_p24_multi
+
+        # Preserva el contenido ya escrito, remapeado por NOMBRE de
+        # columna (no por índice) -- así agregar/quitar una estación no
+        # borra los años/valores ya ingresados de las demás.
+        encabezados_actuales = [
+            tabla.horizontalHeaderItem(c).text() if tabla.horizontalHeaderItem(c) else ""
+            for c in range(tabla.columnCount())]
+        datos_actuales = {}
+        for c, encabezado in enumerate(encabezados_actuales):
+            columna_datos = {}
+            for r in range(tabla.rowCount()):
+                item = tabla.item(r, c)
+                if item and item.text().strip():
+                    columna_datos[r] = item.text()
+            if columna_datos:
+                datos_actuales[encabezado] = columna_datos
+
+        tabla.setColumnCount(1 + len(nombres))
+        tabla.setHorizontalHeaderLabels(["Año"] + nombres)
+        for c, encabezado in enumerate(["Año"] + nombres):
+            if encabezado in datos_actuales:
+                for r, texto in datos_actuales[encabezado].items():
+                    if r < tabla.rowCount():
+                        tabla.setItem(r, c, QTableWidgetItem(texto))
+
+        self.lbl_estado_multi_p24.setText(
+            f"Estado: columnas sincronizadas -- {len(nombres)} estación(es): {', '.join(nombres)}. "
+            "Pegue o escriba los años y valores (mm) en la tabla de abajo.")
+
+    def _leer_serie_multi_p24(self, nombres_estaciones):
+        tabla = self.tabla_serie_p24_multi
+        datos_por_estacion = {n: {} for n in nombres_estaciones}
+        for r in range(tabla.rowCount()):
+            item_anio = tabla.item(r, 0)
+            if not (item_anio and item_anio.text().strip()):
+                continue
+            try:
+                anio = int(float(item_anio.text().replace(",", ".")))
+            except ValueError:
+                raise ValueError(f"año no numérico en la fila {r + 1}: «{item_anio.text()}».")
+            for c, nombre in enumerate(nombres_estaciones, start=1):
+                item_valor = tabla.item(r, c)
+                if item_valor and item_valor.text().strip():
+                    try:
+                        valor = float(item_valor.text().replace(",", "."))
+                    except ValueError:
+                        raise ValueError(f"valor no numérico para «{nombre}» en el año {anio}.")
+                    if valor <= 0:
+                        raise ValueError(f"valor no positivo para «{nombre}» en el año {anio}.")
+                    datos_por_estacion[nombre][anio] = valor
+        if not any(datos_por_estacion.values()):
+            raise ValueError("no se ingresó ningún valor en la tabla de la serie.")
+        return datos_por_estacion
+
+    def _on_calcular_serie_areal_multi_p24(self):
+        try:
+            coords = self._leer_estaciones_multi_p24()
+        except ValueError as e:
+            QMessageBox.warning(self, "Datos de estaciones incompletos", str(e))
+            return
+        nombres = list(coords.keys())
+
+        encabezados = [
+            self.tabla_serie_p24_multi.horizontalHeaderItem(c).text()
+            if self.tabla_serie_p24_multi.horizontalHeaderItem(c) else ""
+            for c in range(1, self.tabla_serie_p24_multi.columnCount())]
+        if encabezados != nombres:
+            QMessageBox.warning(
+                self, "Columnas desincronizadas",
+                "Las columnas de la tabla de series no coinciden con la tabla de estaciones -- "
+                "presione «Sincronizar columnas» antes de calcular.")
+            return
+
+        try:
+            datos_por_estacion = self._leer_serie_multi_p24(nombres)
+        except ValueError as e:
+            QMessageBox.warning(self, "Datos de la serie incompletos", str(e))
+            return
+
+        metodo = self.combo_metodo_ponderacion_multi_p24.currentData()
+        try:
+            if metodo == "thiessen":
+                if self.cuenca_layer is None:
+                    raise areal_precipitation.ArealPrecipitationError(
+                        "el método Thiessen requiere la cuenca delimitada (Pestaña 1).")
+                capa_estaciones = mapas_tematicos.generar_capa_estaciones(
+                    {n: 0.0 for n in nombres}, coords, self.cuenca_layer.crs().authid())
+                context = QgsProcessingContext()
+                feedback = QgsProcessingFeedback()
+                pesos = mapas_tematicos.calcular_pesos_thiessen_estaciones(
+                    capa_estaciones, self.cuenca_layer, context, feedback)
+            else:
+                vertices = self._obtener_vertices_cuenca_activa()
+                centroide = areal_precipitation.centroide_poligono(vertices)
+                pesos = areal_precipitation.calcular_pesos_idw_estaciones(coords, centroide)
+
+            resultado = areal_precipitation.serie_anual_ponderada(
+                datos_por_estacion, pesos,
+                minimo_estaciones=self.spin_minimo_estaciones_multi_p24.value())
+            self.resultado_serie_areal_multi_p24 = resultado
+            self._volcar_resultado_serie_areal_multi_p24(resultado, pesos, metodo)
+        except (areal_precipitation.ArealPrecipitationError, mapas_tematicos.MapasTematicosError,
+                ValueError) as e:
+            self.btn_usar_serie_areal_multi_p24.setEnabled(False)
+            QMessageBox.warning(self, "No se pudo calcular la serie areal", str(e))
+        except Exception as e:
+            self.btn_usar_serie_areal_multi_p24.setEnabled(False)
+            QMessageBox.critical(self, "Error inesperado calculando la serie areal", str(e))
+
+    def _volcar_resultado_serie_areal_multi_p24(self, resultado, pesos, metodo):
+        etiqueta_metodo = "Thiessen" if metodo == "thiessen" else "IDW"
+        filas = [
+            ("Método de ponderación", etiqueta_metodo, ""),
+            ("Años incluidos en la serie areal", resultado["n_anios"], "años",
+             f"de {resultado['anios_totales_disponibles']} año(s) con dato en al menos 1 estación; "
+             f"{resultado['anios_excluidos_por_pocas_estaciones']} excluido(s) por tener menos de "
+             f"{self.spin_minimo_estaciones_multi_p24.value()} estación(es) reportando"),
+        ]
+        for nombre, peso in sorted(pesos.items(), key=lambda kv: -kv[1]):
+            filas.append((f"Peso de «{nombre}»", round(peso, 4), "", f"{peso * 100:.1f}% del área/influencia"))
+        poblar_tabla_parametros(self.tabla_resumen_multi_p24, filas)
+
+        tabla = self.tabla_resultado_serie_areal_multi_p24
+        tabla.setRowCount(len(resultado["anios"]))
+        for row, (anio, valor) in enumerate(zip(resultado["anios"], resultado["valores_mm"])):
+            n_est = resultado["detalle_por_anio"][anio]["n_estaciones"]
+            tabla.setItem(row, 0, QTableWidgetItem(str(anio)))
+            tabla.setItem(row, 1, QTableWidgetItem(f"{valor:.2f}"))
+            tabla.setItem(row, 2, QTableWidgetItem(str(n_est)))
+        ajustar_alto_tabla(tabla, filas_visibles_max=10)
+
+        self.btn_usar_serie_areal_multi_p24.setEnabled(True)
+        self.lbl_estado_multi_p24.setText(
+            f"Estado: serie areal ponderada calculada ({etiqueta_metodo}) -- {resultado['n_anios']} "
+            f"años ({min(resultado['anios'])}-{max(resultado['anios'])}). Presione «Usar esta serie» "
+            "para adoptarla como la serie activa de esta pestaña.")
+
+    def _on_usar_serie_areal_multi_p24(self):
+        resultado = getattr(self, "resultado_serie_areal_multi_p24", None)
+        if resultado is None:
+            QMessageBox.warning(self, "Nada que usar", "Calcule primero la serie areal ponderada.")
+            return
+        metodo = self.combo_metodo_ponderacion_multi_p24.currentData()
+        etiqueta_metodo = "Thiessen" if metodo == "thiessen" else "IDW"
+        try:
+            self.serie_precip_anual = precip_source.construir_serie_anual(
+                list(resultado["anios"]), list(resultado["valores_mm"]),
+                fuente=f"areal ponderada ({etiqueta_metodo}, {resultado['n_anios']} años)")
+        except ValueError as e:
+            QMessageBox.warning(self, "No se pudo adoptar la serie", str(e))
+            return
+        # Se limpia cualquier resultado de outliers/frecuencia de una
+        # serie anterior -- ya no corresponden a esta serie activa.
+        self.resultado_outliers_p24 = None
+        self.datos_precip_ajustados = None
+        self.anios_precip_ajustados = None
+        self.lbl_estado_serie.setText(
+            f"Estado: serie areal ponderada ADOPTADA como serie activa -- {etiqueta_metodo}, "
+            f"{resultado['n_anios']} años ({min(resultado['anios'])}-{max(resultado['anios'])}).")
+        self.lbl_estado_multi_p24.setText(
+            f"Estado: serie areal ADOPTADA como serie activa ({etiqueta_metodo}, "
+            f"{resultado['n_anios']} años).")
+        QMessageBox.information(
+            self, "Serie adoptada",
+            f"La serie areal ponderada ({etiqueta_metodo}, {resultado['n_anios']} años) quedó activa "
+            "como la serie de esta pestaña -- ya puede detectar outliers y ajustar distribuciones "
+            "normalmente (secciones de abajo).")
 
     def _on_detectar_outliers_p24(self):
         if not getattr(self, "serie_precip_anual", None):
