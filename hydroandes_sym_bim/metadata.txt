@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.4.7
+version=0.4.8
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,51 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.4.8: NUEVO -- Análisis de Outliers (Grubbs-Beck, USWRC
+      Bulletin 17B) en la Pestaña 5 (Precipitación Máx 24h), a pedido
+      explícito del usuario, "conectado a los resultados y como dato
+      input para otros cálculos".
+      Nuevo core/outlier_analysis.py: test de outliers altos/bajos de
+      Grubbs-Beck (1972), adoptado por Bulletin 17B como control de
+      calidad previo al ajuste de distribuciones. Trabaja en log10 de
+      la serie: umbral alto/bajo = media ± Kn·σ. El valor crítico Kn
+      se calcula ANALÍTICAMENTE (fórmula de Grubbs, 1969, con
+      corrección de Bonferroni) en vez de transcribir la tabla impresa
+      de Bulletin 17B -- se intentó extraer esa tabla (OCR de su
+      reproducción en FHWA HDS-2) para verificarla, y el OCR resultó
+      demostrablemente corrupto en un tramo (Kn(92)=2.889, MENOR que
+      Kn(91)=2.984, imposible: Kn debe crecer con n). Ante el riesgo de
+      fijar un error de transcripción en un plugin de uso real, se
+      usó la fórmula analítica, verificada contra los valores LIMPIOS
+      de esa misma tabla (coincide dentro de 0.2% relativo en todo el
+      rango n=10-50), consistente con que Bulletin 17C (USGS, 2019)
+      reemplazó la tabla fija por un cálculo numérico equivalente.
+      Nueva sección "1b. Análisis de Outliers" en la Pestaña 5: botón
+      de detección (umbrales + tabla de años marcados alto/bajo) y
+      casilla "Excluir los outliers detectados del ajuste de
+      distribuciones" (desmarcada por defecto -- decisión consciente
+      del usuario, no automática). Conectado de punta a punta: al
+      ajustar distribuciones, los outliers se recalculan siempre con
+      la serie vigente, y si se excluyen, la serie filtrada alimenta
+      directamente frequency_analysis.analizar_todas() -- de ahí en
+      más TODO lo que ya dependía de ese ajuste (P24-Tr, curvas IDF,
+      hidrograma de diseño de la Pestaña 6 y todo lo que dependa de
+      él) queda automáticamente libre de esos outliers, sin tocar cada
+      consumidor por separado. El diagnóstico gráfico y las bandas de
+      confianza (bootstrap), que antes leían la serie cruda por su
+      cuenta, ahora usan la misma serie efectivamente ajustada (con o
+      sin outliers excluidos) para no quedar inconsistentes con los
+      parámetros ajustados.
+      Verificado: 20/20 (núcleo -- Kn calculado contra 18 valores
+      limpios de la tabla real de Bulletin 17B, monotonicidad
+      estricta n=10-200, detección de outlier alto/bajo sintético con
+      umbrales recalculados a mano de forma independiente con numpy/
+      scipy, serie_sin_outliers() verificada elemento a elemento) +
+      24/24 (integración UI real en QGIS headless -- incluida la
+      comprobación de que el P24 de diseño Tr=100 CAMBIA de forma
+      sustancial según se excluya o no el outlier: 177.24 mm con vs.
+      70.13 mm sin, confirmando que la exclusión se propaga
+      efectivamente al resultado final) -- 44/44 en total.
     - v0.4.7: Módulo BIM y corrección de ancho (BIM/Presupuesto/
       Programación), a pedido explícito del usuario.
       1) RENDER 3D AUTOMÁTICO: cada vez que se calcula una estructura

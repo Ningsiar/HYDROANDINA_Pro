@@ -51,7 +51,8 @@ from .core import (delineation, morphometry, curve_number, tc_methods, dem_downl
                     iila_senamhi_zones, bim_metrados, bim_ifc, bim_refuerzo, bim_geometry,
                     lateral_pressures, reinforced_concrete_e060, presupuesto, formula_polinomica,
                     apu_referencia, cronograma, geotecnia_e050, estabilidad_muros, zapatas, proyecto_io,
-                    exportar_presupuesto, curva_s, map_styling, print_layout, mapas_tematicos, pfafstetter)
+                    exportar_presupuesto, curva_s, map_styling, print_layout, mapas_tematicos, pfafstetter,
+                    outlier_analysis)
 from .core.qgis_layer_utils import obtener_capa
 from .ui.hypsometric_canvas import HypsometricCanvas
 from .ui.hydrograph_canvas import HydrographCanvas
@@ -357,6 +358,9 @@ class HydroAndinaProDialog(QDialog):
         self.tc_resultados = {}
         self.hidrograma_resultado = {}
         self.serie_precip_anual = None
+        self.resultado_outliers_p24 = None   # último resultado de detectar_outliers_grubbs_beck()
+        self.datos_precip_ajustados = None   # serie REALMENTE usada en el último ajuste (con/sin outliers excluidos)
+        self.anios_precip_ajustados = None
         self.resultados_frecuencia = {}
         self.mejor_ajuste_clave = None
         self.metodo_ajuste_usado = "momentos_l"
@@ -3982,6 +3986,48 @@ class HydroAndinaProDialog(QDialog):
         v_manual.addLayout(h_botones_tabla)
         v.addWidget(gb_manual)
 
+        # ------------------------------------------------------------
+        # 1b. Análisis de outliers (Grubbs-Beck, Bulletin 17B) -- ANTES
+        # del ajuste de distribuciones, para poder revisar/excluir años
+        # atípicos de la serie antes de confiar en el ajuste. Ver
+        # core/outlier_analysis.py.
+        # ------------------------------------------------------------
+        gb_outliers = QGroupBox("1b. Análisis de Outliers (Grubbs-Beck, Bulletin 17B)")
+        v_outliers = QVBoxLayout(gb_outliers)
+        _lbl_outliers_intro = QLabel(
+            "Prueba de outliers altos/bajos de Grubbs-Beck (USWRC Bulletin 17B, 1982), trabajando en "
+            "log10 de la serie: umbral alto = media + Kn·σ, umbral bajo = media − Kn·σ (Kn calculado "
+            "analíticamente, no de la tabla impresa -- ver docstring de core/outlier_analysis.py). Un "
+            "outlier NO significa automáticamente un dato erróneo: revise si corresponde a un error de "
+            "medición/digitación o a un evento hidrológico real antes de decidir excluirlo."
+        )
+        _lbl_outliers_intro.setWordWrap(True)
+        v_outliers.addWidget(_lbl_outliers_intro)
+
+        btn_detectar_outliers_p24 = QPushButton("🔍 Detectar outliers altos/bajos")
+        btn_detectar_outliers_p24.clicked.connect(self._on_detectar_outliers_p24)
+        limitar_ancho_boton(btn_detectar_outliers_p24)
+        v_outliers.addWidget(btn_detectar_outliers_p24)
+        self.lbl_estado_outliers_p24 = QLabel("Estado: sin calcular.")
+        self.lbl_estado_outliers_p24.setWordWrap(True)
+        v_outliers.addWidget(self.lbl_estado_outliers_p24)
+
+        self.tabla_outliers_p24 = crear_tabla_parametros()
+        v_outliers.addWidget(self.tabla_outliers_p24)
+
+        v_outliers.addWidget(QLabel("<i>Años marcados como outlier (vacío si no se detectó ninguno):</i>"))
+        self.tabla_outliers_detalle_p24 = QTableWidget(0, 3)
+        self.tabla_outliers_detalle_p24.setHorizontalHeaderLabels(["Año", "Valor (mm)", "Tipo"])
+        v_outliers.addWidget(self.tabla_outliers_detalle_p24)
+
+        self.check_excluir_outliers_p24 = QCheckBox(
+            "Excluir los outliers detectados del ajuste de distribuciones -- afecta TODOS los "
+            "resultados derivados (P24-Tr, IDF, hidrogramas de diseño y todo lo que dependa de ellos "
+            "en las demás pestañas)")
+        self.check_excluir_outliers_p24.setChecked(False)
+        v_outliers.addWidget(self.check_excluir_outliers_p24)
+        v.addWidget(gb_outliers)
+
         gb_analisis = QGroupBox("2. Análisis de frecuencia")
         v_analisis = QVBoxLayout(gb_analisis)
         h_a = QHBoxLayout()
@@ -4846,8 +4892,10 @@ class HydroAndinaProDialog(QDialog):
             return
         try:
             resultado = self.resultados_frecuencia[clave]
+            datos_diagnostico = (getattr(self, "datos_precip_ajustados", None)
+                                  or self.serie_precip_anual.valores_mm)
             diagnostico = frequency_analysis.diagnostico_distribucion(
-                self.serie_precip_anual.valores_mm, resultado["distribucion"], n_puntos=300)
+                datos_diagnostico, resultado["distribucion"], n_puntos=300)
             self.canvas_diagnostico_distribucion.plot_diagnosticos(diagnostico, resultado["nombre"])
         except ValueError as e:
             QMessageBox.warning(self, "No se pudo generar el diagnóstico", str(e))
@@ -4866,9 +4914,10 @@ class HydroAndinaProDialog(QDialog):
             return
         try:
             QApplication.setOverrideCursor(Qt.WaitCursor)
+            datos_bandas = getattr(self, "datos_precip_ajustados", None) or self.serie_precip_anual.valores_mm
             try:
                 bandas = frequency_analysis.bandas_confianza_bootstrap(
-                    self.serie_precip_anual.valores_mm, clave,
+                    datos_bandas, clave,
                     periodos_retorno=self.periodos_retorno_actuales,
                     n_remuestreos=self.spin_bootstrap_n.value(),
                     nivel_confianza=self.combo_nivel_confianza.currentData(),
@@ -4895,7 +4944,7 @@ class HydroAndinaProDialog(QDialog):
             ajustar_alto_tabla(self.tabla_bandas_confianza, filas_visibles_max=self.tabla_bandas_confianza.rowCount() + 2)
 
             self.canvas_bandas_confianza.plot_bandas_confianza(
-                bandas, datos_observados=self.serie_precip_anual.valores_mm, escala_log=True)
+                bandas, datos_observados=datos_bandas, escala_log=True)
 
             if bandas.get("advertencia_fallidos"):
                 QMessageBox.warning(self, "Bootstrap poco fiable", bandas["advertencia_fallidos"])
@@ -5753,6 +5802,56 @@ class HydroAndinaProDialog(QDialog):
         except pmp_hershfield.PmpHershfieldError as e:
             QMessageBox.warning(self, "No se pudo calcular la PMP", str(e))
 
+    def _on_detectar_outliers_p24(self):
+        if not getattr(self, "serie_precip_anual", None):
+            QMessageBox.warning(self, "Falta la serie de datos",
+                                 "Cargue primero una serie de máximos anuales (CSV o PISCOp).")
+            return
+        try:
+            resultado = outlier_analysis.detectar_outliers_grubbs_beck(
+                self.serie_precip_anual.valores_mm, self.serie_precip_anual.anios, alpha=0.10)
+            self.resultado_outliers_p24 = resultado
+            self._volcar_resultado_outliers_p24(resultado)
+        except outlier_analysis.OutlierAnalysisError as e:
+            self.resultado_outliers_p24 = None
+            self.lbl_estado_outliers_p24.setText(f"Estado: no se pudo calcular -- {e}")
+            QMessageBox.warning(self, "No se pudo calcular", str(e))
+
+    def _volcar_resultado_outliers_p24(self, resultado):
+        filas = [
+            ("Tamaño de muestra n", resultado["n"], "años"),
+            ("Valor crítico Kn (Grubbs-Beck, α=10%)", resultado["kn"], "",
+             "calculado analíticamente (Grubbs, 1969) -- ver core/outlier_analysis.py"),
+            ("Umbral de outlier ALTO", resultado["umbral_alto_mm"], "mm",
+             "valores por ENCIMA de este umbral se marcan como outlier alto"),
+            ("Umbral de outlier BAJO", resultado["umbral_bajo_mm"], "mm",
+             "valores por DEBAJO de este umbral se marcan como outlier bajo"),
+        ]
+        poblar_tabla_parametros(self.tabla_outliers_p24, filas)
+
+        outliers = [d for d in resultado["detalle"] if d["es_outlier_alto"] or d["es_outlier_bajo"]]
+        self.tabla_outliers_detalle_p24.setRowCount(len(outliers))
+        for row, d in enumerate(outliers):
+            tipo = "ALTO" if d["es_outlier_alto"] else "BAJO"
+            etiqueta_anio = str(d["anio"]) if d["anio"] is not None else f"índice {d['indice']}"
+            self.tabla_outliers_detalle_p24.setItem(row, 0, QTableWidgetItem(etiqueta_anio))
+            self.tabla_outliers_detalle_p24.setItem(row, 1, QTableWidgetItem(f"{d['valor_mm']:.2f}"))
+            self.tabla_outliers_detalle_p24.setItem(row, 2, QTableWidgetItem(tipo))
+        ajustar_alto_tabla(self.tabla_outliers_detalle_p24, filas_visibles_max=6)
+
+        if resultado["hay_outliers"]:
+            n_altos = len(resultado["indices_outliers_altos"])
+            n_bajos = len(resultado["indices_outliers_bajos"])
+            self.lbl_estado_outliers_p24.setText(
+                f"Estado: {n_altos} outlier(s) alto(s) y {n_bajos} outlier(s) bajo(s) detectados "
+                "(Grubbs-Beck, Bulletin 17B, α=10%). Revise si corresponden a un error de medición/"
+                "digitación o a un evento real antes de decidir excluirlos del ajuste (casilla de "
+                "abajo).")
+        else:
+            self.lbl_estado_outliers_p24.setText(
+                f"Estado: no se detectaron outliers altos ni bajos (Grubbs-Beck, Bulletin 17B, "
+                f"α=10%, n={resultado['n']}).")
+
     def _on_analizar_frecuencia(self):
         if not getattr(self, "serie_precip_anual", None):
             QMessageBox.warning(self, "Falta la serie de datos",
@@ -5760,9 +5859,41 @@ class HydroAndinaProDialog(QDialog):
             return
         try:
             datos = self.serie_precip_anual.valores_mm
+            anios = self.serie_precip_anual.anios
+
+            # Outliers (Grubbs-Beck) -- se recalculan SIEMPRE con la
+            # serie actual (no se reutiliza un resultado de una corrida
+            # anterior con otra serie), para que la casilla de exclusión
+            # de abajo nunca actúe sobre un diagnóstico desactualizado.
+            resultado_outliers = None
+            try:
+                resultado_outliers = outlier_analysis.detectar_outliers_grubbs_beck(
+                    datos, anios, alpha=0.10)
+                self.resultado_outliers_p24 = resultado_outliers
+                self._volcar_resultado_outliers_p24(resultado_outliers)
+            except outlier_analysis.OutlierAnalysisError as e:
+                self.resultado_outliers_p24 = None
+                self.lbl_estado_outliers_p24.setText(f"Estado: no se pudo evaluar outliers -- {e}")
+
+            datos_para_ajuste, anios_para_ajuste = datos, anios
+            if (resultado_outliers and resultado_outliers["hay_outliers"]
+                    and self.check_excluir_outliers_p24.isChecked()):
+                datos_para_ajuste, anios_para_ajuste = outlier_analysis.serie_sin_outliers(
+                    datos, anios, resultado_outliers)
+
+            # Serie REALMENTE usada para este ajuste (con o sin outliers
+            # excluidos, según la casilla) -- se guarda para que el
+            # diagnóstico gráfico y las bandas de confianza (que hasta
+            # ahora leían self.serie_precip_anual.valores_mm directo)
+            # sean consistentes con los parámetros que se ajustaron aquí,
+            # y no con la serie cruda si se excluyeron outliers.
+            self.datos_precip_ajustados = datos_para_ajuste
+            self.anios_precip_ajustados = anios_para_ajuste
+
             alpha = float(self.combo_alpha_ks.currentText())
             metodo_ajuste = self.combo_metodo_ajuste.currentData() or "momentos_l"
-            resultados = frequency_analysis.analizar_todas(datos, alpha_ks=alpha, metodo=metodo_ajuste)
+            resultados = frequency_analysis.analizar_todas(
+                datos_para_ajuste, alpha_ks=alpha, metodo=metodo_ajuste)
             self.metodo_ajuste_usado = metodo_ajuste
             mejor = frequency_analysis.mejor_ajuste(resultados)
             self.resultados_frecuencia = resultados
@@ -5868,7 +5999,7 @@ class HydroAndinaProDialog(QDialog):
             for col, tr in enumerate(frequency_analysis.PERIODOS_RETORNO_DEFAULT):
                 self.tabla_p24_tr.setItem(0, col, QTableWidgetItem(str(disenio[tr])))
 
-            datos_ordenados = sorted(datos)
+            datos_ordenados = sorted(datos_para_ajuste)
             self.canvas_frecuencia.plot_ajuste(datos_ordenados, resultados, mejor)
             self._actualizar_tabla_comparacion_tr()
 
