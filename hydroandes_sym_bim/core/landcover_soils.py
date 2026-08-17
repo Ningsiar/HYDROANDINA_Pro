@@ -503,29 +503,19 @@ def obtener_hsg_soilgrids_automatico(cuenca_layer, context, feedback,
 # ---------------------------------------------------------------------
 # C) Cruce LULC x HSG -> CN ponderado
 # ---------------------------------------------------------------------
-def calcular_cn_ponderado_automatico(lulc_clip_path: str, hsg_clip_path: str,
-                                      mapeo_codigo_hsg: Optional[Dict[int, str]] = None,
-                                      tabla_cn: Optional[Dict[int, dict]] = None) -> dict:
-    """
-    Cruza pixel a pixel el ráster de LULC (ESA WorldCover, ya recortado
-    a la cuenca) con el ráster de HSG (ya recortado a la misma cuenca,
-    posiblemente en otra resolución/grilla), calcula el CN de cada pixel
-    según (clase LULC, grupo HSG) usando `tabla_cn`, y devuelve el CN_II
-    ponderado por área junto con el desglose área x CN de cada
-    combinación LULC x HSG presente en la cuenca.
-
-    Requiere GDAL con bindings de Python (osgeo.gdal), disponibles en el
-    entorno de QGIS.
-    """
+def _arrays_lulc_hsg_resampleados(lulc_clip_path: str, hsg_clip_path: str):
+    """Abre LULC y HSG (ya recortados a la cuenca, posiblemente en
+    grillas/resoluciones distintas), remuestrea HSG (categórico,
+    vecino más cercano) a la grilla EXACTA de LULC, y devuelve
+    (lulc_array, hsg_array, geotransform, proyección, área_pixel_m2)
+    -- compartido entre calcular_cn_ponderado_automatico() (agregación
+    a escalar) y generar_raster_cn() (ráster de CN por píxel)."""
     if gdal is None:
         raise LandcoverSoilsError(
             "No se encontraron los bindings de Python de GDAL (osgeo.gdal), necesarios para "
             "cruzar los rásters de LULC y HSG. Esto es inusual en una instalación estándar de "
             "QGIS; verifique la instalación."
         )
-    mapeo_codigo_hsg = mapeo_codigo_hsg or {1: "A", 2: "B", 3: "C", 4: "D"}
-    tabla_cn = tabla_cn or cargar_matriz_cn()
-
     ds_lulc = gdal.Open(lulc_clip_path)
     if ds_lulc is None:
         raise LandcoverSoilsError(f"No se pudo abrir el ráster de LULC recortado: {lulc_clip_path}")
@@ -537,8 +527,6 @@ def calcular_cn_ponderado_automatico(lulc_clip_path: str, hsg_clip_path: str,
 
     lulc_array = ds_lulc.GetRasterBand(1).ReadAsArray()
 
-    # Remuestrear el HSG (usualmente 250 m) a la grilla exacta del LULC
-    # (usualmente 10 m) con vecino más cercano, ya que HSG es categórico.
     ds_hsg_resampleado = gdal.Warp(
         "", hsg_clip_path, format="MEM",
         width=ancho, height=alto, outputBounds=(
@@ -555,6 +543,28 @@ def calcular_cn_ponderado_automatico(lulc_clip_path: str, hsg_clip_path: str,
             "Las grillas de LULC y HSG remuestreado no coinciden en forma "
             f"({lulc_array.shape} vs {hsg_array.shape}); revise el remuestreo."
         )
+    return lulc_array, hsg_array, gt, proj, pixel_area_m2
+
+
+def calcular_cn_ponderado_automatico(lulc_clip_path: str, hsg_clip_path: str,
+                                      mapeo_codigo_hsg: Optional[Dict[int, str]] = None,
+                                      tabla_cn: Optional[Dict[int, dict]] = None) -> dict:
+    """
+    Cruza pixel a pixel el ráster de LULC (ESA WorldCover, ya recortado
+    a la cuenca) con el ráster de HSG (ya recortado a la misma cuenca,
+    posiblemente en otra resolución/grilla), calcula el CN de cada pixel
+    según (clase LULC, grupo HSG) usando `tabla_cn`, y devuelve el CN_II
+    ponderado por área junto con el desglose área x CN de cada
+    combinación LULC x HSG presente en la cuenca.
+
+    Requiere GDAL con bindings de Python (osgeo.gdal), disponibles en el
+    entorno de QGIS.
+    """
+    mapeo_codigo_hsg = mapeo_codigo_hsg or {1: "A", 2: "B", 3: "C", 4: "D"}
+    tabla_cn = tabla_cn or cargar_matriz_cn()
+
+    lulc_array, hsg_array, gt, proj, pixel_area_m2 = _arrays_lulc_hsg_resampleados(
+        lulc_clip_path, hsg_clip_path)
 
     combinaciones: Dict[Tuple[int, str], int] = {}
     codigos_lulc = np.unique(lulc_array)
@@ -599,3 +609,55 @@ def calcular_cn_ponderado_automatico(lulc_clip_path: str, hsg_clip_path: str,
         "area_total_km2": round(area_total_km2, 4),
         "desglose": desglose,
     }
+
+
+def generar_raster_cn(lulc_clip_path: str, hsg_clip_path: str,
+                       mapeo_codigo_hsg: Optional[Dict[int, str]] = None,
+                       tabla_cn: Optional[Dict[int, dict]] = None,
+                       destino_tif: Optional[str] = None) -> str:
+    """Genera un ráster ESPACIAL de Número de Curva (CN-II) por píxel,
+    combinando LULC + HSG mediante lookup vectorizado en `tabla_cn`
+    (misma tabla que usa calcular_cn_ponderado_automatico -- por
+    defecto la matriz CN cargada de resources/cn_matriz_lulc.json).
+    A diferencia de calcular_cn_ponderado_automatico() (que solo
+    devuelve un promedio ponderado escalar), esta función escribe un
+    GeoTIFF con la MISMA grilla/georreferenciación que `lulc_clip_path`,
+    apto para estilizar como mapa temático (ver core/map_styling.py).
+
+    Devuelve la ruta del GeoTIFF escrito (`destino_tif`, o un archivo
+    temporal si no se indica)."""
+    if gdal is None:
+        raise LandcoverSoilsError(
+            "GDAL no está disponible en este entorno; no se puede generar el ráster de CN.")
+
+    mapeo_codigo_hsg = mapeo_codigo_hsg or {1: "A", 2: "B", 3: "C", 4: "D"}
+    tabla_cn = tabla_cn or cargar_matriz_cn()
+    lulc_array, hsg_array, gt, proj, _pixel_area_m2 = _arrays_lulc_hsg_resampleados(
+        lulc_clip_path, hsg_clip_path)
+
+    cn_array = np.full(lulc_array.shape, -9999.0, dtype=np.float32)
+    for codigo_lulc, fila_cn in tabla_cn.items():
+        for codigo_hsg, letra_hsg in mapeo_codigo_hsg.items():
+            clave_cn = f"cn_{letra_hsg.lower()}"
+            if clave_cn not in fila_cn:
+                continue
+            mascara = (lulc_array == codigo_lulc) & (hsg_array == codigo_hsg)
+            if np.any(mascara):
+                cn_array[mascara] = float(fila_cn[clave_cn])
+
+    if destino_tif is None:
+        destino_tif = os.path.join(
+            tempfile.mkdtemp(prefix="hydroandes_cn_raster_"), "cn_ii_raster.tif")
+
+    driver = gdal.GetDriverByName("GTiff")
+    alto, ancho = cn_array.shape
+    ds_salida = driver.Create(destino_tif, ancho, alto, 1, gdal.GDT_Float32)
+    ds_salida.SetGeoTransform(gt)
+    ds_salida.SetProjection(proj)
+    banda_salida = ds_salida.GetRasterBand(1)
+    banda_salida.WriteArray(cn_array)
+    banda_salida.SetNoDataValue(-9999.0)
+    banda_salida.FlushCache()
+    ds_salida = None
+
+    return destino_tif

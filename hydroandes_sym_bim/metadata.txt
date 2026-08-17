@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.4.1
+version=0.4.2
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,41 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.4.2: NUEVO -- Pestaña "Mapas Temáticos", Fase 2 de la serie:
+      Número de Curva y Suelos. Reutiliza directamente el LULC y el
+      HSG ya obtenidos en la Pestaña 3 (self._ultimo_lulc_path/
+      _ultimo_hsg_path, persistidos desde v0.4.0) -- no vuelve a
+      descargar ni recalcular nada.
+      Nuevo core/landcover_soils.py::generar_raster_cn(): a diferencia
+      de calcular_cn_ponderado_automatico() (que solo devuelve un
+      promedio ponderado escalar), esta función escribe un GeoTIFF
+      ESPACIAL de CN-II por píxel, mediante lookup vectorizado de
+      LULC+HSG contra la matriz CN (misma tabla editable de
+      resources/cn_matriz_lulc.json), con la misma georreferenciación
+      que el LULC de entrada. Se extrajo un helper compartido
+      (_arrays_lulc_hsg_resampleados) reutilizado también por la
+      función escalar preexistente, en vez de duplicar el remuestreo
+      GDAL.
+      Nuevo core/map_styling.py::estilizar_raster_paletizado() (con
+      QgsPalettedRasterRenderer): muestra en la leyenda SOLO las
+      clases realmente presentes en el ráster (no la paleta completa),
+      con las paletas oficiales COLORES_HSG_RASTER y
+      COLORES_ESA_WORLDCOVER (colores oficiales ESA WorldCover).
+      Nuevas 3 capas en la pestaña (checkboxes independientes): CN-II
+      (pseudocolor RdYlGn invertido -- rojo=más escorrentía), HSG y
+      LULC (paletizadas), organizadas en el grupo «Mapas Temáticos >
+      Número de Curva y Suelos», con exportación PDF/PNG igual que la
+      Fase 1. Advertencia clara si la Pestaña 3 aún no se calculó.
+      Verificado: 10/10 (generar_raster_cn con LULC+HSG sintéticos de
+      combinaciones conocidas, contra los valores reales de la matriz
+      CN cargada, incluida verificación de sentido físico y de
+      georreferenciación preservada) + 19/19 (integración UI real en
+      QGIS: caso sin datos previos con advertencia correcta, caso
+      normal con 3 capas/renderers/grupo de capas verificados, y
+      exportación PDF/PNG real) -- 29/29 en total.
+      PENDIENTE (próximas fases, mismo pedido): precipitación y clima
+      (Thiessen/isoyetas/estaciones), peligro hidráulico (SWE2D) y
+      estructuras, codificación Pfafstetter.
     - v0.4.1: NUEVO -- Pestaña "Mapas Temáticos" (22), primera entrega
       (Fase 0+1 de una serie), a pedido explícito del usuario:
       "Mapas Temáticos: de todo hidrología hidráulica y más", con

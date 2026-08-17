@@ -352,6 +352,8 @@ class HydroAndinaProDialog(QDialog):
         self.morfometria_resultados = {}
         self.cn_resultados = None
         self.cn_resultados_corregido_pendiente = None
+        self._ultimo_lulc_path = None  # ráster LULC (ESA WorldCover) de la última Pestaña 3 exitosa
+        self._ultimo_hsg_path = None   # ráster HSG (manual o SoilGrids) de la última Pestaña 3 exitosa
         self.tc_resultados = {}
         self.hidrograma_resultado = {}
         self.serie_precip_anual = None
@@ -1426,6 +1428,8 @@ class HydroAndinaProDialog(QDialog):
         self.morfometria_resultados = {}
         self.cn_resultados = None
         self.cn_resultados_corregido_pendiente = None
+        self._ultimo_lulc_path = None  # ráster LULC (ESA WorldCover) de la última Pestaña 3 exitosa
+        self._ultimo_hsg_path = None   # ráster HSG (manual o SoilGrids) de la última Pestaña 3 exitosa
         self.tc_resultados = {}
         self.hidrograma_resultado = {}
 
@@ -2828,6 +2832,8 @@ class HydroAndinaProDialog(QDialog):
             self.tabla_amc.setItem(0, 3, QTableWidgetItem(str(amc["S_mm"])))
             self.tabla_amc.setItem(0, 4, QTableWidgetItem(str(amc["Ia_mm"])))
 
+            self._ultimo_lulc_path = lulc_path
+            self._ultimo_hsg_path = hsg_path
             self.lbl_estado_cn_auto.setText(
                 f"Estado: CN_II ponderado = {cn_ii} (área total cruzada: {resultado['area_total_km2']} km², "
                 f"{len(resultado['desglose'])} combinaciones LULC x HSG)."
@@ -2885,6 +2891,8 @@ class HydroAndinaProDialog(QDialog):
             self.tabla_amc.setItem(0, 3, QTableWidgetItem(str(amc["S_mm"])))
             self.tabla_amc.setItem(0, 4, QTableWidgetItem(str(amc["Ia_mm"])))
 
+            self._ultimo_lulc_path = lulc_path
+            self._ultimo_hsg_path = hsg_path
             self.lbl_estado_cn_auto.setText(
                 f"Estado: CN_II ponderado = {cn_ii} (HSG 100% autónomo vía SoilGrids -- sin ráster "
                 f"propio; área total cruzada: {resultado['area_total_km2']} km², "
@@ -17258,6 +17266,44 @@ class HydroAndinaProDialog(QDialog):
         v_morfo.addLayout(h_export_morfo)
 
         v.addWidget(gb_morfo)
+
+        # ------------------------------------------------------------
+        # 2) Número de Curva y Suelos
+        # ------------------------------------------------------------
+        gb_cn = QGroupBox("2. Número de Curva y Suelos")
+        v_cn = QVBoxLayout(gb_cn)
+        v_cn.addWidget(QLabel(
+            "Reutiliza el LULC y el HSG YA obtenidos en la Pestaña 3 (Número de Curva) -- no vuelve a "
+            "descargar ni recalcular nada. Calcule primero el CN automático (B1 o B2) en la Pestaña 3 "
+            "si el estado de abajo indica que faltan datos."
+        ))
+        self.check_mt_cn_raster = QCheckBox("Número de Curva (CN-II), ráster espacial por píxel")
+        self.check_mt_cn_raster.setChecked(True)
+        v_cn.addWidget(self.check_mt_cn_raster)
+        self.check_mt_hsg = QCheckBox("Grupo Hidrológico de Suelo (HSG: A/B/C/D)")
+        self.check_mt_hsg.setChecked(True)
+        v_cn.addWidget(self.check_mt_hsg)
+        self.check_mt_lulc = QCheckBox("Uso y Cobertura de Suelo (LULC, ESA WorldCover)")
+        self.check_mt_lulc.setChecked(True)
+        v_cn.addWidget(self.check_mt_lulc)
+
+        btn_generar_cn = QPushButton("🗺 Generar capas de Número de Curva y Suelos")
+        btn_generar_cn.clicked.connect(self._on_generar_mapa_cn_suelos)
+        v_cn.addWidget(btn_generar_cn)
+        self.lbl_estado_mt_cn = QLabel("Estado: sin generar.")
+        self.lbl_estado_mt_cn.setWordWrap(True)
+        v_cn.addWidget(self.lbl_estado_mt_cn)
+
+        h_export_cn = QHBoxLayout()
+        btn_pdf_cn = QPushButton("📄 Exportar lámina PDF")
+        btn_pdf_cn.clicked.connect(lambda: self._on_exportar_layout_mapa_tematico("cn_suelos", "pdf"))
+        h_export_cn.addWidget(btn_pdf_cn)
+        btn_png_cn = QPushButton("🖼 Exportar PNG")
+        btn_png_cn.clicked.connect(lambda: self._on_exportar_layout_mapa_tematico("cn_suelos", "png"))
+        h_export_cn.addWidget(btn_png_cn)
+        v_cn.addLayout(h_export_cn)
+
+        v.addWidget(gb_cn)
         v.addStretch()
 
         self._capas_mapas_tematicos = {}  # clave_sección -> [QgsMapLayer,...] ya estilizadas
@@ -17329,8 +17375,58 @@ class HydroAndinaProDialog(QDialog):
             self.lbl_estado_mt_morfo.setText("Estado: error (ver mensaje).")
             QMessageBox.critical(self, "Error generando el mapa de morfometría", str(e))
 
+    def _on_generar_mapa_cn_suelos(self):
+        lulc_path = getattr(self, "_ultimo_lulc_path", None)
+        hsg_path = getattr(self, "_ultimo_hsg_path", None)
+        if not lulc_path or not hsg_path:
+            QMessageBox.warning(
+                self, "Faltan datos de LULC/HSG",
+                "Calcule primero el CN automático en la Pestaña 3 (Número de Curva) -- botón B1 o "
+                "B2 -- para obtener el LULC y el HSG recortados a la cuenca. Esta pestaña los "
+                "reutiliza directamente, sin volver a descargar ni calcular nada.")
+            return
+        try:
+            context = QgsProcessingContext()
+            capas = []
+            self.lbl_estado_mt_cn.setText("Estado: generando capas...")
+            QApplication.processEvents()
+
+            if self.check_mt_cn_raster.isChecked():
+                ruta_cn = landcover_soils.generar_raster_cn(lulc_path, hsg_path)
+                capa = obtener_capa(ruta_cn, context, es_raster=True, nombre="Número de Curva (CN-II)")
+                # invertir=True: rojo = CN alto (más escorrentía), verde = CN bajo (más infiltración)
+                map_styling.estilizar_raster_pseudocolor(capa, rampa="RdYlGn", n_clases=8, invertir=True)
+                map_styling.agregar_capa_a_grupo(capa, subgrupo="Número de Curva y Suelos")
+                capas.append(capa)
+
+            if self.check_mt_hsg.isChecked():
+                capa = obtener_capa(hsg_path, context, es_raster=True, nombre="Grupo Hidrológico de Suelo")
+                map_styling.estilizar_raster_paletizado(capa, map_styling.COLORES_HSG_RASTER)
+                map_styling.agregar_capa_a_grupo(capa, subgrupo="Número de Curva y Suelos")
+                capas.append(capa)
+
+            if self.check_mt_lulc.isChecked():
+                capa = obtener_capa(lulc_path, context, es_raster=True, nombre="Uso y Cobertura de Suelo (LULC)")
+                map_styling.estilizar_raster_paletizado(capa, map_styling.COLORES_ESA_WORLDCOVER)
+                map_styling.agregar_capa_a_grupo(capa, subgrupo="Número de Curva y Suelos")
+                capas.append(capa)
+
+            if not capas:
+                raise mapas_tematicos.MapasTematicosError(
+                    "no se marcó ninguna capa para generar -- active al menos una casilla.")
+
+            self._capas_mapas_tematicos["cn_suelos"] = capas
+            self.lbl_estado_mt_cn.setText(
+                f"Estado: {len(capas)} capa(s) generada(s) y agregada(s) al grupo «Mapas Temáticos "
+                f"> Número de Curva y Suelos» del panel de capas."
+            )
+        except Exception as e:
+            self.lbl_estado_mt_cn.setText("Estado: error (ver mensaje).")
+            QMessageBox.critical(self, "Error generando el mapa de CN y suelos", str(e))
+
     _TITULOS_MAPAS_TEMATICOS = {
         "morfo": "Mapa Físico — Morfometría y Terreno",
+        "cn_suelos": "Número de Curva y Suelos",
     }
 
     def _on_exportar_layout_mapa_tematico(self, clave: str, formato: str = "pdf"):

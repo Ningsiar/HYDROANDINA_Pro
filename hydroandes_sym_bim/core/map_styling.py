@@ -203,9 +203,89 @@ def estilizar_vector_categorizado(capa_vector, campo: str,
     capa_vector.triggerRepaint()
 
 
+# ======================================================================
+# Ráster -- paletizado (valores discretos exactos, p.ej. clases LULC o
+# códigos de HSG 1-4) -- distinto de estilizar_raster_pseudocolor()
+# (ese es para variables CONTINUAS como CN o pendiente; este es para
+# categorías, donde cada valor entero exacto tiene su propio color fijo,
+# no un degradado).
+# ======================================================================
+def estilizar_raster_paletizado(capa_raster, mapa_valores: Dict[int, dict]) -> None:
+    """Aplica un QgsPalettedRasterRenderer (banda 1) -- `mapa_valores`:
+    {codigo_entero: {"nombre": str, "color": "#RRGGBB"}}. Solo se
+    incluyen en la leyenda los códigos de `mapa_valores` que
+    EFECTIVAMENTE aparecen en el ráster (evita una leyenda con
+    clases que no existen en esta cuenca en particular)."""
+    from qgis.core import QgsPalettedRasterRenderer
+
+    proveedor = capa_raster.dataProvider()
+    stats = proveedor.bandStatistics(1)
+    if stats.minimumValue is None:
+        raise MapStylingError(
+            f"no se pudo leer el ráster «{capa_raster.name()}» para paletizar (sin estadísticas de banda)."
+        )
+    # Histograma para saber qué códigos EXISTEN de verdad en este ráster.
+    valores_presentes = set()
+    ancho, alto = capa_raster.width(), capa_raster.height()
+    bloque = proveedor.block(1, capa_raster.extent(), ancho, alto)
+    if bloque is None:
+        raise MapStylingError(f"no se pudo leer los píxeles del ráster «{capa_raster.name()}».")
+    for fila in range(alto):
+        for col in range(ancho):
+            valor = bloque.value(fila, col)
+            if bloque.isNoData(fila, col):
+                continue
+            valores_presentes.add(int(round(valor)))
+
+    clases = []
+    for codigo, datos in sorted(mapa_valores.items()):
+        if codigo not in valores_presentes:
+            continue
+        clases.append(QgsPalettedRasterRenderer.Class(codigo, QColor(datos["color"]), datos["nombre"]))
+    if not clases:
+        raise MapStylingError(
+            f"ninguno de los códigos de `mapa_valores` aparece en el ráster «{capa_raster.name()}» -- "
+            f"revise que la tabla de colores corresponda a este ráster (códigos presentes: "
+            f"{sorted(valores_presentes)})."
+        )
+
+    renderer = QgsPalettedRasterRenderer(proveedor, 1, clases)
+    capa_raster.setRenderer(renderer)
+    capa_raster.triggerRepaint()
+
+
 # Paletas de referencia para categorías hidrológicas estándar del
 # plugin (HSG y Grupo Hidrológico dominante ya usan estas letras en
 # el resto de la interfaz) -- colores convencionales: A=verde
 # (alta infiltración) a D=rojo (muy lenta), el mismo sentido que un
 # semáforo de "capacidad de infiltración".
 COLORES_HSG: Dict[str, str] = {"A": "#1a9850", "B": "#91cf60", "C": "#fc8d59", "D": "#d73027"}
+
+# Códigos HSG tal como los escribe core/landcover_soils.py en el
+# ráster resultante (1=A, 2=B, 3=C, 4=D) -- para usar con
+# estilizar_raster_paletizado() sobre el propio ráster de HSG (a
+# diferencia de COLORES_HSG, que es para capas VECTORIALES con la
+# letra como texto).
+COLORES_HSG_RASTER: Dict[int, dict] = {
+    1: {"nombre": "A — alta infiltración", "color": COLORES_HSG["A"]},
+    2: {"nombre": "B — infiltración moderada", "color": COLORES_HSG["B"]},
+    3: {"nombre": "C — infiltración lenta", "color": COLORES_HSG["C"]},
+    4: {"nombre": "D — infiltración muy lenta", "color": COLORES_HSG["D"]},
+}
+
+# Paleta OFICIAL de ESA WorldCover (v100/v200, publicada por ESA en la
+# guía de usuario del producto) -- mismos códigos que
+# core/landcover_soils.py::TABLA_CN_ESA_WORLDCOVER.
+COLORES_ESA_WORLDCOVER: Dict[int, dict] = {
+    10: {"nombre": "Bosque / cobertura arbórea", "color": "#006400"},
+    20: {"nombre": "Matorral", "color": "#FFBB22"},
+    30: {"nombre": "Pastizal", "color": "#FFFF4C"},
+    40: {"nombre": "Cultivos", "color": "#F096FF"},
+    50: {"nombre": "Área construida", "color": "#FA0000"},
+    60: {"nombre": "Suelo desnudo / vegetación escasa", "color": "#B4B4B4"},
+    70: {"nombre": "Nieve / hielo", "color": "#F0F0F0"},
+    80: {"nombre": "Cuerpo de agua", "color": "#0064C8"},
+    90: {"nombre": "Humedal herbáceo", "color": "#0096A0"},
+    95: {"nombre": "Manglar", "color": "#00CF75"},
+    100: {"nombre": "Musgo / liquen", "color": "#FAE6A0"},
+}
