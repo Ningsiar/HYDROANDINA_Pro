@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.3.38
+version=0.3.39
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,34 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.3.39: NUEVO -- Curva S de avance físico-financiero
+      planificado, SEXTA y última de las 6 mejoras priorizadas por el
+      usuario tras pedir sugerencias de mejora "como ingeniero civil"
+      (1, 6, 4, 5 y 3 ya entregadas -- lista completa).
+      Nuevo core/curva_s.py: `curva_s_planificada()` une el
+      Presupuesto (costo por partida) con el Cronograma YA CALCULADO
+      (fechas ES/EF por actividad, mismo código que la partida),
+      distribuyendo el costo de cada partida LINEALMENTE entre el
+      Inicio y Fin Tempranos de su actividad vinculada, y arma la
+      curva acumulada en cortes periódicos (diario/semanal/mensual).
+      Partidas SIN actividad de igual código se EXCLUYEN y se
+      reportan aparte (costo_excluido), en vez de fallar en silencio.
+      Curva PLANIFICADA únicamente -- el plugin no registra
+      valorizaciones (avance real ejecutado), así que no hay
+      comparación planificado vs. real.
+      Nueva sección "5. Curva S" en la Pestaña 10, con
+      ui/curva_s_canvas.py: curva acumulada en % (eje izq.) y S/. (eje
+      der.) contra la fecha, área sombreada, y una caja de alerta
+      visible si hay partidas excluidas de la curva.
+      Verificado con un escenario calculado a mano por completo (2
+      partidas de S/.1000 y S/.2000, con una actividad de espera para
+      fijar ES/EF exactos en 0-4 y 2-6 días) -- 7 puntos diarios
+      comparados uno por uno contra el valor esperado, más el caso
+      borde de una actividad de duración cero (hito, sin dividir por
+      cero) -- 35/35 comprobaciones de núcleo; y con las 626 partidas
+      reales de Cajamarca a escala completa (14/14 de integración UI,
+      confirmando que TODAS quedan vinculadas y que la curva cierra
+      exactamente en el costo directo real).
     - v0.3.38: NUEVO -- Calendario Laboral en el Cronograma (CPM),
       quinta de las 6 mejoras priorizadas por el usuario (1, 6, 4 y 5
       ya entregadas, ahora el 3 -- solo queda el 2, Curva S).

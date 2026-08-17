@@ -51,7 +51,7 @@ from .core import (delineation, morphometry, curve_number, tc_methods, dem_downl
                     iila_senamhi_zones, bim_metrados, bim_ifc, bim_refuerzo, bim_geometry,
                     lateral_pressures, reinforced_concrete_e060, presupuesto, formula_polinomica,
                     apu_referencia, cronograma, geotecnia_e050, estabilidad_muros, zapatas, proyecto_io,
-                    exportar_presupuesto)
+                    exportar_presupuesto, curva_s)
 from .core.qgis_layer_utils import obtener_capa
 from .ui.hypsometric_canvas import HypsometricCanvas
 from .ui.hydrograph_canvas import HydrographCanvas
@@ -84,6 +84,7 @@ from .ui.presupuesto_canvas import PresupuestoCanvas
 from .ui.cronograma_canvas import CronogramaCanvas
 from .ui.estabilidad_muros_canvas import EstabilidadMurosCanvas
 from .ui.zapatas_canvas import ZapataCanvas
+from .ui.curva_s_canvas import CurvaSCanvas
 from .ui.table_utils import (ajustar_alto_tabla, aplicar_columna_elastica, limitar_ancho_tabla,
                               limitar_ancho_boton, crear_tabla_parametros, poblar_tabla_parametros)
 from .ui import export_overlay
@@ -12582,6 +12583,38 @@ class HydroAndinaProDialog(QDialog):
         self.canvas_adquisicion_materiales = CronogramaCanvas(width=7.6, height=6.0)
         v.addWidget(self.canvas_adquisicion_materiales)
 
+        # ------------------------------------------------------------
+        # 5) Curva S de avance físico-financiero planificado -- une el
+        # Presupuesto (costo por partida) con este Cronograma (fechas
+        # ES/EF) por código de partida/actividad. Ver core/curva_s.py.
+        # ------------------------------------------------------------
+        v.addWidget(QLabel(
+            "<hr><b>5. Curva S (avance físico-financiero planificado)</b> — distribuye el costo de "
+            "cada partida LINEALMENTE entre el Inicio y Fin Tempranos de su actividad vinculada "
+            "(mismo código) y arma la curva acumulada en el tiempo. Curva PLANIFICADA únicamente -- "
+            "este plugin no registra avance real ejecutado (valorizaciones), no compara planificado "
+            "vs. real. Requiere haber calculado el presupuesto (Pestaña 9) Y el CPM (sección 2)."))
+        f_curva_s = QFormLayout()
+        f_curva_s.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.combo_curva_s_periodo = QComboBox()
+        self.combo_curva_s_periodo.addItems(["Semanal (recomendado)", "Mensual", "Diario"])
+        f_curva_s.addRow("Período de la curva:", self.combo_curva_s_periodo)
+        v.addLayout(f_curva_s)
+        btn_curva_s = QPushButton("📈 Generar Curva S")
+        btn_curva_s.clicked.connect(self._on_generar_curva_s)
+        v.addWidget(btn_curva_s)
+        self.lbl_estado_curva_s = QLabel("Estado: sin generar.")
+        self.lbl_estado_curva_s.setWordWrap(True)
+        v.addWidget(self.lbl_estado_curva_s)
+        self.tabla_resumen_curva_s = crear_tabla_parametros(con_comentario=False)
+        v.addWidget(self.tabla_resumen_curva_s)
+        self.canvas_curva_s = CurvaSCanvas(width=8.4, height=5.2)
+        v.addWidget(self.canvas_curva_s)
+        self.tabla_puntos_curva_s = QTableWidget(0, 4, objectName="tabla_puntos_curva_s")
+        self.tabla_puntos_curva_s.setHorizontalHeaderLabels(
+            ["Fecha", "Día", "Costo Acumulado (S/.)", "% Acumulado"])
+        v.addWidget(self.tabla_puntos_curva_s)
+
         self._actividades_meta_cron = {}
         self._orden_actividades_cron = []
         self._ultimo_cronograma = None
@@ -12729,6 +12762,56 @@ class HydroAndinaProDialog(QDialog):
                 "Estado: sin insumos programables -- ninguna partida del presupuesto tiene una "
                 "actividad con el mismo código en este cronograma (genérelas con el botón de la "
                 "sección 1b, o revise que los códigos coincidan).")
+
+    def _on_generar_curva_s(self):
+        if self._ultimo_cronograma is None:
+            self.lbl_estado_curva_s.setText("Estado: calcule el CPM primero (sección 2).")
+            return
+        presupuesto_actual = getattr(self, "_ultimo_presupuesto_pres", None)
+        if presupuesto_actual is None:
+            self.lbl_estado_curva_s.setText(
+                "Estado: calcule el presupuesto primero (Pestaña 9, sección 4).")
+            return
+        periodo = {0: "semanal", 1: "mensual", 2: "diario"}[self.combo_curva_s_periodo.currentIndex()]
+        try:
+            r = curva_s.curva_s_planificada(presupuesto_actual, self._ultimo_cronograma, periodo=periodo)
+        except curva_s.CurvaSError as e:
+            self.tabla_resumen_curva_s.setRowCount(0)
+            self.tabla_puntos_curva_s.setRowCount(0)
+            self.lbl_estado_curva_s.setText(f"Estado: no se pudo generar -- {e}")
+            return
+        except Exception as e:
+            self.tabla_resumen_curva_s.setRowCount(0)
+            self.tabla_puntos_curva_s.setRowCount(0)
+            self.lbl_estado_curva_s.setText(f"Estado: ERROR inesperado -- {e}")
+            return
+
+        filas_resumen = [
+            ("Costo total programable", r["costo_total_programable"], "S/."),
+            ("Partidas programadas", r["n_partidas_programadas"], "und"),
+            ("Partidas excluidas (sin actividad vinculada)", r["n_partidas_excluidas"], "und"),
+            ("Costo excluido (no representado en la curva)", r["costo_excluido"], "S/."),
+        ]
+        poblar_tabla_parametros(self.tabla_resumen_curva_s, filas_resumen)
+
+        self.tabla_puntos_curva_s.setRowCount(len(r["puntos"]))
+        for fila, p in enumerate(r["puntos"]):
+            self.tabla_puntos_curva_s.setItem(fila, 0, QTableWidgetItem(p["fecha"].strftime("%d-%m-%Y")))
+            self.tabla_puntos_curva_s.setItem(fila, 1, QTableWidgetItem(f"{p['dia']:g}"))
+            self.tabla_puntos_curva_s.setItem(fila, 2, QTableWidgetItem(f"{p['costo_acumulado']:,.2f}"))
+            self.tabla_puntos_curva_s.setItem(fila, 3, QTableWidgetItem(f"{p['pct_acumulado']:.2f}"))
+        ajustar_alto_tabla(self.tabla_puntos_curva_s, filas_visibles_max=15)
+
+        try:
+            self.canvas_curva_s.graficar(r)
+        except Exception:
+            pass  # el gráfico es un plus visual -- nunca debe romper el cálculo ya hecho
+
+        nota_excluidas = (f" ⚠ {r['n_partidas_excluidas']} partida(s) excluida(s) (sin actividad "
+                          f"vinculada, S/. {r['costo_excluido']:,.2f}).") if r["n_partidas_excluidas"] else ""
+        self.lbl_estado_curva_s.setText(
+            f"Estado: curva {periodo} generada -- {r['n_partidas_programadas']} partida(s) "
+            f"programada(s), S/. {r['costo_total_programable']:,.2f}.{nota_excluidas}")
 
     def _construir_calendario_laboral_cron(self):
         """None (días corridos) si el combo está en «Ninguno», o un
