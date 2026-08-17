@@ -80,6 +80,18 @@ class SimulacionSwe2DWorker(QThread):
                 sim.agregar_estructura(estructura)
             if cfg.get("salida_por_bordes", True):
                 sim.salida_por_bordes()
+            # Sección(es) de control/descarga (p.ej. el punto de salida
+            # real de la cuenca) -- ver swe2d.agregar_seccion_control().
+            # Se agregan DESPUÉS de salida_por_bordes(): agregar_salida()
+            # deduplica, así que el orden no afecta el balance, pero si
+            # una sección cae fuera del dominio activo (Swe2DError) se
+            # avisa por mensaje en vez de abortar toda la simulación --
+            # las demás condiciones de contorno siguen siendo válidas.
+            for seccion in cfg.get("secciones_control", []):
+                try:
+                    sim.agregar_seccion_control(**seccion)
+                except swe2d.Swe2DError as e:
+                    self.mensaje.emit(f"Aviso: no se pudo agregar la sección de control: {e}")
 
             self.simulador = sim
             tiempo_total = float(cfg["tiempo_total_s"])

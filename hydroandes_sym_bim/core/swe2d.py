@@ -74,6 +74,27 @@ unas pocas operaciones sobre arrays completos, no bucles en Python. Si
 Numba está disponible se compila además el núcleo de flujos, pero NO es
 un requisito -- QGIS no garantiza traer Numba, y un plugin que solo
 funciona con una dependencia opcional no es utilizable.
+
+SECCIÓN DE DESCARGA (punto de control). `salida_por_bordes()` deja
+salir agua por TODO el borde del rectángulo de la grilla -- pero un MDE
+recortado a una cuenca casi nunca tiene su punto de salida real sobre
+ese borde: la cuenca es un polígono irregular inscrito en el rectángulo
+del ráster, así que la mayoría de las celdas del borde quedan FUERA del
+dominio activo (NaN) y el punto de salida verdadero (el break point de
+la Pestaña 1) cae en el INTERIOR de la grilla. Confiar solo en el borde
+para "ver" el caudal de salida no refleja el caudal que realmente pasa
+por la boca de la cuenca, y en el caso extremo (ninguna celda del borde
+activa cerca de la salida real) el agua se acumula sin drenar nunca por
+donde debería, y no hay manera de leer un hidrograma de caudal en el
+punto de interés.
+
+`agregar_seccion_control(nombre, celdas)` resuelve esto: registra un
+grupo de celdas (típicamente la celda de la salida real, convertida a
+fila/columna con la geotransformación del dominio) como una sección de
+DESCARGA con salida libre, y lleva por separado su propia serie de
+caudal Q(t) -- de la que se puede leer el caudal pico y el instante en
+que ocurre, igual que el hidrograma de diseño de la Pestaña 6, pero
+producido por el tránsito 2D real en vez de por un hidrograma unitario.
 """
 import math
 import numpy as np
@@ -383,6 +404,8 @@ class SimuladorSwe2D:
         self.entradas = []          # (fila, col, hidrograma o caudal constante)
         self.lluvia_mm_h = 0.0
         self.celdas_salida = []     # celdas con salida libre
+        self._set_salida = set()    # dedupe de celdas_salida (evita contarlas 2 veces)
+        self.secciones_control = []  # ver agregar_seccion_control()
         self.estructuras = []
 
         # Contabilidad de volúmenes: es la comprobación que dice si la
@@ -422,15 +445,23 @@ class SimuladorSwe2D:
 
     def agregar_salida(self, celdas):
         """Celdas de salida libre: el agua que llega a ellas abandona el
-        dominio y se contabiliza como volumen salido."""
+        dominio y se contabiliza como volumen salido. Deduplicada:
+        agregar la misma celda dos veces (p.ej. porque ya la trajo
+        salida_por_bordes() y también una sección de control) no la
+        cuenta dos veces en el balance de caudal de salida."""
         for f, c in celdas:
             if 0 <= f < self.filas and 0 <= c < self.columnas:
-                self.celdas_salida.append((f, c))
+                if (f, c) not in self._set_salida:
+                    self.celdas_salida.append((f, c))
+                    self._set_salida.add((f, c))
 
     def salida_por_bordes(self):
         """Salida libre por todo el contorno del dominio activo. Es la
         condición por defecto razonable: el agua que alcanza el límite
-        del MDE se ha ido de la zona de estudio."""
+        del MDE se ha ido de la zona de estudio. NO sustituye a una
+        sección de control en el punto de salida real de la cuenca (ver
+        agregar_seccion_control()): el borde del RECTÁNGULO del ráster
+        casi nunca coincide con la salida real de una cuenca recortada."""
         celdas = []
         for c in range(self.columnas):
             celdas.append((0, c))
@@ -439,6 +470,35 @@ class SimuladorSwe2D:
             celdas.append((f, 0))
             celdas.append((f, self.columnas - 1))
         self.agregar_salida(celdas)
+
+    def agregar_seccion_control(self, nombre: str, celdas):
+        """Registra `celdas` (lista de (fila, columna)) como una SECCIÓN
+        DE CONTROL con salida libre -- además de sumarse al balance
+        global de salida (como cualquier celda de agregar_salida()), su
+        caudal se contabiliza POR SEPARADO como la serie Q(t) de esta
+        sección específica, de la que se puede leer el caudal pico y el
+        instante en que ocurre (ver resumen()). Es la forma correcta de
+        obtener el hidrograma de caudal en el punto de salida real de la
+        cuenca (ver nota "SECCIÓN DE DESCARGA" en el docstring del
+        módulo), en vez de depender de que el borde rectangular del MDE
+        recortado coincida con la salida real."""
+        celdas_validas = [(f, c) for f, c in celdas
+                          if 0 <= f < self.filas and 0 <= c < self.columnas]
+        if not celdas_validas:
+            raise Swe2DError(
+                f"la sección de control «{nombre}» no tiene ninguna celda dentro del dominio.")
+        fuera_de_cuenca = [c for c in celdas_validas if not self.activo[c]]
+        if len(fuera_de_cuenca) == len(celdas_validas):
+            raise Swe2DError(
+                f"la sección de control «{nombre}» cae fuera del dominio activo (todas sus "
+                "celdas están fuera de la cuenca según el MDE) -- revise la ubicación del "
+                "punto de salida.")
+        self.agregar_salida(celdas_validas)
+        self.secciones_control.append({
+            "nombre": nombre, "celdas": set(celdas_validas),
+            "serie_caudal": [], "caudal_pico_m3s": 0.0, "tiempo_pico_s": 0.0,
+            "volumen_total_m3": 0.0,
+        })
 
     def agregar_estructura(self, estructura: Estructura):
         for celda in (estructura.celda_1, estructura.celda_2):
@@ -673,12 +733,25 @@ class SimuladorSwe2D:
 
         # ---------------- Salidas -------------------------------------
         caudal_salida = 0.0
+        caudal_por_celda_salida = {}
         for f, c in self.celdas_salida:
             if h_nuevo[f, c] > 0:
                 volumen = h_nuevo[f, c] * self.dx * self.dy
                 self.volumen_salido += volumen
-                caudal_salida += volumen / dt
+                q_celda = volumen / dt
+                caudal_salida += q_celda
+                caudal_por_celda_salida[(f, c)] = q_celda
                 h_nuevo[f, c] = 0.0
+
+        # ---------------- Secciones de control (hidrograma de salida) --
+        t_nuevo = self.tiempo + dt
+        for seccion in self.secciones_control:
+            q_seccion = sum(caudal_por_celda_salida.get(celda, 0.0) for celda in seccion["celdas"])
+            seccion["serie_caudal"].append((t_nuevo, q_seccion))
+            if q_seccion > seccion["caudal_pico_m3s"]:
+                seccion["caudal_pico_m3s"] = q_seccion
+                seccion["tiempo_pico_s"] = t_nuevo
+            seccion["volumen_total_m3"] += q_seccion * dt
 
         # Un calado negativo residual solo puede venir de redondeo; se
         # recorta, pero el balance de volumen lo delataría si fuera algo
@@ -860,6 +933,16 @@ class SimuladorSwe2D:
             "pasos_con_dt_recortado": self.pasos_con_dt_recortado,
             "estable": self.pasos_con_dt_recortado == 0,
             "balance": self.balance_masa(),
+            "secciones_control": [
+                {
+                    "nombre": s["nombre"],
+                    "caudal_pico_m3s": s["caudal_pico_m3s"],
+                    "tiempo_pico_s": s["tiempo_pico_s"],
+                    "volumen_total_m3": s["volumen_total_m3"],
+                    "serie_caudal": s["serie_caudal"],
+                }
+                for s in self.secciones_control
+            ],
         }
 
 

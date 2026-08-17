@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.4.5
+version=0.4.6
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,53 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.4.6: CORRECCIÓN CRÍTICA -- Simulación Hidráulica 2D (Pestaña 8),
+      a pedido explícito del usuario: "no genera escorrentía ni flujo,
+      debe de haber una sección o tramo donde se tenga que evaluar la
+      descarga de agua", más "la generación del caudal máximo (caudal
+      pico) desde que inicia la precipitación".
+      CAUSA RAÍZ IDENTIFICADA Y CONFIRMADA con una prueba a mano: la
+      única forma de "salida" que tenía el modelo era
+      salida_por_bordes() -- deja drenar el agua por TODO el borde del
+      RECTÁNGULO de la grilla. Pero un MDE recortado a un polígono de
+      cuenca irregular (que es SIEMPRE el caso en este plugin, Pestaña
+      1) deja la inmensa mayoría de las celdas del borde del rectángulo
+      FUERA del dominio activo (NaN); el punto de salida real de la
+      cuenca (el break point) cae casi siempre en el INTERIOR de la
+      grilla, nunca en su borde. Resultado: el agua podía llegar al
+      punto de salida real y quedar ahí atrapada sin poder drenar
+      -- "no genera escorrentía" --, y no había ninguna forma de leer
+      un caudal (mucho menos un caudal pico) en el punto que importa.
+      CORRECCIÓN: nuevo core/swe2d.py::agregar_seccion_control(nombre,
+      celdas) -- registra una sección de DESCARGA explícita (con salida
+      libre asegurada) que además lleva su PROPIA serie Q(t), de la que
+      se calculan el caudal pico y el instante en que ocurre (medidos
+      desde el inicio de la simulación, que es cuando arranca el
+      forzamiento -- lluvia o hidrograma de entrada). La Pestaña 8 la
+      agrega AUTOMÁTICAMENTE en el punto de salida real de la cuenca
+      (self.break_point_xy de la Pestaña 1, convertido a fila/columna
+      de la malla, con un pequeño radio configurable de celdas
+      alrededor para no perderla por redondeo), sin pedir nada nuevo al
+      usuario -- casilla activada por defecto, con opción de
+      desactivarla. El caudal pico de la sección ahora es el VALOR
+      PRINCIPAL del cuadro de resultados (antes solo mostraba h_máx/
+      v_máx), se agrega como fila explícita a la tabla de resultados
+      (caudal pico + instante + volumen total transitado), y su
+      hidrograma Q(t) se dibuja en el gráfico de series con su pico
+      marcado y anotado (ui/swe2d_canvas.py::plot_series(), nuevo
+      parámetro `secciones_control`).
+      Verificado: 16/16 (núcleo puro numpy/swe2d.py, sin QGIS -- CASO 1
+      reproduce el bug a mano: con la configuración por defecto el
+      volumen salido queda en CERO pese a que sí entra agua y la celda
+      de salida real ya tiene lámina; CASO 2 confirma que
+      salida_por_bordes() no encuentra NINGUNA celda de borde activa en
+      un dominio recortado; CASO 3 confirma que con
+      agregar_seccion_control() el agua drena, el balance de masa
+      cierra en 0.0000 %, y el volumen acumulado en la sección coincide
+      EXACTAMENTE con el volumen_salido del simulador) + 10/10
+      (integración UI real en QGIS headless: conversión punto->fila/
+      columna verificada a mano, caudal pico mostrado en el cuadro de
+      resultado coincide con el calculado) -- 26/26 en total.
     - v0.4.5: NUEVO -- Pestaña "Mapas Temáticos", Fase 5 (ÚLTIMA de la
       serie): Codificación Pfafstetter de subcuencas (Verdin & Verdin,
       1999). Nuevo core/pfafstetter.py: reutiliza el mismo grafo

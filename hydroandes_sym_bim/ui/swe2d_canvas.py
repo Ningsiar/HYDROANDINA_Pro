@@ -223,10 +223,19 @@ class HidrogramasSwe2DCanvas(FigureCanvas):
         self.setParent(parent)
         self.setMinimumSize(int(width * dpi), int(height * dpi))
 
-    def plot_series(self, serie_tiempo, balance=None):
+    def plot_series(self, serie_tiempo, balance=None, secciones_control=None):
         """
         serie_tiempo: lista de (t, Q_entrada, Q_salida, volumen,
         area_inundada, Q_estructuras) que acumula el simulador.
+
+        secciones_control: lista de dicts (ver SimuladorSwe2D.resumen())
+        con "nombre", "serie_caudal" ([(t, Q), ...]), "caudal_pico_m3s"
+        y "tiempo_pico_s" -- el hidrograma REAL en el punto de salida de
+        la cuenca (o cualquier otra sección de interés), que es lo que
+        responde a "¿cuál es el caudal pico, y cuándo ocurre?" -- a
+        diferencia del "Caudal de salida del dominio" (agregado de TODO
+        el borde/todas las salidas juntas), esta curva es específica de
+        la sección marcada.
         """
         self.fig.clear()
         if not serie_tiempo:
@@ -240,11 +249,37 @@ class HidrogramasSwe2DCanvas(FigureCanvas):
 
         ax_q.plot(t_h, datos[:, 1], "-", linewidth=2.2, color="#2E7D32",
                   label="Caudal de entrada")
-        ax_q.plot(t_h, datos[:, 2], "-", linewidth=2.2, color="#B3261E",
-                  label="Caudal de salida del dominio")
+        ax_q.plot(t_h, datos[:, 2], "-", linewidth=1.6, color="#B3261E", alpha=0.55,
+                  label="Caudal de salida del dominio (todas las celdas de salida)")
         if datos.shape[1] > 5 and np.any(datos[:, 5] > 0):
             ax_q.plot(t_h, datos[:, 5], "--", linewidth=1.9, color="#8B5CF6",
                       label="Caudal por estructuras")
+
+        # Hidrograma(s) de la(s) sección(es) de control (p.ej. el punto de
+        # salida real de la cuenca) -- se destaca con más grosor que el
+        # agregado del dominio porque ES el resultado principal que se
+        # busca (el caudal pico "de diseño" del tránsito 2D).
+        colores_secciones = ["#0B5FA5", "#C77700", "#0E8C6B", "#8E24AA"]
+        for i, seccion in enumerate(secciones_control or []):
+            serie = seccion.get("serie_caudal") or []
+            if not serie:
+                continue
+            datos_s = np.asarray(serie, dtype=float)
+            color = colores_secciones[i % len(colores_secciones)]
+            ax_q.plot(datos_s[:, 0] / 3600.0, datos_s[:, 1], "-", linewidth=2.6,
+                      color=color, label=f"Caudal en «{seccion['nombre']}»")
+            qp = seccion.get("caudal_pico_m3s", 0.0)
+            tp_h = seccion.get("tiempo_pico_s", 0.0) / 3600.0
+            if qp > 0:
+                ax_q.plot([tp_h], [qp], marker="o", markersize=7, color=color,
+                          markeredgecolor="white", markeredgewidth=1.0, zorder=5)
+                ax_q.annotate(
+                    f"Qp = {qp:.3f} m³/s\nt = {tp_h:.2f} h",
+                    xy=(tp_h, qp), xytext=(8, 10), textcoords="offset points",
+                    fontsize=8.5, fontweight="bold", color=color,
+                    bbox=dict(boxstyle="round,pad=0.25", facecolor="white",
+                              edgecolor=color, linewidth=1.0, alpha=0.9))
+
         ax_q.set_ylabel("Caudal (m³/s)")
         ax_q.set_title("Evolución de caudales, volumen y área inundada", pad=12)
         ax_q.grid(True, linestyle=":", linewidth=0.6)

@@ -8937,6 +8937,24 @@ class HydroAndinaProDialog(QDialog):
         fila = int((dom["y_max"] - punto.y()) / dom["dy"])
         return fila, columna
 
+    def _celdas_seccion_control_en_punto(self, punto_xy, radio_celdas: int = 1):
+        """Celdas alrededor de `punto_xy` (x, y) que forman la sección de
+        descarga -- un pequeño vecindario (no solo la celda exacta) para
+        no perder la sección por el redondeo al convertir a fila/columna,
+        y para representar mejor una sección transversal real (varias
+        celdas de ancho) en vez de un único píxel. Solo se devuelven
+        celdas DENTRO del dominio activo (con dato de MDE)."""
+        fila_c, col_c = self._fila_columna_desde_punto_2d(QgsPointXY(*punto_xy))
+        zb = self.dominio_2d["zb"]
+        filas, columnas = zb.shape
+        celdas = []
+        for df in range(-radio_celdas, radio_celdas + 1):
+            for dc in range(-radio_celdas, radio_celdas + 1):
+                f, c = fila_c + df, col_c + dc
+                if 0 <= f < filas and 0 <= c < columnas and np.isfinite(zb[f, c]):
+                    celdas.append((f, c))
+        return celdas
+
     def _valor_atributo_o_none(self, feature, nombre_campo):
         """feature[nombre_campo] normalizado: None tanto si el atributo es
         el None de Python como si es un QVariant NULL (lo que devuelve un
@@ -9294,6 +9312,32 @@ class HydroAndinaProDialog(QDialog):
             return
 
         dominio = self.dominio_2d
+
+        secciones_control = []
+        if self.check_seccion_descarga_2d.isChecked():
+            if self.break_point_xy is None:
+                QMessageBox.warning(
+                    self, "Sin punto de salida",
+                    "No hay un punto de salida delimitado (Pestaña 1) -- se continúa sin la "
+                    "sección de descarga automática; desmarque la casilla para no ver este aviso, "
+                    "o delimite la cuenca primero para obtener el hidrograma en el punto real de "
+                    "salida.")
+            else:
+                celdas_salida_real = self._celdas_seccion_control_en_punto(
+                    self.break_point_xy, self.spin_radio_seccion_descarga_2d.value())
+                if celdas_salida_real:
+                    secciones_control.append({
+                        "nombre": "Salida de la cuenca (Pestaña 1)",
+                        "celdas": celdas_salida_real,
+                    })
+                else:
+                    QMessageBox.warning(
+                        self, "Sección de descarga fuera del dominio",
+                        "El punto de salida de la cuenca cae fuera del dominio de cálculo actual "
+                        "(o de su vecindario) -- se continúa sin la sección de descarga automática. "
+                        "Aumente el radio de la sección o revise que el dominio de cálculo (sección "
+                        "1) incluya el punto de salida.")
+
         configuracion = {
             "zb": dominio["zb"], "dx": dominio["dx"], "dy": dominio["dy"],
             "n_manning": self.spin_manning_2d.value(),
@@ -9305,6 +9349,7 @@ class HydroAndinaProDialog(QDialog):
             "estructuras": estructuras,
             "lluvia_mm_h": self.spin_lluvia_2d.value(),
             "salida_por_bordes": self.check_salida_bordes_2d.isChecked(),
+            "secciones_control": secciones_control,
             "intervalo_captura_s": self.spin_captura_2d.value(),
         }
 
@@ -9407,6 +9452,14 @@ class HydroAndinaProDialog(QDialog):
             filas.append((
                 "Pasos con Δt recortado", resumen["pasos_con_dt_recortado"], "",
                 "el paso estable cayó por debajo del mínimo: baje el CFL o use inercia local"))
+
+        secciones_control = resumen.get("secciones_control") or []
+        for seccion in secciones_control:
+            filas.append((
+                f"Caudal pico en «{seccion['nombre']}»", round(seccion["caudal_pico_m3s"], 4), "m³/s",
+                f"en t = {seccion['tiempo_pico_s'] / 3600.0:.3f} h "
+                f"(desde el inicio de la simulación); volumen total transitado = "
+                f"{seccion['volumen_total_m3']:,.1f} m³"))
         poblar_tabla_parametros(self.tabla_resultado_2d, filas, filas_visibles_max=26)
 
         if simulador.estructuras:
@@ -9427,17 +9480,29 @@ class HydroAndinaProDialog(QDialog):
         # espectacular del calado: un resultado que no cierra masa no es
         # utilizable por muy verosímil que parezca el mapa.
         tipo = "exito" if balance["aceptable"] and resumen.get("estable", True) else "alerta"
+        metricas_cuadro = [("Área inundada", f"{resumen['area_inundada_ha']:.2f} ha"),
+                            ("Peligro h·v máx", f"{resumen['peligrosidad_maxima_m2s']:.2f} m²/s"),
+                            ("Pasos", f"{resumen['pasos']:,}"),
+                            ("Error de masa", f"{balance['error_relativo_pct']:.4f} %")]
+        valor_principal_2d = (f"h_máx = {resumen['calado_maximo_m']:.3f} m   ·   "
+                              f"v_máx = {resumen['velocidad_maxima_ms']:.3f} m/s")
+        if secciones_control:
+            # El caudal pico de la sección de descarga es el resultado que
+            # más importa para dimensionar aguas abajo -- se destaca en el
+            # valor PRINCIPAL del cuadro, no solo en una métrica más.
+            principal = secciones_control[0]
+            valor_principal_2d = (f"Qp = {principal['caudal_pico_m3s']:.3f} m³/s   ·   "
+                                  f"h_máx = {resumen['calado_maximo_m']:.3f} m")
+            metricas_cuadro.insert(0, (
+                f"Caudal pico ({principal['nombre']})",
+                f"{principal['caudal_pico_m3s']:.3f} m³/s en t={principal['tiempo_pico_s']/3600.0:.2f} h"))
         self.cuadro_resultado_2d.actualizar(
             titulo="SIMULACIÓN HIDRÁULICA 2D",
-            valor_principal=f"h_máx = {resumen['calado_maximo_m']:.3f} m   ·   "
-                            f"v_máx = {resumen['velocidad_maxima_ms']:.3f} m/s",
+            valor_principal=valor_principal_2d,
             subtitulo=f"{resumen['area_inundada_ha']:.2f} ha inundadas en "
                       f"{resumen['tiempo_simulado_s']:,.0f} s simulados "
                       f"({resumen['esquema'].replace('_', ' ')})",
-            metricas=[("Área inundada", f"{resumen['area_inundada_ha']:.2f} ha"),
-                       ("Peligro h·v máx", f"{resumen['peligrosidad_maxima_m2s']:.2f} m²/s"),
-                       ("Pasos", f"{resumen['pasos']:,}"),
-                       ("Error de masa", f"{balance['error_relativo_pct']:.4f} %")],
+            metricas=metricas_cuadro,
             leyenda=("El balance de masa cierra: los resultados son consistentes y pueden usarse "
                       "para dimensionar." if tipo == "exito" else
                       "EL BALANCE DE MASA NO CIERRA o el paso de tiempo tuvo que recortarse. "
@@ -9452,7 +9517,8 @@ class HydroAndinaProDialog(QDialog):
         self.canvas_peligro_2d.plot_peligrosidad(
             peligro, clasificacion, simulador.zb, simulador.dx, simulador.dy,
             activo=simulador.activo)
-        self.canvas_hidrogramas_2d.plot_series(simulador.serie_tiempo, balance=balance)
+        self.canvas_hidrogramas_2d.plot_series(simulador.serie_tiempo, balance=balance,
+                                               secciones_control=secciones_control)
         self._on_actualizar_perfil_2d()
 
         self._actualizar_resumen_final_2d()
@@ -9981,6 +10047,32 @@ class HydroAndinaProDialog(QDialog):
             "Salida libre por el borde del dominio (desmarque para dominio cerrado)")
         self.check_salida_bordes_2d.setChecked(True)
         v_bc.addWidget(self.check_salida_bordes_2d)
+
+        lbl_seccion_descarga = QLabel(
+            "<b>Sección de descarga (caudal pico):</b> el borde del RECTÁNGULO de la malla casi "
+            "nunca coincide con el punto de salida real de la cuenca (un MDE recortado a un "
+            "polígono deja la mayoría de las celdas del borde fuera del dominio activo) -- sin una "
+            "sección explícita en el punto de salida real, el agua puede quedar atrapada sin "
+            "drenar y no hay forma de leer un caudal pico creíble. Se agrega automáticamente en el "
+            "punto de salida delimitado en la Pestaña 1, con su propio hidrograma Q(t)."
+        )
+        lbl_seccion_descarga.setWordWrap(True)
+        v_bc.addWidget(lbl_seccion_descarga)
+        self.check_seccion_descarga_2d = QCheckBox(
+            "Usar el punto de salida de la cuenca (Pestaña 1) como sección de descarga")
+        self.check_seccion_descarga_2d.setChecked(True)
+        v_bc.addWidget(self.check_seccion_descarga_2d)
+        f_seccion_descarga = QFormLayout()
+        f_seccion_descarga.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.spin_radio_seccion_descarga_2d = QSpinBox()
+        self.spin_radio_seccion_descarga_2d.setRange(0, 5)
+        self.spin_radio_seccion_descarga_2d.setValue(1)
+        self.spin_radio_seccion_descarga_2d.setToolTip(
+            "Radio en celdas alrededor del punto de salida (0 = solo la celda exacta; 1 = vecindad "
+            "3×3) -- un pequeño margen evita perder la sección por el redondeo al convertir el "
+            "punto real a fila/columna de la malla.")
+        f_seccion_descarga.addRow("Radio de la sección (celdas):", self.spin_radio_seccion_descarga_2d)
+        v_bc.addLayout(f_seccion_descarga)
         v.addWidget(gb_bc)
 
         # ---------------- 4. ESTRUCTURAS ----------------
