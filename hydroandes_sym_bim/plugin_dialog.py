@@ -51,7 +51,7 @@ from .core import (delineation, morphometry, curve_number, tc_methods, dem_downl
                     iila_senamhi_zones, bim_metrados, bim_ifc, bim_refuerzo, bim_geometry,
                     lateral_pressures, reinforced_concrete_e060, presupuesto, formula_polinomica,
                     apu_referencia, cronograma, geotecnia_e050, estabilidad_muros, zapatas, proyecto_io,
-                    exportar_presupuesto, curva_s)
+                    exportar_presupuesto, curva_s, map_styling, print_layout, mapas_tematicos)
 from .core.qgis_layer_utils import obtener_capa
 from .ui.hypsometric_canvas import HypsometricCanvas
 from .ui.hydrograph_canvas import HydrographCanvas
@@ -459,6 +459,7 @@ class HydroAndinaProDialog(QDialog):
         self._build_tab_flujo_subterraneo()
         self._build_tab_hidraulica_pozos()
         self._build_tab_exportacion()
+        self._build_tab_mapas_tematicos()
         self._build_tab6()
 
         # Item 9 del pedido: "todas las tablas, gráficos y cuadros de
@@ -17188,6 +17189,173 @@ class HydroAndinaProDialog(QDialog):
 
         v.addStretch()
         self._agregar_pestaña_con_scroll(tab, "21. Exportar / Reportes")
+
+    # ------------------------------------------------------------------
+    # MAPAS TEMÁTICOS -- capas estilizadas + láminas de impresión (PDF/
+    # PNG) a partir de resultados YA calculados en otras pestañas. Ver
+    # core/map_styling.py, core/print_layout.py, core/mapas_tematicos.py.
+    # Se construye por fases (morfometría/terreno primero) -- ver
+    # metadata.txt para el alcance exacto de cada versión.
+    # ------------------------------------------------------------------
+    def _build_tab_mapas_tematicos(self):
+        tab = QWidget()
+        v = QVBoxLayout(tab)
+        v.addWidget(QLabel(
+            "<b>Mapas Temáticos</b> — genera capas estilizadas (simbología + leyenda) y láminas de "
+            "impresión (PDF/PNG) listas para el expediente técnico, a partir de los resultados YA "
+            "calculados en las demás pestañas -- no vuelve a calcular nada. Las capas se organizan "
+            "en el panel de capas de QGIS bajo el grupo «Mapas Temáticos»."
+        ))
+
+        # ------------------------------------------------------------
+        # 1) Mapa Físico / Morfometría y Terreno
+        # ------------------------------------------------------------
+        gb_morfo = QGroupBox("1. Mapa Físico / Morfometría y Terreno")
+        v_morfo = QVBoxLayout(gb_morfo)
+        v_morfo.addWidget(QLabel(
+            "Requiere haber delimitado la cuenca (Pestaña 1). El orden de Strahler de la red de "
+            "drenaje se calcula aquí mismo (algoritmo ya existente en core/morphometry.py, ahora "
+            "conectado a una capa real por primera vez)."
+        ))
+        self.check_mt_hillshade = QCheckBox("Sombreado de relieve (hillshade)")
+        self.check_mt_hillshade.setChecked(True)
+        v_morfo.addWidget(self.check_mt_hillshade)
+        self.check_mt_pendientes = QCheckBox("Pendientes (%, clasificado)")
+        self.check_mt_pendientes.setChecked(True)
+        v_morfo.addWidget(self.check_mt_pendientes)
+        h_curvas = QHBoxLayout()
+        self.check_mt_curvas_nivel = QCheckBox("Curvas de nivel, intervalo:")
+        self.check_mt_curvas_nivel.setChecked(True)
+        h_curvas.addWidget(self.check_mt_curvas_nivel)
+        self.spin_mt_intervalo_curvas = QDoubleSpinBox()
+        self.spin_mt_intervalo_curvas.setRange(1.0, 500.0)
+        self.spin_mt_intervalo_curvas.setValue(25.0)
+        self.spin_mt_intervalo_curvas.setSuffix(" m")
+        h_curvas.addWidget(self.spin_mt_intervalo_curvas)
+        h_curvas.addStretch()
+        v_morfo.addLayout(h_curvas)
+        self.check_mt_cuenca = QCheckBox("Límite de cuenca")
+        self.check_mt_cuenca.setChecked(True)
+        v_morfo.addWidget(self.check_mt_cuenca)
+        self.check_mt_red_drenaje = QCheckBox("Red de drenaje (clasificada por orden de Strahler)")
+        self.check_mt_red_drenaje.setChecked(True)
+        v_morfo.addWidget(self.check_mt_red_drenaje)
+
+        btn_generar_morfo = QPushButton("🗺 Generar capas de Morfometría y Terreno")
+        btn_generar_morfo.clicked.connect(self._on_generar_mapa_morfometria)
+        v_morfo.addWidget(btn_generar_morfo)
+        self.lbl_estado_mt_morfo = QLabel("Estado: sin generar.")
+        self.lbl_estado_mt_morfo.setWordWrap(True)
+        v_morfo.addWidget(self.lbl_estado_mt_morfo)
+
+        h_export_morfo = QHBoxLayout()
+        btn_pdf_morfo = QPushButton("📄 Exportar lámina PDF")
+        btn_pdf_morfo.clicked.connect(lambda: self._on_exportar_layout_mapa_tematico("morfo", "pdf"))
+        h_export_morfo.addWidget(btn_pdf_morfo)
+        btn_png_morfo = QPushButton("🖼 Exportar PNG")
+        btn_png_morfo.clicked.connect(lambda: self._on_exportar_layout_mapa_tematico("morfo", "png"))
+        h_export_morfo.addWidget(btn_png_morfo)
+        v_morfo.addLayout(h_export_morfo)
+
+        v.addWidget(gb_morfo)
+        v.addStretch()
+
+        self._capas_mapas_tematicos = {}  # clave_sección -> [QgsMapLayer,...] ya estilizadas
+        self._agregar_pestaña_con_scroll(tab, "22. Mapas Temáticos")
+
+    def _on_generar_mapa_morfometria(self):
+        if self.cuenca_layer is None or self.dem_clip_path is None:
+            QMessageBox.warning(self, "Falta la delimitación",
+                                 "Delimite la cuenca primero (Pestaña 1).")
+            return
+        try:
+            context = QgsProcessingContext()
+            feedback = QgsProcessingFeedback()
+            capas = []
+            self.lbl_estado_mt_morfo.setText("Estado: generando capas...")
+            QApplication.processEvents()
+
+            if self.check_mt_hillshade.isChecked():
+                capa = mapas_tematicos.generar_hillshade(self.dem_clip_path, context, feedback)
+                capa.setName("Hillshade")
+                map_styling.estilizar_raster_pseudocolor(capa, rampa="Greys", n_clases=10, modo="Continuous")
+                map_styling.agregar_capa_a_grupo(capa, subgrupo="Morfometría y Terreno")
+                capas.append(capa)
+
+            if self.check_mt_pendientes.isChecked():
+                ruta_pendiente = delineation.calcular_pendiente(
+                    QgsRasterLayer(self.dem_clip_path, "dem_clip"), context, feedback)
+                capa = obtener_capa(ruta_pendiente, context, es_raster=True, nombre="Pendientes (%)")
+                map_styling.estilizar_raster_pseudocolor(capa, rampa="YlOrRd", n_clases=6)
+                map_styling.agregar_capa_a_grupo(capa, subgrupo="Morfometría y Terreno")
+                capas.append(capa)
+
+            if self.check_mt_curvas_nivel.isChecked():
+                capa = mapas_tematicos.generar_curvas_nivel(
+                    self.dem_clip_path, self.spin_mt_intervalo_curvas.value(), context, feedback)
+                capa.setName("Curvas de nivel")
+                map_styling.agregar_capa_a_grupo(capa, subgrupo="Morfometría y Terreno")
+                capas.append(capa)
+
+            if self.check_mt_cuenca.isChecked():
+                capa = self.cuenca_layer.clone()
+                capa.setName("Cuenca")
+                map_styling.agregar_capa_a_grupo(capa, subgrupo="Morfometría y Terreno")
+                capas.append(capa)
+
+            if self.check_mt_red_drenaje.isChecked():
+                if self.red_drenaje_layer is None:
+                    raise mapas_tematicos.MapasTematicosError(
+                        "no hay una red de drenaje delimitada (Pestaña 1) -- desmarque esta opción "
+                        "o delimite la cuenca primero.")
+                capa = mapas_tematicos.calcular_orden_strahler_en_capa(
+                    self.red_drenaje_layer, self.dem_clip_path)
+                n_ordenes = len({f["strahler"] for f in capa.getFeatures()})
+                map_styling.estilizar_vector_graduado(
+                    capa, "strahler", rampa="Blues", n_clases=max(min(n_ordenes, 5), 1), tipo_simbolo="line")
+                map_styling.agregar_capa_a_grupo(capa, subgrupo="Morfometría y Terreno")
+                capas.append(capa)
+
+            if not capas:
+                raise mapas_tematicos.MapasTematicosError(
+                    "no se marcó ninguna capa para generar -- active al menos una casilla.")
+
+            self._capas_mapas_tematicos["morfo"] = capas
+            self.lbl_estado_mt_morfo.setText(
+                f"Estado: {len(capas)} capa(s) generada(s) y agregada(s) al grupo «Mapas Temáticos "
+                f"> Morfometría y Terreno» del panel de capas."
+            )
+        except Exception as e:
+            self.lbl_estado_mt_morfo.setText("Estado: error (ver mensaje).")
+            QMessageBox.critical(self, "Error generando el mapa de morfometría", str(e))
+
+    _TITULOS_MAPAS_TEMATICOS = {
+        "morfo": "Mapa Físico — Morfometría y Terreno",
+    }
+
+    def _on_exportar_layout_mapa_tematico(self, clave: str, formato: str = "pdf"):
+        capas = self._capas_mapas_tematicos.get(clave) if hasattr(self, "_capas_mapas_tematicos") else None
+        if not capas:
+            QMessageBox.warning(self, "Nada que exportar",
+                                 "Genere primero las capas de esta sección (botón de arriba).")
+            return
+        titulo = self._TITULOS_MAPAS_TEMATICOS.get(clave, "Mapa Temático")
+        ruta, _ = QFileDialog.getSaveFileName(
+            self, "Exportar mapa temático", f"mapa_{clave}.{formato}",
+            f"{'PDF' if formato == 'pdf' else 'PNG'} (*.{formato})")
+        if not ruta:
+            return
+        try:
+            layout = print_layout.crear_layout_tematico(f"Mapa Temático — {clave}", capas, titulo=titulo)
+            if formato == "pdf":
+                print_layout.exportar_layout_pdf(layout, ruta)
+            else:
+                print_layout.exportar_layout_png(layout, ruta)
+            QMessageBox.information(self, "Mapa exportado", f"Lámina exportada a:\n{ruta}")
+        except (map_styling.MapStylingError, print_layout.PrintLayoutError) as e:
+            QMessageBox.critical(self, "Error exportando el mapa", str(e))
+        except Exception as e:
+            QMessageBox.critical(self, "Error inesperado exportando el mapa", str(e))
 
     # ------------------------------------------------------------------
     # TAB 6: Créditos

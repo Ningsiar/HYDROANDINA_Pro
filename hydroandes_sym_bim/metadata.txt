@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.4.0
+version=0.4.1
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,43 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.4.1: NUEVO -- Pestaña "Mapas Temáticos" (22), primera entrega
+      (Fase 0+1 de una serie), a pedido explícito del usuario:
+      "Mapas Temáticos: de todo hidrología hidráulica y más", con
+      salida tanto de capas estilizadas en el lienzo de QGIS como de
+      láminas de impresión PDF/PNG listas para expediente.
+      Infraestructura reutilizable para TODAS las fases futuras:
+      core/map_styling.py (pseudocolor ráster con rampas de
+      QgsStyle().defaultStyle(), graduado/categorizado vectorial,
+      organización en grupos del panel de capas) y
+      core/print_layout.py (QgsPrintLayout genérico: mapa + leyenda +
+      norte + escala + título, exportable a PDF/PNG, reemplaza el
+      layout si ya existe uno con el mismo nombre en vez de duplicar).
+      Fase 1 -- Mapa Físico / Morfometría y Terreno: hillshade,
+      pendientes clasificadas (reutiliza delineation.calcular_pendiente()),
+      curvas de nivel (gdal:contour), límite de cuenca, y la red de
+      drenaje clasificada por ORDEN DE STRAHLER -- el algoritmo
+      (morphometry.strahler_order()) ya existía en el plugin pero
+      nunca había estado conectado a ninguna capa real de la interfaz;
+      ahora lo está (nuevo core/mapas_tematicos.py:
+      calcular_orden_strahler_en_capa(), verificado con el ejemplo
+      textbook clásico de confluencia en Y).
+      Bug real encontrado y corregido en el camino: un ráster de valor
+      UNIFORME (mismo mín=máx en toda la banda -- caso legítimo, p.ej.
+      un hillshade sobre una superficie perfectamente plana) hacía
+      fallar la estilización con un error de "rango inválido" en vez
+      de renderizarse como un solo color; corregido en
+      core/map_styling.py.
+      Verificado: 22/22 (simbología + layout con PDF/PNG reales
+      exportados y verificados con contenido) + 13/13 (hillshade,
+      curvas de nivel, Strahler -- caso Y verificado a mano) + 17/17
+      (integración UI real en QGIS, con capas sintéticas de cuenca/
+      DEM/red de drenaje) -- 52/52 en total.
+      PENDIENTE (próximas fases, mismo pedido): Número de Curva/
+      suelos, precipitación y clima (Thiessen/isoyetas/estaciones),
+      peligro hidráulico (SWE2D) y estructuras, codificación
+      Pfafstetter. Isotermas quedó fuera de alcance (el plugin no
+      tiene ninguna fuente de datos de temperatura).
     - v0.4.0: NUEVO -- Mejora y automatización completa del Número de
       Curva (Pestaña 3), a pedido explícito del usuario (arquitectura
       técnica de 4 módulos: ingesta/recorte, clasificación de HSG,
