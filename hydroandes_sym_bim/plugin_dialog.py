@@ -17359,6 +17359,48 @@ class HydroAndinaProDialog(QDialog):
         v_precip.addLayout(h_export_precip)
 
         v.addWidget(gb_precip)
+
+        # ------------------------------------------------------------
+        # 4) Peligro Hidráulico (SWE2D) y Estructuras
+        # ------------------------------------------------------------
+        gb_peligro = QGroupBox("4. Peligro Hidráulico (SWE2D) y Estructuras")
+        v_peligro = QVBoxLayout(gb_peligro)
+        v_peligro.addWidget(QLabel(
+            "Reutiliza directamente los resultados YA calculados de la simulación 2D (Pestaña 8: "
+            "h_max, v_max) y las estructuras insertadas en ella -- no vuelve a simular nada."
+        ))
+        self.check_mt_calado_max = QCheckBox("Calado máximo (h_max)")
+        self.check_mt_calado_max.setChecked(True)
+        v_peligro.addWidget(self.check_mt_calado_max)
+        self.check_mt_velocidad_max = QCheckBox("Velocidad máxima (v_max)")
+        self.check_mt_velocidad_max.setChecked(True)
+        v_peligro.addWidget(self.check_mt_velocidad_max)
+        self.check_mt_peligrosidad = QCheckBox("Peligrosidad (h·v)")
+        self.check_mt_peligrosidad.setChecked(True)
+        v_peligro.addWidget(self.check_mt_peligrosidad)
+        self.check_mt_estructuras_2d = QCheckBox("Estructuras (líneas insertadas en la simulación 2D)")
+        self.check_mt_estructuras_2d.setChecked(True)
+        v_peligro.addWidget(self.check_mt_estructuras_2d)
+
+        btn_generar_peligro = QPushButton("🗺 Generar capas de Peligro Hidráulico y Estructuras")
+        btn_generar_peligro.clicked.connect(self._on_generar_mapa_peligro_estructuras)
+        v_peligro.addWidget(btn_generar_peligro)
+        self.lbl_estado_mt_peligro = QLabel("Estado: sin generar.")
+        self.lbl_estado_mt_peligro.setWordWrap(True)
+        v_peligro.addWidget(self.lbl_estado_mt_peligro)
+
+        h_export_peligro = QHBoxLayout()
+        btn_pdf_peligro = QPushButton("📄 Exportar lámina PDF")
+        btn_pdf_peligro.clicked.connect(
+            lambda: self._on_exportar_layout_mapa_tematico("peligro_estructuras", "pdf"))
+        h_export_peligro.addWidget(btn_pdf_peligro)
+        btn_png_peligro = QPushButton("🖼 Exportar PNG")
+        btn_png_peligro.clicked.connect(
+            lambda: self._on_exportar_layout_mapa_tematico("peligro_estructuras", "png"))
+        h_export_peligro.addWidget(btn_png_peligro)
+        v_peligro.addLayout(h_export_peligro)
+
+        v.addWidget(gb_peligro)
         v.addStretch()
 
         self._capas_mapas_tematicos = {}  # clave_sección -> [QgsMapLayer,...] ya estilizadas
@@ -17561,10 +17603,85 @@ class HydroAndinaProDialog(QDialog):
             self.lbl_estado_mt_precip.setText("Estado: error (ver mensaje).")
             QMessageBox.critical(self, "Error inesperado generando el mapa de precipitación", str(e))
 
+    def _on_generar_mapa_peligro_estructuras(self):
+        simulador = getattr(self, "simulador_2d", None)
+        dominio = getattr(self, "dominio_2d", None)
+        if simulador is None or dominio is None:
+            QMessageBox.warning(
+                self, "Falta la simulación 2D",
+                "Ejecute primero una simulación bidimensional (Pestaña 8) -- esta pestaña reutiliza "
+                "directamente sus resultados de calado/velocidad máximos, sin volver a simular.")
+            return
+        try:
+            context = QgsProcessingContext()
+            capas = []
+            self.lbl_estado_mt_peligro.setText("Estado: generando capas...")
+            QApplication.processEvents()
+
+            carpeta_tmp = tempfile.mkdtemp(prefix="hydroandes_mt_peligro_")
+            dx, dy = dominio["dx"], dominio["dy"]
+            x_min, y_max = dominio["x_min"], dominio["y_max"]
+            wkt = dominio.get("wkt")
+
+            if self.check_mt_calado_max.isChecked():
+                ruta = os.path.join(carpeta_tmp, "calado_max.tif")
+                mesh_export.exportar_geotiff(ruta, simulador.h_max, dx, dy, x_min, y_max, wkt_crs=wkt)
+                capa = obtener_capa(ruta, context, es_raster=True, nombre="Calado máximo (m)")
+                map_styling.estilizar_raster_pseudocolor(capa, rampa="Blues", n_clases=8)
+                map_styling.agregar_capa_a_grupo(capa, subgrupo="Peligro Hidráulico y Estructuras")
+                capas.append(capa)
+
+            if self.check_mt_velocidad_max.isChecked():
+                ruta = os.path.join(carpeta_tmp, "velocidad_max.tif")
+                mesh_export.exportar_geotiff(ruta, simulador.v_max, dx, dy, x_min, y_max, wkt_crs=wkt)
+                capa = obtener_capa(ruta, context, es_raster=True, nombre="Velocidad máxima (m/s)")
+                map_styling.estilizar_raster_pseudocolor(capa, rampa="YlOrRd", n_clases=8)
+                map_styling.agregar_capa_a_grupo(capa, subgrupo="Peligro Hidráulico y Estructuras")
+                capas.append(capa)
+
+            if self.check_mt_peligrosidad.isChecked():
+                ruta = os.path.join(carpeta_tmp, "peligrosidad.tif")
+                mesh_export.exportar_geotiff(ruta, simulador.peligrosidad(), dx, dy, x_min, y_max, wkt_crs=wkt)
+                capa = obtener_capa(ruta, context, es_raster=True, nombre="Peligrosidad (h·v, m²/s)")
+                map_styling.estilizar_raster_pseudocolor(capa, rampa="Reds", n_clases=8)
+                map_styling.agregar_capa_a_grupo(capa, subgrupo="Peligro Hidráulico y Estructuras")
+                capas.append(capa)
+
+            if self.check_mt_estructuras_2d.isChecked():
+                capa_origen = (self.capa_estructuras_2d
+                                if self._capa_sigue_en_proyecto(self.capa_estructuras_2d) else None)
+                if capa_origen is None or capa_origen.featureCount() == 0:
+                    raise mapas_tematicos.MapasTematicosError(
+                        "no hay estructuras 2D insertadas en la simulación (Pestaña 8) -- desmarque "
+                        "esta opción o inserte al menos una estructura.")
+                capa_estructuras = capa_origen.clone()
+                capa_estructuras.setName("Estructuras 2D")
+                map_styling.estilizar_vector_categorizado(capa_estructuras, "tipo")
+                map_styling.agregar_capa_a_grupo(capa_estructuras, subgrupo="Peligro Hidráulico y Estructuras")
+                capas.append(capa_estructuras)
+
+            if not capas:
+                raise mapas_tematicos.MapasTematicosError(
+                    "no se marcó ninguna capa para generar -- active al menos una casilla.")
+
+            self._capas_mapas_tematicos["peligro_estructuras"] = capas
+            self.lbl_estado_mt_peligro.setText(
+                f"Estado: {len(capas)} capa(s) generada(s) y agregada(s) al grupo «Mapas Temáticos "
+                f"> Peligro Hidráulico y Estructuras» del panel de capas."
+            )
+        except (mapas_tematicos.MapasTematicosError, map_styling.MapStylingError,
+                mesh_export.MeshExportError) as e:
+            self.lbl_estado_mt_peligro.setText("Estado: error (ver mensaje).")
+            QMessageBox.warning(self, "No se pudo generar el mapa de peligro hidráulico", str(e))
+        except Exception as e:
+            self.lbl_estado_mt_peligro.setText("Estado: error (ver mensaje).")
+            QMessageBox.critical(self, "Error inesperado generando el mapa de peligro hidráulico", str(e))
+
     _TITULOS_MAPAS_TEMATICOS = {
         "morfo": "Mapa Físico — Morfometría y Terreno",
         "cn_suelos": "Número de Curva y Suelos",
         "precipitacion": "Precipitación y Clima",
+        "peligro_estructuras": "Peligro Hidráulico y Estructuras",
     }
 
     def _on_exportar_layout_mapa_tematico(self, clave: str, formato: str = "pdf"):

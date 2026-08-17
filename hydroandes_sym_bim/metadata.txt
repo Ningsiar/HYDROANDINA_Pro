@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.4.3
+version=0.4.4
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,31 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.4.4: NUEVO -- Pestaña "Mapas Temáticos", Fase 4 de la serie:
+      Peligro Hidráulico (SWE2D) y Estructuras. Reutiliza directamente
+      los resultados YA calculados de la simulación bidimensional
+      (Pestaña 8: self.simulador_2d.h_max/v_max/peligrosidad(),
+      self.dominio_2d, self.capa_estructuras_2d) -- no vuelve a
+      simular nada, mediante core/mesh_export.py::exportar_geotiff()
+      (ya existente, usado hasta ahora solo por la exportación manual
+      de la Pestaña 8, ahora reutilizado también aquí).
+      Nuevas 4 capas en la pestaña (checkboxes independientes): calado
+      máximo y velocidad máxima (pseudocolor continuo, rampas Blues/
+      YlOrRd), peligrosidad h·v (pseudocolor Reds), y las estructuras
+      insertadas en la simulación (categorizada por tipo) --
+      organizadas en el grupo «Mapas Temáticos > Peligro Hidráulico y
+      Estructuras», con exportación PDF/PNG. Advertencias claras si
+      no hay simulación 2D ejecutada o si no hay estructuras
+      insertadas.
+      Verificado: 23/23 (integración UI real en QGIS headless, con un
+      SimuladorSwe2D sintético y una capa de estructuras sintética;
+      los 3 GeoTIFF exportados -- calado, velocidad, peligrosidad --
+      verificados con `np.allclose()` EXACTAMENTE contra los arrays
+      h_max/v_max/h_max·v_max asignados a mano con un gradiente
+      conocido, más los 2 casos de advertencia sin simulación/sin
+      estructuras).
+      PENDIENTE (próxima fase, mismo pedido): codificación
+      Pfafstetter de subcuencas.
     - v0.4.3: NUEVO -- Pestaña "Mapas Temáticos", Fase 3 de la serie:
       Precipitación y Clima. Reutiliza directamente las estaciones YA
       ingresadas por el usuario en «Módulos Avanzados (Beta) >
