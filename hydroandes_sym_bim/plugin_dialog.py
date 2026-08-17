@@ -7962,6 +7962,43 @@ class HydroAndinaProDialog(QDialog):
             html += f"<p><b>{nombre}</b><br>" + " &nbsp;|&nbsp; ".join(partes) + "</p><hr>"
         self.texto_resumen_hidraulica.setHtml(html)
         self._actualizar_tabla_comparativa_hidraulica()
+        self._actualizar_bim_automatico()
+
+    def _actualizar_bim_automatico(self):
+        """Refresca el render 3D del Módulo BIM (Pestaña 8b) con la
+        estructura que ACABA de calcularse -- para que no haga falta ir
+        a la pestaña BIM y volver a generar el modelo a mano cada vez
+        que se recalcula algo en la Pestaña 7. self.resultados_hidraulica_drenaje
+        conserva el orden de inserción (dict de Python 3.7+), así que su
+        ÚLTIMA clave es siempre la estructura recién calculada -- no
+        hace falta que cada uno de los 7 handlers de cálculo avise por
+        separado, con el riesgo de que alguno se quede desactualizado.
+
+        Protegido a propósito: un fallo del render 3D (datos aún
+        incompletos, tipo sin soporte 3D como los resultados de
+        caudales) NUNCA debe interrumpir el cálculo hidráulico que lo
+        disparó -- es un plus visual, no el resultado principal."""
+        if not self.resultados_hidraulica_drenaje or not hasattr(self, "canvas_bim_3d"):
+            return
+        nombre_estructura = next(reversed(self.resultados_hidraulica_drenaje))
+        datos = self.resultados_hidraulica_drenaje[nombre_estructura]
+        if datos.get("tipo") not in self._TIPOS_ESTRUCTURALES_BIM_P7:
+            return
+        try:
+            if hasattr(self, "combo_bim_fuente") and self.combo_bim_fuente.currentIndex() == 0:
+                self._on_actualizar_lista_bim()
+                idx = self.combo_bim_estructura.findText(nombre_estructura)
+                if idx >= 0:
+                    self.combo_bim_estructura.setCurrentIndex(idx)
+            self.canvas_bim_3d.graficar_desde_pestana7(
+                nombre_estructura, datos, self.spin_bim_longitud.value())
+            self.lbl_estado_bim.setText(
+                f"Estado: modelo 3D actualizado automáticamente -- «{nombre_estructura}» "
+                "(recién calculada en la Pestaña 7).")
+        except GeometriaNoDisponibleError:
+            pass  # datos insuficientes para el render 3D de este tipo -- no es un error
+        except Exception:
+            pass  # el render 3D es un plus visual; nunca debe interrumpir el flujo de cálculo
 
     def _actualizar_tabla_comparativa_hidraulica(self):
         """Tabla comparativa (una fila por estructura calculada en la
@@ -10557,10 +10594,12 @@ class HydroAndinaProDialog(QDialog):
         # Metrados (fase 2 del módulo BIM) -- ver core/bim_metrados.py
         # para el alcance y las limitaciones exactas de cada cantidad.
         # ------------------------------------------------------------
-        v.addWidget(QLabel(
+        _lbl_wrap_1 = QLabel(
             "<hr><b>Metrados (cantidades preliminares)</b> — a partir de la misma geometría del "
             "render 3D de arriba. El espesor de muro/losa y la cuantía de acero son ASUNCIONES "
-            "suyas (este plugin no hace diseño estructural) -- ajústelas antes de generar."))
+            "suyas (este plugin no hace diseño estructural) -- ajústelas antes de generar.")
+        _lbl_wrap_1.setWordWrap(True)
+        v.addWidget(_lbl_wrap_1)
 
         f_metrados = QFormLayout()
         f_metrados.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
@@ -10601,14 +10640,16 @@ class HydroAndinaProDialog(QDialog):
         # y core/reinforced_concrete_e060.py para el alcance EXACTO y
         # las limitaciones de este cálculo.
         # ------------------------------------------------------------
-        v.addWidget(QLabel(
+        _lbl_wrap_2 = QLabel(
             "<hr><b>Diseño de refuerzo estructural (NTP E.060 / E.030)</b> — diseño simplificado "
             "por flexión del muro/losa bajo empuje de agua y, si tiene relleno posterior, empuje "
             "de tierra (con incremento sísmico Mononobe-Okabe opcional). Es un cálculo "
             "PRELIMINAR de apoyo -- NO reemplaza la revisión de un ingeniero estructural/"
             "geotécnico colegiado ni cubre cimentación, juntas o un análisis sísmico dinámico "
             "completo. El acero mostrado aquí ya reemplaza a la cuantía estimada de la sección "
-            "de metrados de arriba una vez calculado."))
+            "de metrados de arriba una vez calculado.")
+        _lbl_wrap_2.setWordWrap(True)
+        v.addWidget(_lbl_wrap_2)
 
         f_refuerzo = QFormLayout()
         f_refuerzo.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
@@ -10716,7 +10757,7 @@ class HydroAndinaProDialog(QDialog):
         # -- puntera/pantalla/talón), no ligada a los canales/
         # alcantarillas de este módulo. Ver core/estabilidad_muros.py.
         # ------------------------------------------------------------
-        v.addWidget(QLabel(
+        _lbl_wrap_3 = QLabel(
             "<hr><b>Estabilidad de Muros de Contención en Voladizo</b> — verifica volteo, "
             "deslizamiento, excentricidad y capacidad portante de un muro con zapata corrida "
             "(puntera + pantalla + talón), independiente de las estructuras de arriba. Método de "
@@ -10724,7 +10765,9 @@ class HydroAndinaProDialog(QDialog):
             "capacidad portante Terzaghi-Bowles (E.050 Art. 20-21). Cálculo PRELIMINAR -- no "
             "reemplaza el Estudio de Mecánica de Suelos ni el criterio de un ingeniero estructural/"
             "geotécnico colegiado. Verifique especialmente el DRENAJE real del muro (un lloradero "
-            "tapado duplica el empuje de diseño -- causa #1 de fallas reales)."))
+            "tapado duplica el empuje de diseño -- causa #1 de fallas reales).")
+        _lbl_wrap_3.setWordWrap(True)
+        v.addWidget(_lbl_wrap_3)
 
         f_geo_muro = QFormLayout()
         f_geo_muro.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
@@ -10858,14 +10901,16 @@ class HydroAndinaProDialog(QDialog):
         # (columna aislada bajo carga axial), no ligada al muro de
         # arriba. Ver core/zapatas.py.
         # ------------------------------------------------------------
-        v.addWidget(QLabel(
+        _lbl_wrap_4 = QLabel(
             "<hr><b>Diseño de Zapata Aislada (columna)</b> — dimensiona en planta con la carga de "
             "SERVICIO contra la presión admisible (E.050 Art. 21), y verifica el peralte y el acero "
             "por RESISTENCIA con la carga amplificada Pu (E.060 Cap. 15: cortante en una dirección, "
             "punzonamiento, momento en la cara de la columna, transferencia de fuerzas por "
             "aplastamiento/dowels). Alcance: zapata CUADRADA bajo carga AXIAL centrada (columna sin "
             "momento significativo) -- no cubre zapatas combinadas/medianeras ni plateas. Cálculo "
-            "PRELIMINAR -- no reemplaza el criterio de un ingeniero estructural/geotécnico colegiado."))
+            "PRELIMINAR -- no reemplaza el criterio de un ingeniero estructural/geotécnico colegiado.")
+        _lbl_wrap_4.setWordWrap(True)
+        v.addWidget(_lbl_wrap_4)
 
         f_carga_zap = QFormLayout()
         f_carga_zap.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
@@ -10990,7 +11035,7 @@ class HydroAndinaProDialog(QDialog):
         # real para Revit/Navisworks/ArchiCAD/Tekla. Ver
         # core/bim_ifc.py para el alcance exacto.
         # ------------------------------------------------------------
-        v.addWidget(QLabel(
+        _lbl_wrap_5 = QLabel(
             "<hr><b>Exportar a IFC</b> — genera un archivo .ifc (Industry Foundation Classes) con "
             "la geometría 3D real de arriba MÁS los metrados como propiedades del elemento "
             "(Pset_HydroAndesMetrados). Si ya calculó el «Diseño de refuerzo» de esta misma "
@@ -10998,7 +11043,9 @@ class HydroAndinaProDialog(QDialog):
             "visibles en el modelo, no solo como texto) más sus cantidades (Pset_HydroAndesRefuerzo). "
             "Ábralo directamente en Revit (Insertar → Vincular IFC), Navisworks, ArchiCAD, Tekla o "
             "BIM Vision. No existe forma de generar un .rvt nativo de Revit fuera del propio Revit "
-            "-- IFC es el estándar abierto para esto."))
+            "-- IFC es el estándar abierto para esto.")
+        _lbl_wrap_5.setWordWrap(True)
+        v.addWidget(_lbl_wrap_5)
         btn_ifc = QPushButton("📦 Exportar a IFC...")
         btn_ifc.clicked.connect(self._on_exportar_ifc_bim)
         v.addWidget(btn_ifc)
@@ -11750,7 +11797,7 @@ class HydroAndinaProDialog(QDialog):
         # portátil (Presupuesto, Cronograma, Fórmula Polinómica,
         # Estabilidad de Muros, Zapatas). Ver core/proyecto_io.py.
         # ------------------------------------------------------------
-        v.addWidget(QLabel(
+        _lbl_wrap_6 = QLabel(
             "<hr><b>💾 Guardar / Cargar Proyecto Completo</b> — guarda en UN archivo .json portátil "
             "el estado de esta pestaña (Presupuesto, Fórmula Polinómica), Cronograma, y los "
             "calculadores de Estabilidad de Muros y Diseño de Zapatas (Pestaña 8b) -- para "
@@ -11758,7 +11805,9 @@ class HydroAndinaProDialog(QDialog):
             "Hidrología/Hidráulica (se re-derivan de un MDE/CSV/NetCDF externo que usted vuelve a "
             "cargar directamente). El archivo es texto plano, revisable a mano; para tenerlo en la "
             "nube, guárdelo dentro de una carpeta ya sincronizada por su cliente de Drive/OneDrive "
-            "(este plugin no pide credenciales de ninguna nube)."))
+            "(este plugin no pide credenciales de ninguna nube).")
+        _lbl_wrap_6.setWordWrap(True)
+        v.addWidget(_lbl_wrap_6)
         f_proyecto_io = QHBoxLayout()
         btn_guardar_proyecto = QPushButton("💾 Guardar Proyecto...")
         btn_guardar_proyecto.clicked.connect(self._on_guardar_proyecto)
@@ -11774,7 +11823,7 @@ class HydroAndinaProDialog(QDialog):
         # ------------------------------------------------------------
         # 0) Cargar ejemplo real de referencia (Cajamarca, dic-2025)
         # ------------------------------------------------------------
-        v.addWidget(QLabel(
+        _lbl_wrap_7 = QLabel(
             "<hr><b>0. Ejemplo real de referencia (opcional)</b> — carga de una sola vez la "
             "librería de insumos y las partidas (CON su APU ya armado) de un presupuesto de obra "
             "vial REAL (Cajamarca, dic-2025) que el usuario aportó como referencia. Cada partida "
@@ -11782,7 +11831,9 @@ class HydroAndinaProDialog(QDialog):
             "real (±1%) -- NO es una tarifa oficial CAPECO/Revista Costos, es el presupuesto real "
             "de UN proyecto específico: útil como ejemplo/punto de partida, verifique vigencia de "
             "precios/rendimientos antes de usarlo en otro proyecto. REEMPLAZA el contenido actual "
-            "de las secciones 1 y 2."))
+            "de las secciones 1 y 2.")
+        _lbl_wrap_7.setWordWrap(True)
+        v.addWidget(_lbl_wrap_7)
         btn_cargar_referencia = QPushButton("📂 Cargar ejemplo de referencia (Cajamarca, dic-2025)")
         btn_cargar_referencia.clicked.connect(self._on_cargar_referencia_apu)
         v.addWidget(btn_cargar_referencia)
@@ -11793,10 +11844,12 @@ class HydroAndinaProDialog(QDialog):
         # ------------------------------------------------------------
         # 1) Librería de insumos
         # ------------------------------------------------------------
-        v.addWidget(QLabel(
+        _lbl_wrap_8 = QLabel(
             "<hr><b>1. Librería de insumos</b> — recursos reutilizables entre partidas. Tipo debe "
             f"ser uno de: {', '.join(presupuesto.TipoInsumo.TODOS)}. Índice INEI es opcional (solo "
-            "hace falta para la Fórmula Polinómica más abajo)."))
+            "hace falta para la Fórmula Polinómica más abajo).")
+        _lbl_wrap_8.setWordWrap(True)
+        v.addWidget(_lbl_wrap_8)
         self.tabla_insumos_lib = TablaPegable(8, len(self._COLS_INSUMOS_LIB))
         self.tabla_insumos_lib.setHorizontalHeaderLabels(list(self._COLS_INSUMOS_LIB))
         aplicar_columna_elastica(self.tabla_insumos_lib, 1)
@@ -11816,10 +11869,12 @@ class HydroAndinaProDialog(QDialog):
         # ------------------------------------------------------------
         # 2) Partidas del presupuesto
         # ------------------------------------------------------------
-        v.addWidget(QLabel(
+        _lbl_wrap_9 = QLabel(
             "<hr><b>2. Partidas del presupuesto</b> — código, agrupación (Título > Subtítulo, solo "
             "para organizar -- no afecta el cálculo), descripción, unidad y metrado. El precio "
-            "unitario de cada partida sale del APU que le asigne en la sección 3."))
+            "unitario de cada partida sale del APU que le asigne en la sección 3.")
+        _lbl_wrap_9.setWordWrap(True)
+        v.addWidget(_lbl_wrap_9)
         self.tabla_partidas_pres = TablaPegable(6, len(self._COLS_PARTIDAS))
         self.tabla_partidas_pres.setHorizontalHeaderLabels(list(self._COLS_PARTIDAS))
         aplicar_columna_elastica(self.tabla_partidas_pres, 2)
@@ -11839,14 +11894,16 @@ class HydroAndinaProDialog(QDialog):
         # ------------------------------------------------------------
         # 2b) Importar cantidades desde el Módulo BIM (fase 3)
         # ------------------------------------------------------------
-        v.addWidget(QLabel(
+        _lbl_wrap_10 = QLabel(
             "<hr><b>2b. Importar cantidades desde el Módulo BIM</b> — trae como partidas (con "
             "metrado ya calculado, unidad correcta y código estable) el concreto, encofrado, "
             "excavación y acero de la estructura ACTUALMENTE seleccionada en la Pestaña «8b. Módulo "
             "BIM (3D)» (con sus metrados ya generados ahí). Si ya calculó el «Diseño de refuerzo» "
             "(E.060/E.030) de esa misma estructura, el acero importado usa ese peso real en vez de "
             "la cuantía estimada. Reimportar la misma estructura ACTUALIZA sus partidas (mismo "
-            "código), no las duplica -- después debe asignarles su APU en la sección 3."))
+            "código), no las duplica -- después debe asignarles su APU en la sección 3.")
+        _lbl_wrap_10.setWordWrap(True)
+        v.addWidget(_lbl_wrap_10)
         btn_importar_bim = QPushButton("📥 Importar partida(s) desde la estructura BIM seleccionada")
         btn_importar_bim.clicked.connect(self._on_importar_partida_bim)
         v.addWidget(btn_importar_bim)
@@ -11857,12 +11914,14 @@ class HydroAndinaProDialog(QDialog):
         # ------------------------------------------------------------
         # 3) Editor de APU (por partida)
         # ------------------------------------------------------------
-        v.addWidget(QLabel(
+        _lbl_wrap_11 = QLabel(
             "<hr><b>3. Análisis de Precios Unitarios (APU)</b> — elija una partida (ya actualizada "
             "en la sección 2) y arme su APU con insumos de la librería (sección 1), referenciados "
             "por Código Insumo. Mano de Obra/Equipos: llene Cuadrilla + Rendimiento (la cantidad en "
             "hh/hm se calcula sola). Materiales/Herramienta/Subcontratos: llene Cantidad directa "
-            "(+ Desperdicio % opcional)."))
+            "(+ Desperdicio % opcional).")
+        _lbl_wrap_11.setWordWrap(True)
+        v.addWidget(_lbl_wrap_11)
         f_apu = QFormLayout()
         f_apu.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
         self.combo_apu_partida = QComboBox()
@@ -11889,9 +11948,11 @@ class HydroAndinaProDialog(QDialog):
         # ------------------------------------------------------------
         # 4) Resumen del presupuesto
         # ------------------------------------------------------------
-        v.addWidget(QLabel(
+        _lbl_wrap_12 = QLabel(
             "<hr><b>4. Resumen del presupuesto</b> — Costo Directo (suma de partidas con APU "
-            "guardado) + Gastos Generales + Utilidad = Subtotal + IGV = Valor Referencial."))
+            "guardado) + Gastos Generales + Utilidad = Subtotal + IGV = Valor Referencial.")
+        _lbl_wrap_12.setWordWrap(True)
+        v.addWidget(_lbl_wrap_12)
         f_resumen = QFormLayout()
         f_resumen.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
         self.spin_pres_gg = QDoubleSpinBox()
@@ -11930,7 +11991,7 @@ class HydroAndinaProDialog(QDialog):
         # genérica (punto de partida para Delphin Xpress u otro
         # software). Ver core/exportar_presupuesto.py.
         # ------------------------------------------------------------
-        v.addWidget(QLabel(
+        _lbl_wrap_13 = QLabel(
             "<hr><b>4b. Exportar Presupuesto</b> — requiere haber calculado el presupuesto arriba. "
             "«Exportar a S10» genera un .xlsx de 3 hojas con el MISMO layout que un reporte real de "
             "S10 Presupuestos (Presupuesto agrupado por Título/Subtítulo, APU detallado por "
@@ -11939,7 +12000,9 @@ class HydroAndinaProDialog(QDialog):
             "misma apariencia. «Exportar formato genérico» es una plantilla tabular simple, punto de "
             "partida para Delphin Xpress u otro software -- <u>sin verificar contra un archivo real "
             "de Delphin Xpress</u> (no se contó con una muestra); si tiene una exportación real de "
-            "ese software, se puede ajustar para que coincida exactamente."))
+            "ese software, se puede ajustar para que coincida exactamente.")
+        _lbl_wrap_13.setWordWrap(True)
+        v.addWidget(_lbl_wrap_13)
         self.txt_pres_obra = QLineEdit()
         self.txt_pres_obra.setPlaceholderText("Nombre de la obra (opcional, solo para el reporte S10)")
         v.addWidget(self.txt_pres_obra)
@@ -11966,10 +12029,12 @@ class HydroAndinaProDialog(QDialog):
         # ------------------------------------------------------------
         # 5) Relación de Insumos
         # ------------------------------------------------------------
-        v.addWidget(QLabel(
+        _lbl_wrap_14 = QLabel(
             "<hr><b>5. Relación de Insumos</b> — consolida TODOS los insumos de TODAS las partidas "
             "con APU (cantidad × metrado) en una sola lista de compra. Alimentará el cronograma de "
-            "adquisición de materiales del futuro Módulo de Programación y Cronogramas."))
+            "adquisición de materiales del futuro Módulo de Programación y Cronogramas.")
+        _lbl_wrap_14.setWordWrap(True)
+        v.addWidget(_lbl_wrap_14)
         btn_relacion_insumos = QPushButton("📋 Generar relación de insumos")
         btn_relacion_insumos.clicked.connect(self._on_generar_relacion_insumos_pres)
         v.addWidget(btn_relacion_insumos)
@@ -11984,14 +12049,18 @@ class HydroAndinaProDialog(QDialog):
         # 5b) Fórmula Polinómica de reajuste (D.S. 011-79-VC) -- ver
         # core/formula_polinomica.py para el alcance exacto.
         # ------------------------------------------------------------
-        v.addWidget(QLabel(
+        _lbl_wrap_15 = QLabel(
             "<hr><b>5b. Fórmula Polinómica de reajuste</b> — reajuste de precios para contratos "
             "de obra pública (D.S. 011-79-VC). Requiere la Relación de Insumos ya generada "
             "(sección 5) y que cada insumo tenga su Índice Unificado INEI asignado (columna "
-            "«Índice INEI» de la sección 1)."))
-        v.addWidget(QLabel(
+            "«Índice INEI» de la sección 1).")
+        _lbl_wrap_15.setWordWrap(True)
+        v.addWidget(_lbl_wrap_15)
+        _lbl_wrap_16 = QLabel(
             "<b>Paso 1 -- Participación por índice</b> (agrupamiento preliminar): % del costo "
-            "directo que corresponde a cada índice INEI, para decidir cómo agruparlos en monomios."))
+            "directo que corresponde a cada índice INEI, para decidir cómo agruparlos en monomios.")
+        _lbl_wrap_16.setWordWrap(True)
+        v.addWidget(_lbl_wrap_16)
         btn_participacion_indice = QPushButton("📊 Calcular participación por índice INEI")
         btn_participacion_indice.clicked.connect(self._on_calcular_participacion_indice)
         v.addWidget(btn_participacion_indice)
@@ -12003,11 +12072,13 @@ class HydroAndinaProDialog(QDialog):
         aplicar_columna_elastica(self.tabla_participacion_indice, 1)
         v.addWidget(self.tabla_participacion_indice)
 
-        v.addWidget(QLabel(
+        _lbl_wrap_17 = QLabel(
             "<b>Paso 2 -- Armar la fórmula final</b> (agrupamiento en monomios, máximo 8, "
             "requiere su criterio técnico-económico -- qué índice pequeño se agrupa con cuál "
             "mayor, según el Paso 1): Símbolo | Factor (Σ debe dar 1.000) | Componentes "
-            "(«índice:peso%;índice:peso%», el peso de los componentes de UN monomio debe sumar 100)."))
+            "(«índice:peso%;índice:peso%», el peso de los componentes de UN monomio debe sumar 100).")
+        _lbl_wrap_17.setWordWrap(True)
+        v.addWidget(_lbl_wrap_17)
         self.tabla_monomios_formula = TablaPegable(6, 3)
         self.tabla_monomios_formula.setHorizontalHeaderLabels(["Símbolo", "Factor", "Componentes (índice:peso%;...)"])
         v.addWidget(self.tabla_monomios_formula)
@@ -12018,11 +12089,13 @@ class HydroAndinaProDialog(QDialog):
         self.lbl_estado_formula_polinomica.setWordWrap(True)
         v.addWidget(self.lbl_estado_formula_polinomica)
 
-        v.addWidget(QLabel(
+        _lbl_wrap_18 = QLabel(
             "<b>Paso 3 -- Reajustar una valorización</b>: complete la razón Ir/Io (índice del mes "
             "de la valorización sobre el índice del mes base, del Boletín de Índices Unificados "
             "de Precios de la Construcción del INEI vigente para cada mes) de cada índice de la "
-            "fórmula -- 1.0 = sin variación."))
+            "fórmula -- 1.0 = sin variación.")
+        _lbl_wrap_18.setWordWrap(True)
+        v.addWidget(_lbl_wrap_18)
         self.tabla_razones_indices = TablaPegable(0, 3)
         self.tabla_razones_indices.setHorizontalHeaderLabels(["Índice INEI", "Descripción", "Ir/Io"])
         v.addWidget(self.tabla_razones_indices)
@@ -12048,12 +12121,14 @@ class HydroAndinaProDialog(QDialog):
         # Técnico, Gestión del Proyecto, Control Concurrente -- ver
         # core/presupuesto.py::resumen_inversion_publica().
         # ------------------------------------------------------------
-        v.addWidget(QLabel(
+        _lbl_wrap_19 = QLabel(
             "<hr><b>6. Inversión pública (opcional)</b> — para obras públicas peruanas: cadena de "
             "costos por ENCIMA del Valor Referencial de la sección 4 (Supervisión y Liquidación, "
             "Expediente Técnico, Gestión del Proyecto, Control Concurrente de Obra). El % de "
             "Control Concurrente NO tiene una tasa única fijada por norma -- verifíquelo contra la "
-            "Contraloría vigente para su caso."))
+            "Contraloría vigente para su caso.")
+        _lbl_wrap_19.setWordWrap(True)
+        v.addWidget(_lbl_wrap_19)
         f_inv = QFormLayout()
         f_inv.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
         self.spin_pres_supervision = QDoubleSpinBox()
@@ -12736,11 +12811,13 @@ class HydroAndinaProDialog(QDialog):
         # ------------------------------------------------------------
         # 1) Actividades
         # ------------------------------------------------------------
-        v.addWidget(QLabel(
+        _lbl_wrap_20 = QLabel(
             "<hr><b>1. Actividades</b> — código, nombre, duración en días, y sus predecesoras "
             "(códigos separados por «;»). El lag es opcional -- días de espera tras terminar cada "
             "predecesora (mismo orden, «;» separado; negativo = adelanto). Deje ambas columnas "
-            "vacías si la actividad no tiene predecesoras."))
+            "vacías si la actividad no tiene predecesoras.")
+        _lbl_wrap_20.setWordWrap(True)
+        v.addWidget(_lbl_wrap_20)
         self.tabla_actividades_cron = TablaPegable(8, len(self._COLS_ACTIVIDADES_CRON))
         self.tabla_actividades_cron.setHorizontalHeaderLabels(list(self._COLS_ACTIVIDADES_CRON))
         aplicar_columna_elastica(self.tabla_actividades_cron, 1)
@@ -12761,14 +12838,16 @@ class HydroAndinaProDialog(QDialog):
         # ------------------------------------------------------------
         # 1b) Generar actividades desde el Presupuesto
         # ------------------------------------------------------------
-        v.addWidget(QLabel(
+        _lbl_wrap_21 = QLabel(
             "<hr><b>1b. Generar actividades desde el Presupuesto</b> — trae una actividad por "
             "cada partida ya actualizada en la Pestaña 9 (mismo código, para poder enlazar el "
             "cronograma de adquisición de materiales más abajo). Duración inicial = 1 día para "
             "TODAS -- este plugin no fabrica un rendimiento por partida que no tiene de forma "
             "confiable (ver Módulo Presupuesto). AJÚSTELA (puede pegar duraciones reales desde "
             "Excel) y agregue las precedencias que correspondan antes de calcular el CPM. "
-            "REEMPLAZA el contenido actual de la sección 1."))
+            "REEMPLAZA el contenido actual de la sección 1.")
+        _lbl_wrap_21.setWordWrap(True)
+        v.addWidget(_lbl_wrap_21)
         btn_generar_desde_presupuesto = QPushButton("📥 Generar actividades desde el Presupuesto (Pestaña 9)")
         btn_generar_desde_presupuesto.clicked.connect(self._on_generar_actividades_desde_presupuesto)
         v.addWidget(btn_generar_desde_presupuesto)
@@ -12776,7 +12855,7 @@ class HydroAndinaProDialog(QDialog):
         # ------------------------------------------------------------
         # 1c) Importar cronograma real de Microsoft Project (XML MSPDI)
         # ------------------------------------------------------------
-        v.addWidget(QLabel(
+        _lbl_wrap_22 = QLabel(
             "<hr><b>1c. Importar cronograma real (Microsoft Project)</b> — carga un archivo "
             ".xml exportado de MS Project (Archivo → Guardar como... → tipo XML). Se importan las "
             "tareas HOJA (los «resúmenes»/títulos de WBS no son actividades ejecutables) con su "
@@ -12784,7 +12863,9 @@ class HydroAndinaProDialog(QDialog):
             "este plugin (botón «Calcular CPM») pueden diferir de las de MS Project -- ese "
             "considera calendarios, restricciones y nivelación de recursos que este importador NO "
             "reproduce; útil para auditar la red lógica (duración + predecesoras), no como "
-            "reemplazo exacto. REEMPLAZA el contenido actual de la sección 1."))
+            "reemplazo exacto. REEMPLAZA el contenido actual de la sección 1.")
+        _lbl_wrap_22.setWordWrap(True)
+        v.addWidget(_lbl_wrap_22)
         btn_importar_mspdi = QPushButton("📂 Importar cronograma real desde MS Project (.xml)")
         btn_importar_mspdi.clicked.connect(self._on_importar_mspdi)
         v.addWidget(btn_importar_mspdi)
@@ -12797,10 +12878,12 @@ class HydroAndinaProDialog(QDialog):
         # reales saltando fines de semana/feriados, en vez de días
         # corridos. Ver core/cronograma.py::CalendarioLaboral.
         # ------------------------------------------------------------
-        v.addWidget(QLabel(
+        _lbl_wrap_23 = QLabel(
             "<hr><b>1d. Calendario laboral (opcional)</b> — el CPM en sí (holgura, ruta crítica) "
             "no cambia: esto solo afecta cómo se convierten los días de cada actividad a fechas de "
-            "calendario reales. «Ninguno» (por defecto) usa días CORRIDOS, igual que antes."))
+            "calendario reales. «Ninguno» (por defecto) usa días CORRIDOS, igual que antes.")
+        _lbl_wrap_23.setWordWrap(True)
+        v.addWidget(_lbl_wrap_23)
         f_calendario_cron = QFormLayout()
         f_calendario_cron.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
         self.combo_cron_calendario = QComboBox()
@@ -12854,13 +12937,15 @@ class HydroAndinaProDialog(QDialog):
         # ------------------------------------------------------------
         # 4) Cronograma de adquisición de materiales
         # ------------------------------------------------------------
-        v.addWidget(QLabel(
+        _lbl_wrap_24 = QLabel(
             "<hr><b>4. Cronograma de adquisición de materiales</b> — para cada insumo de la "
             "Relación de Insumos (Pestaña 9), calcula cuándo debe estar disponible en obra: la "
             "fecha de Inicio Temprano de la actividad con el mismo código que su partida, menos "
             "el plazo de anticipación. Si un insumo se usa en varias partidas, se toma la fecha "
             "MÁS TEMPRANA entre todas (para que la compra alcance a cubrir el primer uso). "
-            "Requiere haber calculado el CPM (sección 2) Y el presupuesto (Pestaña 9, sección 4)."))
+            "Requiere haber calculado el CPM (sección 2) Y el presupuesto (Pestaña 9, sección 4).")
+        _lbl_wrap_24.setWordWrap(True)
+        v.addWidget(_lbl_wrap_24)
         f_adq = QFormLayout()
         f_adq.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
         self.spin_dias_anticipacion_cron = QSpinBox()
@@ -12888,12 +12973,14 @@ class HydroAndinaProDialog(QDialog):
         # Presupuesto (costo por partida) con este Cronograma (fechas
         # ES/EF) por código de partida/actividad. Ver core/curva_s.py.
         # ------------------------------------------------------------
-        v.addWidget(QLabel(
+        _lbl_wrap_25 = QLabel(
             "<hr><b>5. Curva S (avance físico-financiero planificado)</b> — distribuye el costo de "
             "cada partida LINEALMENTE entre el Inicio y Fin Tempranos de su actividad vinculada "
             "(mismo código) y arma la curva acumulada en el tiempo. Curva PLANIFICADA únicamente -- "
             "este plugin no registra avance real ejecutado (valorizaciones), no compara planificado "
-            "vs. real. Requiere haber calculado el presupuesto (Pestaña 9) Y el CPM (sección 2)."))
+            "vs. real. Requiere haber calculado el presupuesto (Pestaña 9) Y el CPM (sección 2).")
+        _lbl_wrap_25.setWordWrap(True)
+        v.addWidget(_lbl_wrap_25)
         f_curva_s = QFormLayout()
         f_curva_s.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
         self.combo_curva_s_periodo = QComboBox()

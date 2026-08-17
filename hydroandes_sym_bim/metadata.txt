@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.4.6
+version=0.4.7
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,44 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.4.7: Módulo BIM y corrección de ancho (BIM/Presupuesto/
+      Programación), a pedido explícito del usuario.
+      1) RENDER 3D AUTOMÁTICO: cada vez que se calcula una estructura
+      en la Pestaña 7 (canal, alcantarilla, enrocado, sumidero,
+      pontón, puente o defensa ribereña), el render 3D del Módulo BIM
+      (Pestaña 8b) se actualiza SOLO -- ya no hace falta ir a la
+      pestaña BIM, actualizar la lista y presionar "Generar modelo
+      3D" cada vez. Se aprovechó que self.resultados_hidraulica_drenaje
+      conserva el orden de inserción (dict de Python 3.7+): su última
+      clave es siempre la estructura recién calculada, así que un
+      único punto de enganche (_actualizar_bim_automatico(), llamado
+      desde _actualizar_texto_resumen_hidraulica(), que YA se
+      ejecutaba tras cada uno de los 7 cálculos) basta para las 7
+      estructuras, sin duplicar la lógica en cada handler ni arriesgar
+      que alguno quede desactualizado. Protegido: un resultado sin
+      soporte de render 3D (p.ej. tablas de caudales) se ignora sin
+      error.
+      2) ANCHO CON SCROLL HORIZONTAL en las pestañas BIM, Presupuesto
+      y Programación: causa raíz encontrada con un diagnóstico
+      programático (medición real de minimumSizeHint() de cada
+      widget) -- 25 QLabel de texto largo se habían agregado con el
+      patrón `v.addWidget(QLabel("texto largo..."))`, que NUNCA
+      permite activar wordWrap (no queda ninguna referencia a la
+      que llamarle .setWordWrap(True)), a diferencia del resto del
+      plugin donde esas etiquetas SÍ se capturan en una variable.
+      Sin wordWrap, QLabel reporta como ancho mínimo el necesario
+      para el texto COMPLETO en una sola línea -- hasta 3563 px en
+      la pestaña de Presupuesto. Las 25 etiquetas se corrigieron
+      (variable + .setWordWrap(True) + addWidget), reduciendo el
+      ancho mínimo de 3059→958 px (BIM), 3563→778 px (Presupuesto) y
+      3106→858 px (Programación) -- ahora por debajo del de varias
+      pestañas ya consideradas correctas (p.ej. Simulación 2D, 898 px).
+      Verificado: 10/10 (render 3D automático -- título del gráfico
+      cambia solo tras cada cálculo simulado exactamente como lo hace
+      el handler real, un resultado sin soporte 3D no lo altera) +
+      6/6 (ancho de las 3 pestañas por debajo del umbral, y el texto
+      de las etiquetas transformadas verificado carácter por carácter
+      como NO truncado) -- 16/16.
     - v0.4.6: CORRECCIÓN CRÍTICA -- Simulación Hidráulica 2D (Pestaña 8),
       a pedido explícito del usuario: "no genera escorrentía ni flujo,
       debe de haber una sección o tramo donde se tenga que evaluar la
