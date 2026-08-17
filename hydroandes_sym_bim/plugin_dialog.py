@@ -51,7 +51,7 @@ from .core import (delineation, morphometry, curve_number, tc_methods, dem_downl
                     iila_senamhi_zones, bim_metrados, bim_ifc, bim_refuerzo, bim_geometry,
                     lateral_pressures, reinforced_concrete_e060, presupuesto, formula_polinomica,
                     apu_referencia, cronograma, geotecnia_e050, estabilidad_muros, zapatas, proyecto_io,
-                    exportar_presupuesto, curva_s, map_styling, print_layout, mapas_tematicos)
+                    exportar_presupuesto, curva_s, map_styling, print_layout, mapas_tematicos, pfafstetter)
 from .core.qgis_layer_utils import obtener_capa
 from .ui.hypsometric_canvas import HypsometricCanvas
 from .ui.hydrograph_canvas import HydrographCanvas
@@ -17401,6 +17401,45 @@ class HydroAndinaProDialog(QDialog):
         v_peligro.addLayout(h_export_peligro)
 
         v.addWidget(gb_peligro)
+
+        # ------------------------------------------------------------
+        # 5) Codificación Pfafstetter de Subcuencas
+        # ------------------------------------------------------------
+        gb_pfaf = QGroupBox("5. Codificación Pfafstetter de Subcuencas")
+        v_pfaf = QVBoxLayout(gb_pfaf)
+        v_pfaf.addWidget(QLabel(
+            "Codifica cada tramo de la red de drenaje (Pestaña 1) con su código Pfafstetter "
+            "(Verdin &amp; Verdin, 1999) -- los 4 tributarios de mayor longitud dividen el cauce "
+            "principal en 5 segmentos (impares 1,3,5,7,9), y cada tributario recibe un dígito par "
+            "(2,4,6,8), en el orden en que entran de aguas abajo hacia la naciente. Codifica los "
+            "TRAMOS de la red (mapa de líneas), no los polígonos de cada subcuenca."
+        ))
+        h_nivel_pfaf = QHBoxLayout()
+        h_nivel_pfaf.addWidget(QLabel("Nivel de codificación (dígitos):"))
+        self.spin_mt_nivel_pfafstetter = QSpinBox()
+        self.spin_mt_nivel_pfafstetter.setRange(1, 3)
+        self.spin_mt_nivel_pfafstetter.setValue(1)
+        h_nivel_pfaf.addWidget(self.spin_mt_nivel_pfafstetter)
+        h_nivel_pfaf.addStretch()
+        v_pfaf.addLayout(h_nivel_pfaf)
+
+        btn_generar_pfaf = QPushButton("🗺 Generar codificación Pfafstetter")
+        btn_generar_pfaf.clicked.connect(self._on_generar_mapa_pfafstetter)
+        v_pfaf.addWidget(btn_generar_pfaf)
+        self.lbl_estado_mt_pfaf = QLabel("Estado: sin generar.")
+        self.lbl_estado_mt_pfaf.setWordWrap(True)
+        v_pfaf.addWidget(self.lbl_estado_mt_pfaf)
+
+        h_export_pfaf = QHBoxLayout()
+        btn_pdf_pfaf = QPushButton("📄 Exportar lámina PDF")
+        btn_pdf_pfaf.clicked.connect(lambda: self._on_exportar_layout_mapa_tematico("pfafstetter", "pdf"))
+        h_export_pfaf.addWidget(btn_pdf_pfaf)
+        btn_png_pfaf = QPushButton("🖼 Exportar PNG")
+        btn_png_pfaf.clicked.connect(lambda: self._on_exportar_layout_mapa_tematico("pfafstetter", "png"))
+        h_export_pfaf.addWidget(btn_png_pfaf)
+        v_pfaf.addLayout(h_export_pfaf)
+
+        v.addWidget(gb_pfaf)
         v.addStretch()
 
         self._capas_mapas_tematicos = {}  # clave_sección -> [QgsMapLayer,...] ya estilizadas
@@ -17677,11 +17716,42 @@ class HydroAndinaProDialog(QDialog):
             self.lbl_estado_mt_peligro.setText("Estado: error (ver mensaje).")
             QMessageBox.critical(self, "Error inesperado generando el mapa de peligro hidráulico", str(e))
 
+    def _on_generar_mapa_pfafstetter(self):
+        if getattr(self, "red_drenaje_layer", None) is None or self.break_point_xy is None:
+            QMessageBox.warning(
+                self, "Falta la delimitación",
+                "Delimite la cuenca primero (Pestaña 1) -- se necesita la red de drenaje y el punto "
+                "de salida ya ajustado al cauce.")
+            return
+        try:
+            self.lbl_estado_mt_pfaf.setText("Estado: generando codificación...")
+            QApplication.processEvents()
+            capa_pfaf = pfafstetter.generar_capa_pfafstetter(
+                self.red_drenaje_layer, self.break_point_xy,
+                nivel_max=self.spin_mt_nivel_pfafstetter.value())
+            n_codigos = len({f["pfafstetter"] for f in capa_pfaf.getFeatures()})
+            map_styling.estilizar_vector_categorizado(capa_pfaf, "pfafstetter")
+            map_styling.agregar_capa_a_grupo(capa_pfaf, subgrupo="Codificación Pfafstetter")
+
+            self._capas_mapas_tematicos["pfafstetter"] = [capa_pfaf]
+            self.lbl_estado_mt_pfaf.setText(
+                f"Estado: {capa_pfaf.featureCount()} tramo(s) codificados en {n_codigos} subcuenca(s) "
+                f"distintas, agregados al grupo «Mapas Temáticos > Codificación Pfafstetter» del panel "
+                f"de capas."
+            )
+        except (pfafstetter.PfafstetterError, map_styling.MapStylingError) as e:
+            self.lbl_estado_mt_pfaf.setText("Estado: error (ver mensaje).")
+            QMessageBox.warning(self, "No se pudo generar la codificación Pfafstetter", str(e))
+        except Exception as e:
+            self.lbl_estado_mt_pfaf.setText("Estado: error (ver mensaje).")
+            QMessageBox.critical(self, "Error inesperado generando la codificación Pfafstetter", str(e))
+
     _TITULOS_MAPAS_TEMATICOS = {
         "morfo": "Mapa Físico — Morfometría y Terreno",
         "cn_suelos": "Número de Curva y Suelos",
         "precipitacion": "Precipitación y Clima",
         "peligro_estructuras": "Peligro Hidráulico y Estructuras",
+        "pfafstetter": "Codificación Pfafstetter de Subcuencas",
     }
 
     def _on_exportar_layout_mapa_tematico(self, clave: str, formato: str = "pdf"):

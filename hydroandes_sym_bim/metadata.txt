@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.4.4
+version=0.4.5
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,53 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.4.5: NUEVO -- Pestaña "Mapas Temáticos", Fase 5 (ÚLTIMA de la
+      serie): Codificación Pfafstetter de subcuencas (Verdin & Verdin,
+      1999). Nuevo core/pfafstetter.py: reutiliza el mismo grafo
+      no dirigido nodo-a-nodo que ya construye
+      core.main_channel._construir_grafo() (el usado para el perfil
+      del cauce principal) -- sin necesitar una grilla de acumulación
+      de flujo recortada aparte. Como estimador del tamaño de cada
+      tributario para elegir los 4 mayores se usa la longitud total de
+      cauces aguas arriba de la confluencia (proxy monótono del área
+      de drenaje en una red dendrítica, relación de Hack). Algoritmo
+      recursivo: identifica el cauce principal (camino de mayor
+      longitud acumulada), los hasta 4 tributarios mayores lo dividen
+      en hasta 5 segmentos (impares 1,3,5,7,9 para los tramos que
+      drenan directo al cauce principal, pares 2,4,6,8 para los
+      tributarios, en el orden aguas abajo->arriba en que entran), y
+      recursa dentro de cada subcuenca hasta el nivel indicado por el
+      usuario (1 a 3 dígitos), agregando un dígito más por nivel.
+      LIMITACIÓN DOCUMENTADA: codifica los TRAMOS de la red de drenaje
+      (mapa de líneas coloreado por código, igual criterio que el
+      orden de Strahler de la Fase 1), no los polígonos de cada
+      subcuenca -- delinear cada polígono requeriría ejecutar un
+      algoritmo de cuenca de aportación por cada punto de salida
+      tributario, fuera de alcance de esta iteración.
+      Nueva capa en la pestaña, reutilizando la red de drenaje y el
+      punto de salida YA delimitados en la Pestaña 1 (categorizada por
+      código), en el grupo «Mapas Temáticos > Codificación
+      Pfafstetter», con exportación PDF/PNG.
+      Verificado: 14/14 (núcleo, con una red sintética DISEÑADA para
+      que los códigos esperados en nivel 1 Y nivel 2 -- incluida la
+      recursión dentro de un tributario -- se puedan calcular a mano
+      con certeza total; también corrigió un bug real encontrado
+      durante el diseño de la prueba: la raíz de recursión de cada
+      tributario debe ser el nodo de la CONFLUENCIA en el cauce padre,
+      no el primer nodo aguas arriba, o la búsqueda del camino más
+      largo podía "retroceder" hacia el cauce padre) + 13/13
+      (integración UI real en QGIS headless, misma red sintética,
+      incluida la advertencia sin delimitación) -- 27/27.
+      CON ESTA VERSIÓN QUEDA COMPLETA la Pestaña 22 "Mapas Temáticos"
+      pedida por el usuario ("Mapas Temáticos: de todo hidrología
+      hidráulica y más"): Fase 1 (mapa físico/morfometría), Fase 2
+      (número de curva y suelos), Fase 3 (precipitación y clima,
+      incluidos Thiessen/isoyetas/estaciones), Fase 4 (peligro
+      hidráulico SWE2D y estructuras) y Fase 5 (Pfafstetter) -- todas
+      con salida en capas estilizadas del lienzo Y láminas de
+      impresión PDF/PNG, como pidió el usuario ("Ambos"). Isotermas
+      quedó fuera de alcance en todas las fases (sin fuente de datos
+      de temperatura en el plugin).
     - v0.4.4: NUEVO -- Pestaña "Mapas Temáticos", Fase 4 de la serie:
       Peligro Hidráulico (SWE2D) y Estructuras. Reutiliza directamente
       los resultados YA calculados de la simulación bidimensional
