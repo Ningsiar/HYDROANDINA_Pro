@@ -132,7 +132,16 @@ def agregar_boton_descarga_tabla(tabla, nombre_base: str = "tabla"):
 def agregar_boton_descarga_grafico(canvas, nombre_base: str = "grafico"):
     """Botón flotante para un canvas de matplotlib YA construido (necesita
     un atributo .fig, presente en todos los *Canvas del plugin): guardar
-    la figura como PNG o JPG."""
+    la figura como PNG o JPG.
+
+    Si además el canvas expone un atributo `ruta_dem_ascii` (por ahora
+    solo ui/dem_relief_3d_canvas.py::DemRelieve3DCanvas, el visor 3D de
+    la Pestaña 1), se agrega una opción extra para exportar el MDE
+    ACTUALMENTE renderizado como ESRI ASCII Grid (.asc) -- el ráster
+    completo, no una captura de la imagen, listo para abrir en otro
+    software GIS/CAD. El atributo se lee en el momento del clic (no al
+    construir el menú), porque el botón se agrega una sola vez al
+    iniciar el diálogo, antes de que se haya renderizado ningún MDE."""
     if getattr(canvas, "_boton_descarga_agregado", False):
         return None
     if not hasattr(canvas, "fig"):
@@ -154,6 +163,26 @@ def agregar_boton_descarga_grafico(canvas, nombre_base: str = "grafico"):
 
     menu.addAction("Guardar como PNG", lambda: _guardar("png", "PNG (*.png)"))
     menu.addAction("Guardar como JPG", lambda: _guardar("jpg", "JPEG (*.jpg)"))
+
+    if hasattr(canvas, "ruta_dem_ascii"):
+        def _exportar_ascii():
+            ruta_origen = getattr(canvas, "ruta_dem_ascii", None)
+            if not ruta_origen:
+                QMessageBox.information(
+                    canvas, "Sin MDE renderizado",
+                    "Renderice el relieve 3D antes de exportar el MDE a ASCII Grid.")
+                return
+            ruta = _pedir_ruta_guardar(canvas, f"{nombre_base}.asc", "ESRI ASCII Grid (*.asc)")
+            if not ruta:
+                return
+            try:
+                from ..core import raster_stats
+                raster_stats.exportar_raster_a_ascii(ruta_origen, ruta)
+                QMessageBox.information(canvas, "Exportado", f"MDE exportado a:\n{ruta}")
+            except Exception as e:
+                QMessageBox.critical(canvas, "Error al exportar", str(e))
+        menu.addAction("Guardar MDE como ASCII Grid (.asc)", _exportar_ascii)
+
     boton.setMenu(menu)
     return boton
 

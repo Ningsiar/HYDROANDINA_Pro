@@ -770,8 +770,11 @@ class HydroAndinaProDialog(QDialog):
         lbl_3d = QLabel(
             "Render 3D del MDE de la cuenca activa (o del MDE cargado si aún no delimitó ninguna "
             "cuenca): sombreado de relieve (hillshade) con mezcla <b>Multiplicar</b> sobre un color "
-            "base, la misma técnica del proyecto QGIS de referencia (factor Z=1). Arrastre con el "
-            "mouse para rotar 360°."
+            "base, la misma técnica del proyecto QGIS de referencia (factor Z=1). <b>Arrastre</b> con "
+            "el mouse para rotar 360°, <b>rueda del mouse</b> para acercar/alejar (zoom). Si ya generó "
+            "la red de drenaje (sección 4), el río se superpone automáticamente. Use el botón ⬇ de la "
+            "esquina superior derecha del visor para descargar la imagen (PNG/JPG) o el MDE completo "
+            "en formato ASCII Grid (.asc), listo para abrir en otro software GIS/CAD."
         )
         lbl_3d.setWordWrap(True)
         vp.addWidget(lbl_3d)
@@ -799,6 +802,15 @@ class HydroAndinaProDialog(QDialog):
         self.spin_relieve3d_exageracion.setDecimals(2)
         self.spin_relieve3d_exageracion.setValue(1.5)
         f_3d.addRow("Exageración vertical (relieve 3D):", self.spin_relieve3d_exageracion)
+        self.spin_relieve3d_ambiente = QDoubleSpinBox()
+        self.spin_relieve3d_ambiente.setRange(0.0, 1.0)
+        self.spin_relieve3d_ambiente.setDecimals(2)
+        self.spin_relieve3d_ambiente.setSingleStep(0.05)
+        self.spin_relieve3d_ambiente.setValue(0.15)
+        self.spin_relieve3d_ambiente.setToolTip(
+            "Piso de luz de relleno que se mezcla con el hillshade direccional, para que las laderas "
+            "de sombra no queden en negro puro y se vea mejor la forma del relieve. 0 = hillshade puro.")
+        f_3d.addRow("Luz ambiental (forma del relieve):", self.spin_relieve3d_ambiente)
         vp.addLayout(f_3d)
 
         h_color_3d = QHBoxLayout()
@@ -813,6 +825,10 @@ class HydroAndinaProDialog(QDialog):
         self.check_relieve3d_giro = QCheckBox("Girar automáticamente (360°)")
         self.check_relieve3d_giro.toggled.connect(self._on_toggle_giro_relieve3d)
         vp.addWidget(self.check_relieve3d_giro)
+
+        self.check_relieve3d_rio = QCheckBox("Mostrar la red de drenaje (río) sobre el relieve")
+        self.check_relieve3d_rio.setChecked(True)
+        vp.addWidget(self.check_relieve3d_rio)
 
         self.btn_relieve3d_render = QPushButton("Renderizar / Actualizar vista 3D")
         self.btn_relieve3d_render.clicked.connect(self._on_renderizar_relieve_3d)
@@ -875,13 +891,69 @@ class HydroAndinaProDialog(QDialog):
                 azimut=self.spin_relieve3d_azimut.value(), altitud=self.spin_relieve3d_altitud.value(),
                 z_factor=self.spin_relieve3d_zfactor.value(),
                 exageracion_vertical=self.spin_relieve3d_exageracion.value(),
+                luz_ambiental=self.spin_relieve3d_ambiente.value(),
             )
+            # Botón flotante de descarga (⬇, esquina superior derecha,
+            # ya agregado a todo canvas de matplotlib por
+            # _habilitar_descargas_universales): se le da aquí la ruta
+            # del MDE ACTUALMENTE renderizado, para que su opción
+            # "Guardar MDE como ASCII Grid" exporte justo lo que se ve.
+            self.canvas_relieve_3d.ruta_dem_ascii = ruta_dem
+
+            nota_rio = ""
+            if self.check_relieve3d_rio.isChecked():
+                agregado, nota_rio = self._agregar_rio_al_relieve_3d(ruta_dem)
+            else:
+                agregado = False
+
             self._dem_relieve3d_activo = ruta_dem
             self.lbl_estado_relieve3d.setText(
-                f"Estado: renderizado ({'cuenca activa' if ruta_dem == self.dem_clip_path else 'MDE completo'}).")
+                f"Estado: renderizado ({'cuenca activa' if ruta_dem == self.dem_clip_path else 'MDE completo'})"
+                + (", con red de drenaje" if agregado else "") + nota_rio + "."
+            )
         except (DemRelieveCanvasError, RuntimeError) as e:
             self.lbl_estado_relieve3d.setText("Estado: ERROR al renderizar (ver mensaje).")
             QMessageBox.critical(self, "Error al renderizar el visor 3D", str(e))
+
+    def _agregar_rio_al_relieve_3d(self, ruta_dem):
+        """
+        Superpone la red de drenaje ya delineada (sección 4 de esta
+        pestaña) sobre el relieve 3D recién renderizado. No es un paso
+        crítico: si no hay red delineada todavía, o si por algún motivo
+        no comparte el mismo sistema de coordenadas que el MDE
+        renderizado (p. ej. se renderizó el MDE original sin reproyectar
+        porque aún no se corrió ningún paso de delimitación), se informa
+        con una nota corta en vez de interrumpir el renderizado del
+        relieve.
+
+        Devuelve (agregado: bool, nota: str) -- nota va vacía si no hay
+        nada que avisar (sin red disponible todavía, o éxito).
+        """
+        capa_red = getattr(self, "red_drenaje_layer", None)
+        if capa_red is None or not capa_red.isValid() or capa_red.featureCount() == 0:
+            return False, ""
+        capa_dem_tmp = QgsRasterLayer(ruta_dem, "dem_relieve3d_verificacion_crs")
+        if not capa_dem_tmp.isValid() or capa_red.crs() != capa_dem_tmp.crs():
+            return False, " (red de drenaje NO superpuesta: no comparte CRS con el MDE renderizado)"
+        partes_xy = []
+        for feat in capa_red.getFeatures():
+            geom = feat.geometry()
+            if geom is None or geom.isEmpty():
+                continue
+            partes = geom.asMultiPolyline() if geom.isMultipart() else [geom.asPolyline()]
+            for parte in partes:
+                if len(parte) >= 2:
+                    partes_xy.append([(p.x(), p.y()) for p in parte])
+        if not partes_xy:
+            return False, ""
+        try:
+            partes_locales = raster_stats.proyectar_lineas_a_malla_local(ruta_dem, partes_xy)
+        except Exception as e:
+            return False, f" (red de drenaje NO superpuesta: {e})"
+        if not partes_locales:
+            return False, " (red de drenaje NO superpuesta: ningún vértice cayó dentro del MDE renderizado)"
+        self.canvas_relieve_3d.agregar_rio(partes_locales)
+        return True, ""
 
     def _on_examinar_bp_archivo(self):
         ruta, _ = QFileDialog.getOpenFileName(

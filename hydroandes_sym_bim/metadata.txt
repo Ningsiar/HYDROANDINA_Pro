@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.4.21
+version=0.4.22
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,37 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.4.22: mejoras pedidas por el usuario al visor 3D "workspace
+      view" de la Pestaña 1 (Delimitación de Cuenca). 1) Zoom con la
+      rueda del mouse: Axes3D ya rotaba 360° arrastrando con el mouse
+      "gratis", pero NO traía zoom con la rueda (verificado: matplotlib
+      3.8 no registra ningún manejador de scroll en Axes3D); se conectó
+      uno a mano que reescala xlim/ylim/zlim3d alrededor del centro
+      actual, acotado entre 3% y 400% del rango original para no poder
+      alejarse/acercarse a un extremo degenerado. 2) La red de drenaje
+      (río) ya delineada se superpone automáticamente sobre el relieve
+      3D (checkbox para mostrarla/ocultarla), vía el nuevo
+      core/raster_stats.py::proyectar_lineas_a_malla_local() (convierte
+      las coordenadas reales de la capa de red de drenaje al sistema de
+      coordenadas local de la malla 3D, muestreando la cota Z de cada
+      vértice); si la red no comparte CRS con el MDE renderizado se
+      informa en el estado en vez de fallar en silencio o reventar.
+      3) El botón de descarga flotante (⬇, esquina superior derecha, ya
+      existente para PNG/JPG) ahora también ofrece exportar el MDE
+      completo renderizado a formato ESRI ASCII Grid (.asc) vía el
+      nuevo core/raster_stats.py::exportar_raster_a_ascii(), para abrir
+      en otro software GIS/CAD. 4) Mejora de la forma del relieve: nuevo
+      parámetro "Luz ambiental" (spinbox, default 0.15) que mezcla el
+      hillshade direccional con un piso de luz de relleno constante, para
+      que las laderas de sombra no queden en negro puro (antes aplanaban
+      visualmente el relieve). Verificado con prueba real-QGIS-headless
+      (33/33 checks OK): render con río superpuesto y sin superponer,
+      zoom in/out acotado en ambos extremos, manejador de scroll_event,
+      fórmula de luz ambiental (mínimo del sombreado sube sin alterar
+      las zonas ya iluminadas), proyección de coordenadas real->local
+      con verificación numérica exacta y de sentido del gradiente,
+      exportación a ASCII Grid válida, y el menú de descarga ofreciendo
+      la opción ASCII solo en el visor 3D (no en canvases normales).
     - v0.4.21: dos correcciones pedidas por el usuario. 1) Pestaña 2
       (Morfometría): el campo "Longitud del cauce principal Lc (km)"
       quedaba en el mínimo del rango (0.001 km) esperando que el

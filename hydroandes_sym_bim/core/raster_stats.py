@@ -34,6 +34,81 @@ def leer_elevacion_2d(ruta_raster: str):
     return arr, dx, dy
 
 
+def proyectar_lineas_a_malla_local(ruta_raster: str, partes_xy):
+    """
+    Convierte una o varias polilíneas dadas en coordenadas REALES (mismo
+    CRS que `ruta_raster`, típicamente la red de drenaje ya delineada)
+    al sistema de coordenadas "local" que usa la malla 3D de
+    ui.dem_relief_3d_canvas.DemRelieve3DCanvas.plot_dem() -- origen en la
+    esquina superior-izquierda del ráster, eje X = columna*dx, eje
+    Y = fila*dy -- y muestrea la cota Z (vecino más cercano) en cada
+    vértice, lista para superponer el río sobre el relieve
+    (DemRelieve3DCanvas.agregar_rio()).
+
+    partes_xy: lista de polilíneas, cada una una lista de (x, y) reales
+        (p.ej. una por cada tramo/feature de la capa de red de drenaje,
+        para no unir con una línea recta dos cauces que no están
+        conectados entre sí).
+
+    Devuelve una lista paralela de (x_local, y_local, z) -- arrays de
+    numpy -- una tupla por cada polilínea de entrada con al menos un
+    vértice válido; los vértices fuera del ráster o sobre celdas sin
+    dato se omiten (no se insertan como NaN, para no cortar la línea con
+    huecos).
+    """
+    ds = gdal.Open(ruta_raster)
+    if ds is None:
+        raise RuntimeError(f"No se pudo abrir el ráster: {ruta_raster}")
+    gt = ds.GetGeoTransform()
+    banda = ds.GetRasterBand(1)
+    nodata = banda.GetNoDataValue()
+    arr = banda.ReadAsArray().astype("float64")
+    n_cols, n_filas = ds.RasterXSize, ds.RasterYSize
+    ds = None
+    dx, dy = abs(gt[1]), abs(gt[5])
+
+    resultado = []
+    for parte in partes_xy:
+        xs_local, ys_local, zs = [], [], []
+        for x, y in parte:
+            col_f = (x - gt[0]) / gt[1]
+            row_f = (y - gt[3]) / gt[5]
+            col_i, row_i = int(round(col_f)), int(round(row_f))
+            if col_i < 0 or col_i >= n_cols or row_i < 0 or row_i >= n_filas:
+                continue
+            z = arr[row_i, col_i]
+            if (nodata is not None and z == nodata) or np.isnan(z):
+                continue
+            xs_local.append(col_f * dx)
+            ys_local.append(row_f * dy)
+            zs.append(float(z))
+        if len(xs_local) >= 2:
+            resultado.append((np.array(xs_local), np.array(ys_local), np.array(zs)))
+    return resultado
+
+
+def exportar_raster_a_ascii(ruta_entrada: str, ruta_salida: str):
+    """
+    Convierte un ráster (típicamente el MDE) a formato ESRI ASCII Grid
+    (.asc) -- texto plano, el formato más portable para abrirlo en otro
+    software GIS/CAD (ArcGIS, SAGA, Civil 3D, Global Mapper, etc.) sin
+    depender del driver GeoTIFF.
+    """
+    ds_entrada = gdal.Open(ruta_entrada)
+    if ds_entrada is None:
+        raise RuntimeError(f"No se pudo abrir el ráster de entrada: {ruta_entrada}")
+    driver = gdal.GetDriverByName("AAIGrid")
+    if driver is None:
+        ds_entrada = None
+        raise RuntimeError("El driver GDAL 'AAIGrid' (ESRI ASCII Grid) no está disponible en esta instalación.")
+    ds_salida = driver.CreateCopy(ruta_salida, ds_entrada)
+    if ds_salida is None:
+        ds_entrada = None
+        raise RuntimeError(f"No se pudo escribir el archivo ASCII: {ruta_salida}")
+    ds_entrada = None
+    ds_salida = None
+
+
 def leer_array_valido(ruta_raster: str) -> np.ndarray:
     """Devuelve un array 1D con todos los píxeles válidos (sin nodata)
     de la banda 1 del ráster indicado."""

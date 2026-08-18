@@ -43,6 +43,23 @@ no se usa el motor Qt3D nativo de QGIS por la misma razón documentada
 allí: este backend Agg es el que se puede probar en un entorno headless
 (un Qgs3DMapCanvas necesita un contexto OpenGL real, no garantizado en
 headless).
+
+ZOOM CON LA RUEDA DEL MOUSE: a diferencia del arrastre-para-rotar,
+Axes3D NO trae zoom con la rueda "gratis" en matplotlib 3.8 (verificado:
+no hay ningún manejador de 'scroll_event' registrado por defecto en
+Axes3D). Se conecta uno a mano (_on_scroll) que reescala xlim/ylim/zlim3d
+alrededor del centro actual -- en vez de tocar el atributo interno
+`Axes3D.dist` (frágil entre versiones de matplotlib) -- con el factor de
+zoom acotado respecto a los límites originales del último plot_dem(),
+para no poder alejarse/acercarse hasta un extremo degenerado.
+
+RÍO SUPERPUESTO (agregar_rio): la red de drenaje ya delineada (Pestaña 1)
+se dibuja como línea(s) 3D sobre la superficie ya renderizada. Este
+módulo NO conoce QGIS/geometrías de capas -- solo recibe coordenadas ya
+proyectadas al mismo sistema "local" que usa la malla de plot_dem() (ver
+core/raster_stats.py::proyectar_lineas_a_malla_local(), que sí sabe leer
+la geotransformada del ráster); así el visor sigue siendo agnóstico a
+QGIS y testeable con arrays sueltos, igual que plot_dem().
 """
 import numpy as np
 
@@ -85,6 +102,9 @@ class DemRelieve3DCanvas(FigureCanvas):
         self.color_base_rgb = COLOR_BASE_DEFECTO
         self._timer_giro = None
         self._ultimo_render = None  # (elevacion_submuestreada, dx, dy, submuestreo) del último plot_dem()
+        self._limites_originales = None  # (xlim, ylim, zlim) justo después del último plot_dem(), para acotar el zoom
+        self.ruta_dem_ascii = None  # ruta del MDE actualmente renderizado; usado por ui/export_overlay.py
+        self.mpl_connect("scroll_event", self._on_scroll)
 
     def establecer_color_base(self, rgb):
         """rgb: tupla (R, G, B) 0-255. Reemplaza el color BASE que se
@@ -97,7 +117,8 @@ class DemRelieve3DCanvas(FigureCanvas):
     def plot_dem(self, elevacion: np.ndarray, dx: float, dy: float,
                  azimut: float = AZIMUT_DEFECTO, altitud: float = ALTITUD_DEFECTO,
                  z_factor: float = Z_FACTOR_DEFECTO, exageracion_vertical: float = 1.5,
-                 submuestreo=None, objetivo_puntos_por_eje: int = 180, titulo=None):
+                 submuestreo=None, objetivo_puntos_por_eje: int = 180, titulo=None,
+                 luz_ambiental: float = 0.15):
         """
         elevacion: array 2D de cotas (m), con np.nan en las celdas sin
             dato (ver core/raster_stats.py::leer_elevacion_2d).
@@ -117,6 +138,13 @@ class DemRelieve3DCanvas(FigureCanvas):
             completo (millones de celdas) es inviable como superficie 3D
             interactiva; se autocalcula si no se indica, apuntando a
             `objetivo_puntos_por_eje` puntos por lado.
+        luz_ambiental: piso de luz "ambiental" (0-1) que se mezcla con el
+            hillshade direccional antes de la multiplicación por el color
+            base -- un hillshade de una sola fuente de luz dibuja las
+            laderas de sombra en negro puro (0), lo que aplana el relieve
+            en vez de mostrar su forma; con un piso ambiental > 0 esas
+            laderas quedan tenues pero visibles, como una segunda luz de
+            relleno suave. 0.0 = comportamiento anterior (hillshade puro).
         """
         self.ax.clear()
         filas, columnas = elevacion.shape
@@ -144,6 +172,12 @@ class DemRelieve3DCanvas(FigureCanvas):
         sombreado = fuente_luz.hillshade(malla_z, vert_exag=z_factor,
                                           dx=dx * submuestreo, dy=dy * submuestreo)
         sombreado = np.clip(sombreado, 0.0, 1.0)
+        # Piso de luz ambiental: mezcla el hillshade direccional con una
+        # luz de relleno constante, para que las laderas de sombra no
+        # queden en negro puro (ver docstring de `luz_ambiental` arriba).
+        luz_ambiental = float(np.clip(luz_ambiental, 0.0, 1.0))
+        if luz_ambiental > 0.0:
+            sombreado = luz_ambiental + (1.0 - luz_ambiental) * sombreado
 
         # --- Mezcla MULTIPLICAR: color_final = color_base * sombreado (por canal RGB) ---
         r, g, b = (c / 255.0 for c in self.color_base_rgb)
@@ -160,7 +194,8 @@ class DemRelieve3DCanvas(FigureCanvas):
         self.ax.set_xlabel("X (m)")
         self.ax.set_ylabel("Y (m)")
         self.ax.set_zlabel("Cota (m s.n.m.)")
-        self.ax.set_title(titulo or "Relieve 3D del MDE (arrastre para rotar 360°)", pad=10)
+        self.ax.set_title(
+            titulo or "Relieve 3D del MDE (arrastre: rotar 360° | rueda del mouse: zoom)", pad=10)
         try:
             rango_z = (z_max - z_min) or 1.0
             self.ax.set_box_aspect((columnas_s * dx * submuestreo,
@@ -172,6 +207,68 @@ class DemRelieve3DCanvas(FigureCanvas):
         self.fig.tight_layout()
         self.draw()
         self._ultimo_render = (elev_s, dx, dy, submuestreo)
+        # Límites justo después de renderizar (ya autoescalados por
+        # Axes3D a partir de la superficie recién dibujada): referencia
+        # para acotar cuánto puede alejar/acercar el zoom con la rueda
+        # del mouse (_aplicar_zoom), y para poder "resetear" el zoom sin
+        # tener que volver a llamar a plot_dem().
+        self._limites_originales = (self.ax.get_xlim3d(), self.ax.get_ylim3d(), self.ax.get_zlim3d())
+
+    def agregar_rio(self, partes_locales, color="#1F6FEB", linewidth=2.4):
+        """
+        Superpone la red de drenaje (río/cauces) sobre el relieve 3D ya
+        renderizado (requiere haber llamado antes a plot_dem()).
+
+        partes_locales: lista de (x_local, y_local, z) -- arrays de
+            numpy en el MISMO sistema de coordenadas local que
+            malla_x/malla_y de plot_dem() -- ver
+            core/raster_stats.py::proyectar_lineas_a_malla_local(), que
+            hace esa conversión a partir de coordenadas reales. Una
+            tupla por cada tramo/parte de la red, para no unir con una
+            línea recta dos cauces que no están conectados entre sí.
+        """
+        if self._ultimo_render is None:
+            raise DemRelieveCanvasError("Renderice el relieve (plot_dem) antes de agregar el río.")
+        elev_s = self._ultimo_render[0]
+        rango_z = float(np.nanmax(elev_s) - np.nanmin(elev_s)) or 1.0
+        offset_z = rango_z * 0.01  # pequeño realce para evitar que el trazo quede "enterrado" en la superficie
+        for xs, ys, zs in partes_locales:
+            if len(xs) < 2:
+                continue
+            self.ax.plot3D(xs, ys, np.asarray(zs) + offset_z, color=color, linewidth=linewidth,
+                            zorder=20, solid_capstyle="round")
+        self.draw()
+
+    # ---------------- Zoom con la rueda del mouse ----------------
+    def _on_scroll(self, event):
+        if self._limites_originales is None or event.inaxes != self.ax:
+            return
+        factor = 0.85 if event.button == "up" else (1.0 / 0.85)
+        self._aplicar_zoom(factor)
+
+    def _aplicar_zoom(self, factor: float):
+        """Reescala xlim/ylim/zlim3d alrededor de su centro actual (en
+        vez de tocar Axes3D.dist, un atributo interno frágil entre
+        versiones de matplotlib -- ver docstring del módulo). El nuevo
+        semirrango se acota entre el 3% y el 400% del semirrango
+        ORIGINAL (justo después del último plot_dem()), para que la
+        rueda del mouse no pueda alejar/acercar hasta un extremo
+        degenerado (una superficie invisible o un punto sin volumen)."""
+        if self._limites_originales is None:
+            return
+        ejes = (
+            (self.ax.get_xlim3d, self.ax.set_xlim3d, self._limites_originales[0]),
+            (self.ax.get_ylim3d, self.ax.set_ylim3d, self._limites_originales[1]),
+            (self.ax.get_zlim3d, self.ax.set_zlim3d, self._limites_originales[2]),
+        )
+        for obtener, establecer, (lo0, hi0) in ejes:
+            lo, hi = obtener()
+            centro = (lo + hi) / 2.0
+            semirrango_original = (hi0 - lo0) / 2.0 or 1.0
+            semirrango = (hi - lo) / 2.0 * factor
+            semirrango = min(max(semirrango, semirrango_original * 0.03), semirrango_original * 4.0)
+            establecer(centro - semirrango, centro + semirrango)
+        self.draw_idle()
 
     def guardar_figura(self, ruta_png):
         self.fig.savefig(ruta_png, dpi=300, bbox_inches="tight")
