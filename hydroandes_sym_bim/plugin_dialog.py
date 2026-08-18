@@ -52,7 +52,7 @@ from .core import (delineation, morphometry, curve_number, tc_methods, dem_downl
                     lateral_pressures, reinforced_concrete_e060, presupuesto, formula_polinomica,
                     apu_referencia, cronograma, geotecnia_e050, estabilidad_muros, zapatas, proyecto_io,
                     exportar_presupuesto, curva_s, map_styling, print_layout, mapas_tematicos, pfafstetter,
-                    outlier_analysis)
+                    outlier_analysis, modflow6_bridge)
 from .core.qgis_layer_utils import obtener_capa
 from .ui.hypsometric_canvas import HypsometricCanvas
 from .ui.hydrograph_canvas import HydrographCanvas
@@ -421,6 +421,7 @@ class HydroAndinaProDialog(QDialog):
         self.resultado_flujo_subterraneo = None  # dict con cargas h, velocidades, convergencia
         self.resultado_flujo_transitorio = None  # dict con la serie temporal del régimen transitorio (sección 5)
         self.resultado_flujo_multicapa = None  # dict con cargas h (n_capas,n_filas,n_columnas) del modelo multicapa (sección 6)
+        self.resultado_flujo_multicapa_mf6 = None  # ídem, resuelto con MODFLOW 6 real (sección 6b)
         # --- Pestaña Hidráulica de Pozos ---
         self.resultado_pozo = {}  # dict con resultados de las distintas secciones (Theis, Cooper-Jacob, perdidas, radios)
         # --- gestor de cuencas delimitadas (varias en la misma sesión) ---
@@ -17544,9 +17545,11 @@ class HydroAndinaProDialog(QDialog):
         f_multi.addRow("Número de capas:", self.spin_n_capas_multicapa)
         v_multi.addLayout(f_multi)
 
-        v_multi.addWidget(QLabel("Transmisividad homogénea por capa — capa (0-index), T (m²/s):"))
-        self.tabla_t_multicapa = TablaPegable(6, 2)
-        self.tabla_t_multicapa.setHorizontalHeaderLabels(["Capa", "T (m²/s)"])
+        v_multi.addWidget(QLabel(
+            "Transmisividad homogénea por capa — capa (0-index), T (m²/s), espesor (m; solo se usa si "
+            "corre esto con MODFLOW 6 real más abajo, para derivar K=T/espesor y las cotas de cada capa):"))
+        self.tabla_t_multicapa = TablaPegable(6, 3)
+        self.tabla_t_multicapa.setHorizontalHeaderLabels(["Capa", "T (m²/s)", "Espesor (m)"])
         self.tabla_t_multicapa.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.tabla_t_multicapa.setMinimumHeight(120)
         v_multi.addWidget(self.tabla_t_multicapa)
@@ -17612,6 +17615,48 @@ class HydroAndinaProDialog(QDialog):
         self.lbl_estado_multicapa = QLabel("Estado: en espera.")
         self.lbl_estado_multicapa.setWordWrap(True)
         v_multi.addWidget(self.lbl_estado_multicapa)
+
+        # ---- MODFLOW 6 real (FloPy), opcional -- MISMOS datos de arriba ----
+        gb_mf6 = QGroupBox("6b. Ejecutar este mismo modelo con MODFLOW 6 REAL (FloPy)")
+        v_mf6 = QVBoxLayout(gb_mf6)
+        lbl_mf6 = QLabel(
+            "Corre el modelo MODFLOW 6 (USGS) real -- mayor rigor que el solver propio -- reutilizando "
+            "LOS MISMOS datos de arriba (malla, T/espesor por capa, bordes, pozos, RIV/DRN). Necesita "
+            "FloPy instalado ('pip install flopy' en el Python de QGIS). Como MODFLOW 6 trabaja con "
+            "conductividad K y cotas reales (no solo T), indique además la cota superior del modelo; K se "
+            "deriva de T/espesor y las cotas de cada capa se acumulan hacia abajo desde esa cota."
+        )
+        lbl_mf6.setWordWrap(True)
+        v_mf6.addWidget(lbl_mf6)
+        f_mf6 = QFormLayout()
+        f_mf6.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.spin_top_multicapa = QDoubleSpinBox()
+        self.spin_top_multicapa.setRange(-1000, 9000); self.spin_top_multicapa.setDecimals(2)
+        self.spin_top_multicapa.setValue(100.0)
+        f_mf6.addRow("Cota superior del modelo (m s.n.m., tope de la capa 0):", self.spin_top_multicapa)
+        v_mf6.addLayout(f_mf6)
+        btn_verificar_mf6 = QPushButton("Verificar disponibilidad de FloPy/MODFLOW 6")
+        btn_verificar_mf6.clicked.connect(self._on_verificar_disponibilidad_mf6)
+        v_mf6.addWidget(btn_verificar_mf6)
+        btn_resolver_mf6 = QPushButton("Ejecutar con MODFLOW 6 real")
+        btn_resolver_mf6.clicked.connect(self._on_resolver_flujo_multicapa_mf6)
+        v_mf6.addWidget(btn_resolver_mf6)
+
+        h_capa_vis_mf6 = QHBoxLayout()
+        h_capa_vis_mf6.addWidget(QLabel("Capa a visualizar:"))
+        self.combo_capa_visualizar_mf6 = QComboBox()
+        self.combo_capa_visualizar_mf6.currentIndexChanged.connect(self._on_cambiar_capa_visualizar_mf6)
+        h_capa_vis_mf6.addWidget(self.combo_capa_visualizar_mf6)
+        h_capa_vis_mf6.addStretch()
+        v_mf6.addLayout(h_capa_vis_mf6)
+
+        self.canvas_mapa_mf6 = GroundwaterCanvas(width=7.6, height=5.4)
+        v_mf6.addWidget(self.canvas_mapa_mf6)
+        self.lbl_estado_mf6 = QLabel("Estado: en espera.")
+        self.lbl_estado_mf6.setWordWrap(True)
+        v_mf6.addWidget(self.lbl_estado_mf6)
+        v_multi.addWidget(gb_mf6)
+
         v.addWidget(gb_multicapa)
 
         v.addWidget(QLabel("<b>Cuadro resumen final:</b>"))
@@ -18009,6 +18054,107 @@ class HydroAndinaProDialog(QDialog):
         r = self.resultado_flujo_multicapa
         h_capa = r["resultado"]["cargas_h"][k]
         self.canvas_mapa_multicapa.plot_mapa_cargas(h_capa, r["dx"], r["dy"])
+
+    # ---------------- MODFLOW 6 real (sección 6b) ----------------
+    def _leer_tabla_espesor_multicapa(self, n_capas):
+        valores = {}
+        for i in range(self.tabla_t_multicapa.rowCount()):
+            item_capa = self.tabla_t_multicapa.item(i, 0)
+            item_esp = self.tabla_t_multicapa.item(i, 2)
+            if item_capa and item_esp and item_capa.text().strip():
+                try:
+                    valores[int(float(item_capa.text().replace(",", ".")))] = float(
+                        item_esp.text().replace(",", "."))
+                except ValueError:
+                    continue
+        faltantes = [k for k in range(n_capas) if k not in valores]
+        if faltantes:
+            raise groundwater_flow.GroundwaterError(
+                f"Falta el espesor de la(s) capa(s) {faltantes} en la tabla de T por capa (columna "
+                "'Espesor (m)', necesaria para correr con MODFLOW 6 real).")
+        return np.array([valores[k] for k in range(n_capas)])
+
+    def _on_verificar_disponibilidad_mf6(self):
+        disp = modflow6_bridge.verificar_disponibilidad()
+        if disp["flopy_disponible"] and disp["mf6_disponible"]:
+            QMessageBox.information(
+                self, "MODFLOW 6 real disponible",
+                f"✅ FloPy {disp['flopy_version']} instalado.\n✅ mf6.exe encontrado en {disp['mf6_ruta']}.\n\n"
+                "Puede ejecutar el modelo con MODFLOW 6 real.")
+        else:
+            detalle = []
+            if not disp["flopy_disponible"]:
+                detalle.append("❌ FloPy NO está instalado -- ejecute 'pip install flopy' en el Python de QGIS.")
+            if not disp["mf6_disponible"]:
+                detalle.append(f"❌ No se encontró mf6.exe en {disp['mf6_ruta']} -- reinstale el plugin.")
+            QMessageBox.warning(self, "MODFLOW 6 real NO disponible", "\n".join(detalle))
+
+    def _on_resolver_flujo_multicapa_mf6(self):
+        try:
+            n_capas = self.spin_n_capas_multicapa.value()
+            n_filas = self.spin_filas_2d.value()
+            n_columnas = self.spin_columnas_2d.value()
+            dx, dy = self.spin_dx_2d.value(), self.spin_dy_2d.value()
+
+            t_por_capa = self._leer_tabla_t_multicapa(n_capas)
+            espesor_por_capa = self._leer_tabla_espesor_multicapa(n_capas)
+            k_por_capa = t_por_capa / espesor_por_capa
+
+            top_m = self.spin_top_multicapa.value()
+            botm_por_capa = np.empty(n_capas)
+            cota_actual = top_m
+            for k in range(n_capas):
+                cota_actual -= espesor_por_capa[k]
+                botm_por_capa[k] = cota_actual
+
+            condiciones = self._leer_tabla_multicapa_capa_fila_col_valor(self.tabla_borde_multicapa)
+            if not condiciones:
+                QMessageBox.warning(self, "Faltan condiciones de borde",
+                                     "Ingrese al menos una condición de carga fija (Dirichlet) en la tabla "
+                                     "de bordes multicapa (sección 6).")
+                return
+            fuentes = self._leer_tabla_multicapa_capa_fila_col_valor(self.tabla_fuentes_multicapa)
+            condiciones_rio = self._leer_tabla_rio_multicapa()
+            condiciones_dren = self._leer_tabla_dren_multicapa()
+
+            carpeta_trabajo = os.path.join(
+                tempfile.gettempdir(), "hydroandes_mf6", f"multicapa_{int(id(self)) % 100000}")
+            self.lbl_estado_mf6.setText("Estado: ejecutando MODFLOW 6 real (puede tardar unos segundos)...")
+            QApplication.processEvents()
+
+            resultado = modflow6_bridge.construir_y_ejecutar_modelo(
+                nombre_modelo="hydroandes_mc", carpeta_trabajo=carpeta_trabajo,
+                n_capas=n_capas, n_filas=n_filas, n_columnas=n_columnas, dx_m=dx, dy_m=dy,
+                top_m=top_m, botm_m=botm_por_capa, k_por_capa=k_por_capa, condiciones_borde=condiciones,
+                fuentes_sumideros=fuentes, condiciones_rio=condiciones_rio, condiciones_dren=condiciones_dren)
+
+            self.combo_capa_visualizar_mf6.blockSignals(True)
+            self.combo_capa_visualizar_mf6.clear()
+            for k in range(n_capas):
+                self.combo_capa_visualizar_mf6.addItem(f"Capa {k}", k)
+            self.combo_capa_visualizar_mf6.blockSignals(False)
+
+            self.resultado_flujo_multicapa_mf6 = {
+                "resultado": resultado, "n_capas": n_capas, "n_filas": n_filas, "n_columnas": n_columnas,
+                "dx": dx, "dy": dy,
+            }
+            self._on_cambiar_capa_visualizar_mf6()
+            self.lbl_estado_mf6.setText(
+                f"Estado: MODFLOW 6 (v{resultado['mf6_version']}) corrió exitosamente. "
+                f"Carpeta de trabajo: {carpeta_trabajo}")
+        except (modflow6_bridge.Modflow6Error, groundwater_flow.GroundwaterError) as e:
+            self.lbl_estado_mf6.setText("Estado: ERROR (ver mensaje).")
+            QMessageBox.critical(self, "Error al ejecutar MODFLOW 6 real", str(e))
+
+    def _on_cambiar_capa_visualizar_mf6(self):
+        if not self.resultado_flujo_multicapa_mf6:
+            return
+        k = self.combo_capa_visualizar_mf6.currentData()
+        if k is None:
+            return
+        r = self.resultado_flujo_multicapa_mf6
+        h_capa = r["resultado"]["cargas_h"][k]
+        self.canvas_mapa_mf6.plot_mapa_cargas(h_capa, r["dx"], r["dy"])
 
     def _actualizar_texto_resumen_flujo_subterraneo(self):
         r = self.resultado_flujo_subterraneo

@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.4.18
+version=0.4.19
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,46 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.4.19: Pestaña 19 (Flujo Subterráneo) -- Fase 3: MODFLOW 6 REAL
+      vía FloPy ("opción 1" elegida por el usuario junto con la
+      extensión del solver propio, tras comparar con su material de
+      un curso de modelamiento MODFLOW 6). Se instaló FloPy 3.10.0 en
+      el Python de QGIS del usuario (con su autorización explícita) y
+      se empaquetó bin/mf6.exe -- el mf6.exe original que el usuario
+      aportó (v6.0.4, 2019) resultó INCOMPATIBLE con el formato de
+      archivos de FloPy actual ("CONSTANT-HEAD CELL WENT DRY" al
+      escribir/leer el NPF); tras confirmarlo con el usuario, se
+      reemplazó por un v6.7.0 obtenido con la herramienta oficial
+      `get-modflow` de FloPy desde el repositorio oficial
+      github.com/MODFLOW-ORG/executables (dominio público, USGS).
+      Nuevo core/modflow6_bridge.py::construir_y_ejecutar_modelo() --
+      arma, ESCRIBE Y EJECUTA (mf6.exe real) un modelo MODFLOW 6
+      multicapa en régimen permanente, y lee de vuelta las cargas
+      resultantes. Reutiliza EXACTAMENTE los mismos diccionarios
+      (capa,fila,col) que resolver_flujo_multicapa_permanente()
+      (condiciones_borde/fuentes_sumideros/condiciones_rio/
+      condiciones_dren) -- differencia con el solver propio: MODFLOW 6
+      necesita K y cotas reales (top/botm), no solo T, de ahí los
+      parámetros adicionales. verificar_disponibilidad() informa si
+      falta FloPy o el ejecutable, con instrucciones claras.
+      plugin_dialog.py: nueva sub-sección "6b. Ejecutar este mismo
+      modelo con MODFLOW 6 REAL" en la Pestaña 19 -- botón de
+      verificación de disponibilidad, botón de ejecución que reutiliza
+      TODAS las tablas ya cargadas en la sección 6 (T/espesor por
+      capa -- nueva columna "Espesor" agregada a esa tabla --, cota
+      superior del modelo, bordes, pozos, RIV/DRN), K derivado de
+      T/espesor, y cotas de capa acumuladas desde la cota superior.
+      Visor de capa + mapa de cargas independiente del solver propio
+      (para no confundir qué motor produjo qué resultado).
+      Verificado: 12/12 (núcleo -- MODFLOW 6 real EJECUTADO de verdad
+      con el mf6.exe empaquetado, contrastado contra la solución
+      analítica EXACTA de un gradiente lineal Y contra el solver
+      propio del plugin resolviendo el MISMO problema -- dos motores
+      de cálculo independientes coincidieron dentro de 7.8e-5 m;
+      además un modelo de 2 capas con WEL+RIV+DRN+RCHA corriendo sin
+      error, y validaciones de datos inválidos) + 14/14 (integración
+      UI real en QGIS headless -- incluida una ejecución MODFLOW 6
+      completa de punta a punta desde los widgets del diálogo) -- 26/26.
     - v0.4.18: Pestaña 19 (Flujo Subterráneo) -- Fase 2b: UI del modelo
       MULTICAPA (el núcleo ya estaba listo desde v0.4.17). Nueva
       sección "6. Modelo MULTICAPA (cuasi-3D)": N° de capas, tabla de
