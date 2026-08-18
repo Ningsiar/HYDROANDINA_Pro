@@ -1204,18 +1204,33 @@ class HydroAndinaProDialog(QDialog):
             lt_km = longitud_total_m / 1000.0
             self.spin_lt_km.setValue(lt_km)
             self.spin_n_cauces.setValue(n_cauces)
-            # Lc (cauce principal) ya lo calcula la cadena de delimitación;
-            # se traslada aquí para no dejar el único campo restante en su
-            # mínimo mientras los otros dos quedan medidos.
-            lc_km = (self.morfometria_resultados or {}).get("lc_km")
-            if lc_km:
-                self.spin_lc_km.setValue(lc_km)
+            # Lc (cauce principal): ANTES se intentaba reusar
+            # self.morfometria_resultados["lc_km"], pero ese valor es
+            # circular -- solo existía DESPUÉS de calcular la morfometría,
+            # y su origen era el propio spin_lc_km (así que nunca traía
+            # nada nuevo; el campo se quedaba en su mínimo, 0.001 km, hasta
+            # que el usuario lo tecleaba a mano). Ahora se extrae aquí el
+            # mismo perfil longitudinal real del cauce principal que usa el
+            # Grupo 3 (core.main_channel, sobre la red de drenaje + punto
+            # de salida ya delineados), para que el campo llegue con el
+            # valor CALCULADO real -- el usuario puede seguir
+            # sobrescribiéndolo a mano si lo necesita.
+            lc_km_auto = None
+            if self.break_point_xy is not None and getattr(self, "dem_layer", None) is not None:
+                try:
+                    perfil_lc = main_channel.extraer_perfil_cauce_principal(
+                        capa, self.dem_layer, self.break_point_xy)
+                    lc_km_auto = perfil_lc["lc_km"]
+                    self.spin_lc_km.setValue(lc_km_auto)
+                except Exception:
+                    lc_km_auto = None  # se deja el valor previo/manual; no es un paso crítico
 
             self.lbl_estado_tab1.setText(
-                f"Red de drenaje medida: Lt = {lt_km:.3f} km en {n_cauces} cauces "
-                "(volcado a la Pestaña 2)."
+                f"Red de drenaje medida: Lt = {lt_km:.3f} km en {n_cauces} cauces"
+                + (f", Lc = {lc_km_auto:.3f} km (cauce principal)" if lc_km_auto else "")
+                + " (volcado a la Pestaña 2)."
             )
-            return {"lt_km": lt_km, "n_cauces": n_cauces}
+            return {"lt_km": lt_km, "n_cauces": n_cauces, "lc_km": lc_km_auto}
         except Exception:
             return None
 
@@ -4354,15 +4369,18 @@ class HydroAndinaProDialog(QDialog):
         v.addWidget(lbl_pruebas_bondad)
 
         self.tabla_distribuciones = QTableWidget(0, 8)
+        # Antes el encabezado solo mostraba las siglas (D (KS), A² (AD),
+        # χ²) y el nombre completo de la prueba quedaba escondido en el
+        # tooltip -- a simple vista no se identificaba qué prueba era cada
+        # columna. Ahora el encabezado lleva el símbolo Y el nombre
+        # extendido de la prueba estadística, en dos líneas (QHeaderView sí
+        # respeta saltos de línea '\n' y crece de alto automáticamente); el
+        # tooltip se conserva como referencia adicional al pasar el mouse.
         self.tabla_distribuciones.setHorizontalHeaderLabels(
-            ["Distribución", "Parámetros", "D (KS)", "D crít.", "A² (AD)", "A² crít.",
-             "χ² (p-valor)", "Pruebas que pasa"]
+            ["Distribución", "Parámetros", "D\n(Kolmogorov-Smirnov)", "D crít.\n(Kolmogorov-Smirnov)",
+             "A²\n(Anderson-Darling)", "A² crít.\n(Anderson-Darling)", "χ² p-valor\n(Chi-cuadrado)",
+             "Pruebas que pasa"]
         )
-        # Los símbolos ya identifican la prueba a quien conoce las siglas
-        # (D=Kolmogorov-Smirnov, A²=Anderson-Darling, χ²=Chi-cuadrado),
-        # pero no a simple vista -- se deja el nombre completo en el
-        # tooltip de cada encabezado, sin gastar ancho de columna en
-        # texto largo que ya está resuelto por el símbolo.
         for _col, _tip in ((2, "Prueba de Kolmogorov-Smirnov: estadístico D (máxima distancia entre "
                               "la distribución empírica y la ajustada)."),
                             (3, "Kolmogorov-Smirnov: valor D crítico al nivel de significancia elegido. "
@@ -4377,14 +4395,16 @@ class HydroAndinaProDialog(QDialog):
         # dejaba D(KS)/D crítico/¿Pasa KS? (textos cortos) demasiado
         # anchas y obligaba a usar scroll horizontal para ver "Parámetros"
         # completo. Ahora solo "Parámetros" se lleva el espacio sobrante;
-        # el resto tiene un ancho fijo angosto acorde a su contenido.
+        # el resto tiene un ancho fijo, angosto pero suficiente para el
+        # nombre completo de dos líneas de cada prueba.
         cabecera_dist = self.tabla_distribuciones.horizontalHeader()
         cabecera_dist.setSectionResizeMode(0, QHeaderView.Interactive)
         cabecera_dist.setSectionResizeMode(1, QHeaderView.Stretch)
+        cabecera_dist.setDefaultAlignment(Qt.AlignCenter)
         for _col_fija in (2, 3, 4, 5, 6, 7):
             cabecera_dist.setSectionResizeMode(_col_fija, QHeaderView.Fixed)
         self.tabla_distribuciones.setColumnWidth(0, 200)
-        for _col_fija, _ancho in ((2, 70), (3, 70), (4, 70), (5, 70), (6, 95), (7, 150)):
+        for _col_fija, _ancho in ((2, 130), (3, 130), (4, 115), (5, 115), (6, 110), (7, 150)):
             self.tabla_distribuciones.setColumnWidth(_col_fija, _ancho)
         v.addWidget(self.tabla_distribuciones)
 

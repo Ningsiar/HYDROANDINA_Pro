@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.4.20
+version=0.4.21
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,38 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.4.21: dos correcciones pedidas por el usuario. 1) Pestaña 2
+      (Morfometría): el campo "Longitud del cauce principal Lc (km)"
+      quedaba en el mínimo del rango (0.001 km) esperando que el
+      usuario lo tecleara a mano, incluso aunque el Grupo 3 de la tabla
+      de resultados ya mostraba el Lc REAL calculado a partir del
+      perfil longitudinal automático del cauce principal
+      (core.main_channel, sobre la red de drenaje + punto de salida).
+      El intento anterior de autocompletarlo
+      (_autocompletar_red_drenaje_pestana2) era circular: leía
+      self.morfometria_resultados["lc_km"], que a su vez SOLO existía
+      después de calcular la morfometría y provenía del propio campo
+      manual, así que nunca aportaba nada nuevo. Ahora, al terminar la
+      delimitación (Pasos A y B), se extrae ahí mismo el perfil real
+      del cauce principal y el campo se autocompleta con el valor
+      calculado (~el mismo que la fila "Longitud del cauce principal"
+      del Grupo 3); el usuario puede seguir sobrescribiéndolo a mano si
+      lo necesita. 2) Pestaña 5, "1. Precipitación máxima en 24 h" /
+      item 2 "Análisis de frecuencia": la tabla de bondad de ajuste
+      mostraba solo las siglas de cada prueba estadística (D (KS),
+      A² (AD), χ²) con el nombre completo escondido en el tooltip.
+      Ahora el encabezado de cada columna incluye el símbolo Y el
+      nombre extendido de la prueba en dos líneas (D / Kolmogorov-
+      Smirnov, D crít. / Kolmogorov-Smirnov, A² / Anderson-Darling,
+      A² crít. / Anderson-Darling, χ² p-valor / Chi-cuadrado), con las
+      columnas ensanchadas para que el texto no se corte; el mismo
+      ajuste se aplicó a la tabla de bondad de ajuste del reporte Word
+      exportado (core/report_generator.py). Verificado con prueba
+      real-QGIS-headless (17/17 checks OK): Lc autocompletado con un
+      cauce sintético de 1.000 km (con red de drenaje + MDE
+      sintéticos), caso sin punto de salida definido (no crashea, no
+      toca el campo), y los 6 encabezados de la tabla de bondad de
+      ajuste con su nombre extendido y tooltips intactos.
     - v0.4.20: Pestaña 5, sección "1d. Análisis de Outliers" -- ahora
       tiene su propio gráfico y cuadro resumen de alto impacto, igual
       que el resto del plugin (pedido explícito del usuario). Nuevo

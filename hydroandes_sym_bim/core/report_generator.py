@@ -185,7 +185,9 @@ def _seccion_frecuencia(doc, contexto: dict):
         params_str = ", ".join(f"{k}={v:.4f}" for k, v in r["parametros"].items())
         filas.append((r["nombre"] + marca, params_str, r["D_ks"], r["D_critico"], "Sí" if r["pasa_ks"] else "No"))
     if filas:
-        _agregar_tabla_desde_filas(doc, ["Distribución", "Parámetros", "D (KS)", "D crítico", "¿Pasa KS?"], filas)
+        _agregar_tabla_desde_filas(
+            doc, ["Distribución", "Parámetros", "D (Kolmogorov-Smirnov)", "D crítico (Kolmogorov-Smirnov)",
+                  "¿Pasa Kolmogorov-Smirnov?"], filas)
 
     p24 = contexto.get("p24_disenio")
     if p24:
