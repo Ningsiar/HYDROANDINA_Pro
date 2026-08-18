@@ -69,6 +69,54 @@ class FrequencyCanvas(FigureCanvas):
         self.fig.tight_layout()
         self.draw()
 
+    def plot_outliers(self, detalle, umbral_alto_mm: float, umbral_bajo_mm: float, unidad: str = "mm"):
+        """
+        Gráfico de alto impacto de la prueba de outliers de Grubbs-Beck
+        (core/outlier_analysis.py::detectar_outliers_grubbs_beck) --
+        serie completa contra el año (o el índice, si no hay años),
+        con los outliers altos/bajos resaltados y los umbrales como
+        líneas horizontales de referencia.
+
+        detalle: lista de dicts {"indice","anio","valor_mm",
+            "es_outlier_alto","es_outlier_bajo"} -- el campo "detalle"
+            del resultado de detectar_outliers_grubbs_beck().
+        """
+        self.ax.clear()
+        hay_anios = any(d["anio"] is not None for d in detalle)
+        x = [d["anio"] if hay_anios else d["indice"] for d in detalle]
+        y = [d["valor_mm"] for d in detalle]
+        self.ax.plot(x, y, "-", color="#B7C4D6", linewidth=0.9, zorder=1, alpha=0.7)
+
+        x_norm = [xi for xi, d in zip(x, detalle) if not d["es_outlier_alto"] and not d["es_outlier_bajo"]]
+        y_norm = [d["valor_mm"] for d in detalle if not d["es_outlier_alto"] and not d["es_outlier_bajo"]]
+        self.ax.scatter(x_norm, y_norm, s=32, color="#1F3864", label="Datos", zorder=3,
+                        edgecolor="white", linewidth=0.4)
+
+        x_altos = [xi for xi, d in zip(x, detalle) if d["es_outlier_alto"]]
+        y_altos = [d["valor_mm"] for d in detalle if d["es_outlier_alto"]]
+        if x_altos:
+            self.ax.scatter(x_altos, y_altos, s=90, color="#B3261E", marker="^",
+                            label="Outlier ALTO", zorder=4, edgecolor="black", linewidth=0.7)
+
+        x_bajos = [xi for xi, d in zip(x, detalle) if d["es_outlier_bajo"]]
+        y_bajos = [d["valor_mm"] for d in detalle if d["es_outlier_bajo"]]
+        if x_bajos:
+            self.ax.scatter(x_bajos, y_bajos, s=90, color="#B3811E", marker="v",
+                            label="Outlier BAJO", zorder=4, edgecolor="black", linewidth=0.7)
+
+        self.ax.axhline(umbral_alto_mm, color="#B3261E", linestyle="--", linewidth=1.3,
+                        label=f"Umbral alto = {umbral_alto_mm:.1f} {unidad}", zorder=2)
+        self.ax.axhline(umbral_bajo_mm, color="#B3811E", linestyle="--", linewidth=1.3,
+                        label=f"Umbral bajo = {umbral_bajo_mm:.1f} {unidad}", zorder=2)
+
+        self.ax.set_xlabel("Año" if hay_anios else "Posición en la serie")
+        self.ax.set_ylabel(f"P24h ({unidad})")
+        self.ax.set_title("Prueba de outliers de Grubbs-Beck (Bulletin 17B)", pad=12)
+        leyenda_impacto(self.ax, loc="upper center", ncol=2, fuera=True)
+        self.ax.grid(True, linestyle=":", linewidth=0.5)
+        self.fig.tight_layout()
+        self.draw()
+
     def plot_no_estacionario(self, comparacion: dict, serie_observada, anios):
         """
         Análisis de frecuencia no estacionario en dos paneles:

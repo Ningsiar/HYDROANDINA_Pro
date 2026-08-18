@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.4.19
+version=0.4.20
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,23 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.4.20: Pestaña 5, sección "1d. Análisis de Outliers" -- ahora
+      tiene su propio gráfico y cuadro resumen de alto impacto, igual
+      que el resto del plugin (pedido explícito del usuario). Nuevo
+      FrequencyCanvas.plot_outliers(): serie completa de P24h contra
+      el año (o el índice, si no hay años), con los outliers altos
+      (triángulo rojo) y bajos (triángulo naranja) resaltados sobre
+      los datos normales, más las líneas horizontales de umbral alto/
+      bajo de la prueba de Grubbs-Beck (Bulletin 17B). Nuevo
+      CuadroResumenImpacto con el conteo total de outliers, tipo
+      "atención" (si se detectó al menos uno) o "éxito" (si no se
+      detectó ninguno), y métricas de outliers altos/bajos y ambos
+      umbrales en mm. Verificado con prueba real-QGIS-headless (17/17
+      checks OK): existencia de los widgets, escenario CON outliers
+      (año con valor 4x el resto -> gráfico, tabla de detalle y cuadro
+      resumen correctos) y escenario SIN outliers (serie homogénea ->
+      cuadro resumen "SIN OUTLIERS" tipo éxito, tabla de detalle
+      vacía).
     - v0.4.19: Pestaña 19 (Flujo Subterráneo) -- Fase 3: MODFLOW 6 REAL
       vía FloPy ("opción 1" elegida por el usuario junto con la
       extensión del solver propio, tras comparar con su material de

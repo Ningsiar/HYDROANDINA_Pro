@@ -4278,6 +4278,14 @@ class HydroAndinaProDialog(QDialog):
         self.tabla_outliers_p24 = crear_tabla_parametros()
         v_outliers.addWidget(self.tabla_outliers_p24)
 
+        self.cuadro_outliers_p24 = CuadroResumenImpacto(ancho_maximo=700)
+        self.cuadro_outliers_p24.actualizar(
+            titulo="SIN CALCULAR", valor_principal="—",
+            subtitulo="Pulse \"Detectar outliers altos/bajos\" para calcular.")
+        centrar_en_layout(self.cuadro_outliers_p24, v_outliers)
+        self.canvas_outliers_p24 = FrequencyCanvas(self, width=6.5, height=4.2)
+        v_outliers.addWidget(self.canvas_outliers_p24)
+
         v_outliers.addWidget(QLabel("<i>Años marcados como outlier (vacío si no se detectó ninguno):</i>"))
         self.tabla_outliers_detalle_p24 = QTableWidget(0, 3)
         self.tabla_outliers_detalle_p24.setHorizontalHeaderLabels(["Año", "Valor (mm)", "Tipo"])
@@ -6294,6 +6302,23 @@ class HydroAndinaProDialog(QDialog):
         ]
         poblar_tabla_parametros(self.tabla_outliers_p24, filas)
 
+        self.canvas_outliers_p24.plot_outliers(
+            resultado["detalle"], resultado["umbral_alto_mm"], resultado["umbral_bajo_mm"])
+
+        n_altos = len(resultado["indices_outliers_altos"])
+        n_bajos = len(resultado["indices_outliers_bajos"])
+        self.cuadro_outliers_p24.actualizar(
+            titulo="OUTLIERS DETECTADOS" if resultado["hay_outliers"] else "SIN OUTLIERS",
+            valor_principal=f"{n_altos + n_bajos} de {resultado['n']} años",
+            subtitulo=f"Grubbs-Beck (Bulletin 17B), α=10%, Kn={resultado['kn']}",
+            metricas=[
+                ("Outliers altos", n_altos), ("Outliers bajos", n_bajos),
+                ("Umbral alto (mm)", resultado["umbral_alto_mm"]),
+                ("Umbral bajo (mm)", resultado["umbral_bajo_mm"]),
+            ],
+            leyenda="Un outlier no es automáticamente un dato erróneo -- revise antes de excluirlo.",
+            tipo="atencion" if resultado["hay_outliers"] else "exito")
+
         outliers = [d for d in resultado["detalle"] if d["es_outlier_alto"] or d["es_outlier_bajo"]]
         self.tabla_outliers_detalle_p24.setRowCount(len(outliers))
         for row, d in enumerate(outliers):
@@ -6305,8 +6330,6 @@ class HydroAndinaProDialog(QDialog):
         ajustar_alto_tabla(self.tabla_outliers_detalle_p24, filas_visibles_max=6)
 
         if resultado["hay_outliers"]:
-            n_altos = len(resultado["indices_outliers_altos"])
-            n_bajos = len(resultado["indices_outliers_bajos"])
             self.lbl_estado_outliers_p24.setText(
                 f"Estado: {n_altos} outlier(s) alto(s) y {n_bajos} outlier(s) bajo(s) detectados "
                 "(Grubbs-Beck, Bulletin 17B, α=10%). Revise si corresponden a un error de medición/"
