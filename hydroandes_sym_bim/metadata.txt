@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.4.17
+version=0.4.18
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,24 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.4.18: Pestaña 19 (Flujo Subterráneo) -- Fase 2b: UI del modelo
+      MULTICAPA (el núcleo ya estaba listo desde v0.4.17). Nueva
+      sección "6. Modelo MULTICAPA (cuasi-3D)": N° de capas, tabla de
+      T por capa, tabla de goteo/VCONT entre interfaces, y tablas de
+      condiciones de borde/fuentes/RIV/DRN con la CAPA como primer
+      dato de cada fila (reutiliza la malla filas/columnas/dx/dy ya
+      configurada en la sección 3). Selector de capa a visualizar +
+      mapa de cargas de esa capa. El estado final reporta el goteo
+      neto en cada interfaz entre capas.
+      plugin_dialog.py: nuevos parsers _leer_tabla_t_multicapa()/
+      _leer_tabla_leakance_multicapa()/_leer_tabla_multicapa_capa_fila_col_valor()/
+      _leer_tabla_rio_multicapa()/_leer_tabla_dren_multicapa().
+      Verificado: 23/23 (integración UI real en QGIS headless --
+      parsers de las 6 tablas nuevas, validaciones de datos
+      faltantes, y el mismo caso de balance de masa EXACTO ya
+      verificado en el núcleo -- capa sin condición de borde propia +
+      pozo, el goteo entre capas balancea exacto el caudal bombeado
+      -- reproducido de punta a punta desde los widgets reales).
     - v0.4.17: Pestaña 19 (Flujo Subterráneo) -- Fase 2 de la mejora
       hidrogeológica pedida por el usuario: MULTICAPA (núcleo) y
       RÉGIMEN TRANSITORIO (núcleo + UI).

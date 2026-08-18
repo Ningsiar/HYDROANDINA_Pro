@@ -420,6 +420,7 @@ class HydroAndinaProDialog(QDialog):
         # --- Pestaña Flujo Subterráneo ---
         self.resultado_flujo_subterraneo = None  # dict con cargas h, velocidades, convergencia
         self.resultado_flujo_transitorio = None  # dict con la serie temporal del régimen transitorio (sección 5)
+        self.resultado_flujo_multicapa = None  # dict con cargas h (n_capas,n_filas,n_columnas) del modelo multicapa (sección 6)
         # --- Pestaña Hidráulica de Pozos ---
         self.resultado_pozo = {}  # dict con resultados de las distintas secciones (Theis, Cooper-Jacob, perdidas, radios)
         # --- gestor de cuencas delimitadas (varias en la misma sesión) ---
@@ -17524,6 +17525,95 @@ class HydroAndinaProDialog(QDialog):
         v_trans.addWidget(self.lbl_estado_transitorio)
         v.addWidget(gb_transitorio)
 
+        # ---------------- Modelo multicapa (cuasi-3D) ----------------
+        gb_multicapa = QGroupBox("6. Modelo MULTICAPA (cuasi-3D) — capas acopladas por goteo vertical")
+        v_multi = QVBoxLayout(gb_multicapa)
+        lbl_multi = QLabel(
+            "Extiende el flujo 2D a VARIAS capas horizontales apiladas, acopladas por goteo vertical "
+            "(leakance/VCONT) entre capas adyacentes -- el mismo esquema cuasi-3D de los paquetes BCF/LPF "
+            "de MODFLOW. Reutiliza la malla (filas/columnas/dx/dy) de la sección 3. Cada fila de las tablas "
+            "de abajo indica la CAPA (0-index, 0 = superior) como primer dato."
+        )
+        lbl_multi.setWordWrap(True)
+        v_multi.addWidget(lbl_multi)
+
+        f_multi = QFormLayout()
+        f_multi.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.spin_n_capas_multicapa = QSpinBox()
+        self.spin_n_capas_multicapa.setRange(1, 6); self.spin_n_capas_multicapa.setValue(2)
+        f_multi.addRow("Número de capas:", self.spin_n_capas_multicapa)
+        v_multi.addLayout(f_multi)
+
+        v_multi.addWidget(QLabel("Transmisividad homogénea por capa — capa (0-index), T (m²/s):"))
+        self.tabla_t_multicapa = TablaPegable(6, 2)
+        self.tabla_t_multicapa.setHorizontalHeaderLabels(["Capa", "T (m²/s)"])
+        self.tabla_t_multicapa.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.tabla_t_multicapa.setMinimumHeight(120)
+        v_multi.addWidget(self.tabla_t_multicapa)
+
+        v_multi.addWidget(QLabel(
+            "Goteo vertical (leakance/VCONT) entre cada par de capas adyacentes — interfaz (0 = entre capa "
+            "0 y 1, 1 = entre capa 1 y 2, ...), VCONT (1/s; use leakance_entre_capas=Kv1·Kv2/(b1·Kv2/2+b2·Kv1/2) "
+            "si conoce Kv y espesor de cada capa):"))
+        self.tabla_leakance_multicapa = TablaPegable(5, 2)
+        self.tabla_leakance_multicapa.setHorizontalHeaderLabels(["Interfaz", "VCONT (1/s)"])
+        self.tabla_leakance_multicapa.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.tabla_leakance_multicapa.setMinimumHeight(100)
+        v_multi.addWidget(self.tabla_leakance_multicapa)
+
+        v_multi.addWidget(QLabel("Condiciones de carga fija (Dirichlet) — capa, fila, columna, H fijo (m):"))
+        self.tabla_borde_multicapa = TablaPegable(10, 4)
+        self.tabla_borde_multicapa.setHorizontalHeaderLabels(["Capa", "Fila", "Columna", "H fijo (m)"])
+        self.tabla_borde_multicapa.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.tabla_borde_multicapa.setMinimumHeight(160)
+        v_multi.addWidget(self.tabla_borde_multicapa)
+
+        v_multi.addWidget(QLabel(
+            "Fuentes/sumideros (pozos, recarga puntual) — capa, fila, columna, Q (m³/s; + recarga, − bombeo):"))
+        self.tabla_fuentes_multicapa = TablaPegable(10, 4)
+        self.tabla_fuentes_multicapa.setHorizontalHeaderLabels(["Capa", "Fila", "Columna", "Q (m³/s)"])
+        self.tabla_fuentes_multicapa.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.tabla_fuentes_multicapa.setMinimumHeight(160)
+        v_multi.addWidget(self.tabla_fuentes_multicapa)
+
+        v_multi.addWidget(QLabel(
+            "Celdas tipo río (RIV, normalmente solo capa 0) — capa, fila, columna, conductancia C (m²/s), "
+            "nivel del río (m), fondo del lecho (m):"))
+        self.tabla_rio_multicapa = TablaPegable(6, 6)
+        self.tabla_rio_multicapa.setHorizontalHeaderLabels(
+            ["Capa", "Fila", "Columna", "Conductancia C (m²/s)", "Nivel río (m)", "Fondo lecho (m)"])
+        self.tabla_rio_multicapa.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.tabla_rio_multicapa.setMinimumHeight(120)
+        v_multi.addWidget(self.tabla_rio_multicapa)
+
+        v_multi.addWidget(QLabel(
+            "Celdas tipo dren (DRN) — capa, fila, columna, conductancia C (m²/s), nivel del dren (m):"))
+        self.tabla_dren_multicapa = TablaPegable(6, 5)
+        self.tabla_dren_multicapa.setHorizontalHeaderLabels(
+            ["Capa", "Fila", "Columna", "Conductancia C (m²/s)", "Nivel dren (m)"])
+        self.tabla_dren_multicapa.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.tabla_dren_multicapa.setMinimumHeight(120)
+        v_multi.addWidget(self.tabla_dren_multicapa)
+
+        btn_resolver_multicapa = QPushButton("Resolver flujo multicapa")
+        btn_resolver_multicapa.clicked.connect(self._on_resolver_flujo_multicapa)
+        v_multi.addWidget(btn_resolver_multicapa)
+
+        h_capa_vis = QHBoxLayout()
+        h_capa_vis.addWidget(QLabel("Capa a visualizar:"))
+        self.combo_capa_visualizar_multicapa = QComboBox()
+        self.combo_capa_visualizar_multicapa.currentIndexChanged.connect(self._on_cambiar_capa_visualizar_multicapa)
+        h_capa_vis.addWidget(self.combo_capa_visualizar_multicapa)
+        h_capa_vis.addStretch()
+        v_multi.addLayout(h_capa_vis)
+
+        self.canvas_mapa_multicapa = GroundwaterCanvas(width=7.6, height=5.4)
+        v_multi.addWidget(self.canvas_mapa_multicapa)
+        self.lbl_estado_multicapa = QLabel("Estado: en espera.")
+        self.lbl_estado_multicapa.setWordWrap(True)
+        v_multi.addWidget(self.lbl_estado_multicapa)
+        v.addWidget(gb_multicapa)
+
         v.addWidget(QLabel("<b>Cuadro resumen final:</b>"))
         self.texto_resumen_flujo_subterraneo = ResumenFinal()
         v.addWidget(self.texto_resumen_flujo_subterraneo)
@@ -17758,6 +17848,167 @@ class HydroAndinaProDialog(QDialog):
         except groundwater_flow.GroundwaterError as e:
             self.lbl_estado_transitorio.setText("Estado: ERROR (ver mensaje).")
             QMessageBox.critical(self, "Error en la simulación transitoria", str(e))
+
+    # ---------------- Modelo multicapa (sección 6) ----------------
+    def _leer_tabla_t_multicapa(self, n_capas):
+        valores = {}
+        for i in range(self.tabla_t_multicapa.rowCount()):
+            item_capa = self.tabla_t_multicapa.item(i, 0)
+            item_t = self.tabla_t_multicapa.item(i, 1)
+            if item_capa and item_t and item_capa.text().strip():
+                try:
+                    valores[int(float(item_capa.text().replace(",", ".")))] = float(item_t.text().replace(",", "."))
+                except ValueError:
+                    continue
+        faltantes = [k for k in range(n_capas) if k not in valores]
+        if faltantes:
+            raise groundwater_flow.GroundwaterError(
+                f"Falta la transmisividad T de la(s) capa(s) {faltantes} en la tabla de T por capa.")
+        return np.array([valores[k] for k in range(n_capas)])
+
+    def _leer_tabla_leakance_multicapa(self, n_capas):
+        if n_capas <= 1:
+            return None
+        valores = {}
+        for i in range(self.tabla_leakance_multicapa.rowCount()):
+            item_interfaz = self.tabla_leakance_multicapa.item(i, 0)
+            item_v = self.tabla_leakance_multicapa.item(i, 1)
+            if item_interfaz and item_v and item_interfaz.text().strip():
+                try:
+                    valores[int(float(item_interfaz.text().replace(",", ".")))] = float(
+                        item_v.text().replace(",", "."))
+                except ValueError:
+                    continue
+        faltantes = [k for k in range(n_capas - 1) if k not in valores]
+        if faltantes:
+            raise groundwater_flow.GroundwaterError(
+                f"Falta el VCONT de la(s) interfaz(ces) {faltantes} en la tabla de goteo entre capas "
+                f"(con {n_capas} capas se necesitan {n_capas - 1} interfaces, numeradas 0..{n_capas - 2}).")
+        return np.array([valores[k] for k in range(n_capas - 1)])
+
+    def _leer_tabla_multicapa_capa_fila_col_valor(self, tabla):
+        pares = {}
+        for i in range(tabla.rowCount()):
+            item_k = tabla.item(i, 0)
+            item_f = tabla.item(i, 1)
+            item_c = tabla.item(i, 2)
+            item_v = tabla.item(i, 3)
+            if item_k and item_f and item_c and item_v and item_k.text().strip():
+                try:
+                    capa = int(float(item_k.text().replace(",", ".")))
+                    fila = int(float(item_f.text().replace(",", ".")))
+                    col = int(float(item_c.text().replace(",", ".")))
+                    pares[(capa, fila, col)] = float(item_v.text().replace(",", "."))
+                except ValueError:
+                    continue
+        return pares
+
+    def _leer_tabla_rio_multicapa(self):
+        condiciones_rio = {}
+        for i in range(self.tabla_rio_multicapa.rowCount()):
+            item_k = self.tabla_rio_multicapa.item(i, 0)
+            item_f = self.tabla_rio_multicapa.item(i, 1)
+            item_c = self.tabla_rio_multicapa.item(i, 2)
+            item_cond = self.tabla_rio_multicapa.item(i, 3)
+            item_nivel = self.tabla_rio_multicapa.item(i, 4)
+            item_fondo = self.tabla_rio_multicapa.item(i, 5)
+            if item_k and item_f and item_c and item_cond and item_nivel and item_fondo and item_k.text().strip():
+                try:
+                    capa = int(float(item_k.text().replace(",", ".")))
+                    fila = int(float(item_f.text().replace(",", ".")))
+                    col = int(float(item_c.text().replace(",", ".")))
+                    condiciones_rio[(capa, fila, col)] = {
+                        "conductancia": float(item_cond.text().replace(",", ".")),
+                        "nivel": float(item_nivel.text().replace(",", ".")),
+                        "fondo": float(item_fondo.text().replace(",", ".")),
+                    }
+                except ValueError:
+                    continue
+        return condiciones_rio
+
+    def _leer_tabla_dren_multicapa(self):
+        condiciones_dren = {}
+        for i in range(self.tabla_dren_multicapa.rowCount()):
+            item_k = self.tabla_dren_multicapa.item(i, 0)
+            item_f = self.tabla_dren_multicapa.item(i, 1)
+            item_c = self.tabla_dren_multicapa.item(i, 2)
+            item_cond = self.tabla_dren_multicapa.item(i, 3)
+            item_nivel = self.tabla_dren_multicapa.item(i, 4)
+            if item_k and item_f and item_c and item_cond and item_nivel and item_k.text().strip():
+                try:
+                    capa = int(float(item_k.text().replace(",", ".")))
+                    fila = int(float(item_f.text().replace(",", ".")))
+                    col = int(float(item_c.text().replace(",", ".")))
+                    condiciones_dren[(capa, fila, col)] = {
+                        "conductancia": float(item_cond.text().replace(",", ".")),
+                        "nivel": float(item_nivel.text().replace(",", ".")),
+                    }
+                except ValueError:
+                    continue
+        return condiciones_dren
+
+    def _on_resolver_flujo_multicapa(self):
+        try:
+            n_capas = self.spin_n_capas_multicapa.value()
+            n_filas = self.spin_filas_2d.value()
+            n_columnas = self.spin_columnas_2d.value()
+            dx, dy = self.spin_dx_2d.value(), self.spin_dy_2d.value()
+
+            t_por_capa = self._leer_tabla_t_multicapa(n_capas)
+            leakance = self._leer_tabla_leakance_multicapa(n_capas)
+            condiciones = self._leer_tabla_multicapa_capa_fila_col_valor(self.tabla_borde_multicapa)
+            if not condiciones:
+                QMessageBox.warning(self, "Faltan condiciones de borde",
+                                     "Ingrese al menos una condición de carga fija (Dirichlet) en la tabla "
+                                     "de bordes multicapa.")
+                return
+            fuentes = self._leer_tabla_multicapa_capa_fila_col_valor(self.tabla_fuentes_multicapa)
+            condiciones_rio = self._leer_tabla_rio_multicapa()
+            condiciones_dren = self._leer_tabla_dren_multicapa()
+
+            resultado = groundwater_flow.resolver_flujo_multicapa_permanente(
+                n_capas, n_filas, n_columnas, dx, dy, t_por_capa, condiciones, fuentes,
+                leakance_s1=leakance, condiciones_rio=condiciones_rio, condiciones_dren=condiciones_dren,
+                tol_m=1e-6, max_iter=20000)
+
+            self.combo_capa_visualizar_multicapa.blockSignals(True)
+            self.combo_capa_visualizar_multicapa.clear()
+            for k in range(n_capas):
+                self.combo_capa_visualizar_multicapa.addItem(f"Capa {k}", k)
+            self.combo_capa_visualizar_multicapa.blockSignals(False)
+
+            self.resultado_flujo_multicapa = {
+                "resultado": resultado, "n_capas": n_capas, "n_filas": n_filas, "n_columnas": n_columnas,
+                "dx": dx, "dy": dy,
+            }
+            self._on_cambiar_capa_visualizar_multicapa()
+
+            texto_interfaces = "; ".join(
+                f"interfaz {k}: {q:+.5f} m³/s" for k, q in enumerate(resultado["caudal_leakance_por_interfaz_m3s"]))
+            if resultado["convergio"]:
+                self.lbl_estado_multicapa.setText(
+                    f"Estado: convergió en {resultado['iteraciones']} iteraciones "
+                    f"(residuo final = {resultado['residuo_final_m']:.2e} m). "
+                    f"Goteo entre capas: {texto_interfaces or '(sin interfaces, 1 capa)'}.")
+            else:
+                self.lbl_estado_multicapa.setText(
+                    "Estado: ADVERTENCIA -- no convergió completamente (ver resultados con cautela).")
+                QMessageBox.warning(self, "No convergió completamente",
+                                     f"Se alcanzó el máximo de iteraciones con un residuo de "
+                                     f"{resultado['residuo_final_m']:.2e} m. Aumente max_iter o revise la malla.")
+        except groundwater_flow.GroundwaterError as e:
+            self.lbl_estado_multicapa.setText("Estado: ERROR (ver mensaje).")
+            QMessageBox.critical(self, "Error en el modelo multicapa", str(e))
+
+    def _on_cambiar_capa_visualizar_multicapa(self):
+        if not self.resultado_flujo_multicapa:
+            return
+        k = self.combo_capa_visualizar_multicapa.currentData()
+        if k is None:
+            return
+        r = self.resultado_flujo_multicapa
+        h_capa = r["resultado"]["cargas_h"][k]
+        self.canvas_mapa_multicapa.plot_mapa_cargas(h_capa, r["dx"], r["dy"])
 
     def _actualizar_texto_resumen_flujo_subterraneo(self):
         r = self.resultado_flujo_subterraneo
