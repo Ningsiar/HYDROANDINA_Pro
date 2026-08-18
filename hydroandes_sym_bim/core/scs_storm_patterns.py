@@ -27,9 +27,18 @@ curva NRCS exacta, use `cargar_tabla_oficial_csv()` para reemplazar esta
 aproximación por los valores tabulados oficiales (obtenibles del
 apéndice B de TR-55 o de WinTR-55), en vez de la curva aproximada aquí
 generada.
+
+ADEMÁS de los 4 tipos SCS aproximados, este módulo expone
+`curva_cusco_astete_2015()`: el patrón de tormenta de 24h de la
+estación KAYRA (Cusco), Astete, E. (2015) -- a diferencia de los tipos
+SCS, esta SÍ es una curva TABULADA (241 puntos cada 6 min), aportada
+directamente por el usuario y verificada contra su propia hoja de
+cálculo (ver docstring de esa función).
 """
 import csv
+import json
 import math
+import os
 from typing import List, Tuple, Optional
 
 
@@ -99,6 +108,34 @@ def cargar_tabla_oficial_csv(ruta_csv: str) -> List[Tuple[float, float]]:
     if abs(puntos[-1][0] - 1.0) > 1e-6 or abs(puntos[-1][1] - 1.0) > 1e-6:
         raise ValueError("La curva debe terminar en (t=1, F=1).")
     return puntos
+
+
+_CURVA_CUSCO_CACHE: Optional[List[Tuple[float, float]]] = None
+
+
+def curva_cusco_astete_2015() -> List[Tuple[float, float]]:
+    """
+    Curva adimensional TABULADA (no una aproximación paramétrica como los
+    tipos I/IA/II/III de arriba) del patrón de tormenta de 24 horas de la
+    estación KAYRA (Cusco), Astete, E. (2015) -- 241 puntos cada 6 minutos,
+    aportados por el usuario en su hoja de cálculo "Patron Tormenta -
+    CUSCO.xlsx" (hoja "PATRON"; verificados en este plugin contra las
+    hojas "PRUEBA 1/2 Max 24Hrs" del mismo archivo, que aplican esta
+    misma curva a P24 de Tr=100/200/500/1000 años -- ver
+    resources/patron_tormenta_cusco_astete_2015.json para la fuente
+    exacta y la trazabilidad completa).
+
+    A diferencia de curva_adimensional() (SCS I/IA/II/III), esta SÍ es la
+    tabla original del autor, no una forma aproximada -- se usa
+    directamente como `curva_personalizada` de hietograma_scs()."""
+    global _CURVA_CUSCO_CACHE
+    if _CURVA_CUSCO_CACHE is None:
+        ruta = os.path.join(os.path.dirname(__file__), "..", "resources",
+                             "patron_tormenta_cusco_astete_2015.json")
+        with open(ruta, "r", encoding="utf-8") as f:
+            datos = json.load(f)
+        _CURVA_CUSCO_CACHE = [(float(t), float(f)) for t, f in datos["curva"]]
+    return _CURVA_CUSCO_CACHE
 
 
 def hietograma_scs(p_total_mm: float, duracion_total_h: float, dt_h: float,

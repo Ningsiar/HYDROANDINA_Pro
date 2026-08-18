@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.4.13
+version=0.4.14
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,33 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.4.14: NUEVO -- patrón de tormenta de 24h del Cusco (estación
+      KAYRA), Astete, E. (2015), agregado a la Pestaña 6 como noveno
+      método de desagregación temporal, a pedido explícito del
+      usuario, que aportó su propia hoja de cálculo
+      ("Patron Tormenta - CUSCO.xlsx"). A diferencia de los 4 patrones
+      SCS I/IA/II/III (una aproximación paramétrica de la forma
+      general de cada tipo, documentada así en el propio módulo), esta
+      SÍ es la curva TABULADA original del autor: 241 puntos cada 6
+      minutos (t/24h, Pt/P24), extraídos de la hoja "PATRON" del
+      Excel del usuario.
+      Nuevo resources/patron_tormenta_cusco_astete_2015.json (la tabla
+      completa + metadatos de trazabilidad). Nuevo
+      core/scs_storm_patterns.py::curva_cusco_astete_2015() (cargador
+      con caché) -- se reutiliza tal cual la función existente
+      hietograma_scs(curva_personalizada=...), sin duplicar lógica de
+      interpolación. plugin_dialog.py: nueva opción "Patrón Cusco —
+      Astete, E. (2015), KAYRA (curva tabulada)" en el combo de
+      métodos de desagregación (Pestaña 6); al elegirla se deshabilitan
+      duración/exponente igual que con SCS (curva fija de 24h).
+      Verificado: 16/16 (núcleo -- la curva embebida reproduce EXACTO
+      los incrementos calculados en la propia hoja de cálculo del
+      usuario, contrastados contra la hoja "PATRON" y contra las hojas
+      "PRUEBA 1/2 Max 24Hrs" con P24 de Tr=100/200/1000 años; suma
+      total = P24 en todos los casos) + 9/9 (integración UI real en
+      QGIS headless -- opción en el combo, deshabilitado de
+      duración/exponente, flujo completo del botón "Generar
+      hietograma") -- 25/25.
     - v0.4.13: NUEVO -- visor 3D "workspace view" del relieve en la
       Pestaña 1 (DEM y Delimitación), a pedido explícito del usuario:
       subventana a la DERECHA con un render 3D de alto impacto,
