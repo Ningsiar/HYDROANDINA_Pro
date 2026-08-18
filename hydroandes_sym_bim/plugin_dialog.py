@@ -6573,7 +6573,7 @@ class HydroAndinaProDialog(QDialog):
                 ("Patrón SCS Tipo IA (aproximado)", "scs_IA"),
                 ("Patrón SCS Tipo II (aproximado)", "scs_II"),
                 ("Patrón SCS Tipo III (aproximado)", "scs_III"),
-                ("Patrón Cusco — Astete, E. (2015), KAYRA (curva tabulada)", "cusco_astete")):
+                ("Patrón Tormenta Cusco - Estación Kayra (Astete, E. 2015, curva tabulada)", "cusco_astete")):
             self.combo_metodo_desagregacion.addItem(_txt, _clave)
         self.combo_metodo_desagregacion.currentIndexChanged.connect(self._on_cambiar_metodo_desagregacion)
         f_auto.addRow("Método de desagregación temporal:", self.combo_metodo_desagregacion)
@@ -7518,8 +7518,8 @@ class HydroAndinaProDialog(QDialog):
                 curva_cusco = scs_storm_patterns.curva_cusco_astete_2015()
                 hietograma = scs_storm_patterns.hietograma_scs(
                     p24, 24.0, dt_h, curva_personalizada=curva_cusco)
-                descripcion_metodo = ("patrón de tormenta del Cusco — Astete, E. (2015), estación "
-                                      "KAYRA (curva tabulada de 24h completa)")
+                descripcion_metodo = ("Patrón Tormenta Cusco - Estación Kayra (Astete, E. 2015, "
+                                      "curva tabulada de 24h completa)")
             else:
                 # IMPORTANTE: las curvas SCS representan una tormenta de 24 h
                 # completas; NO deben comprimirse en una duración corta (eso

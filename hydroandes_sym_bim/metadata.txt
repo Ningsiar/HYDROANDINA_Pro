@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.4.14
+version=0.4.15
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,13 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.4.15: Renombrado a pedido del usuario -- el método agregado en
+      v0.4.14 pasa a llamarse "Patrón Tormenta Cusco - Estación Kayra"
+      (antes "Patrón Cusco — Astete, E. (2015), KAYRA"), en el combo de
+      la Pestaña 6, en el mensaje de confirmación al generar el
+      hietograma, y en el campo "nombre" de
+      resources/patron_tormenta_cusco_astete_2015.json. La clave
+      interna (cusco_astete) y la curva tabulada no cambian.
     - v0.4.14: NUEVO -- patrón de tormenta de 24h del Cusco (estación
       KAYRA), Astete, E. (2015), agregado a la Pestaña 6 como noveno
       método de desagregación temporal, a pedido explícito del
