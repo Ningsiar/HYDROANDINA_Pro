@@ -6552,6 +6552,7 @@ class HydroAndinaProDialog(QDialog):
         self.spin_lca_km = QDoubleSpinBox()
         self.spin_lca_km.setRange(0.001, 500)
         self.spin_lca_km.setDecimals(3)
+        self.spin_lca_km.setValue(0.3)
         h_m.addWidget(QLabel("Lca (km, solo Snyder):"))
         h_m.addWidget(self.spin_lca_km)
 
@@ -6851,7 +6852,7 @@ class HydroAndinaProDialog(QDialog):
         f_dir.addRow("Pendiente media del cauce S (%):", self.spin_dir_s)
         self.spin_dir_creager_c = QDoubleSpinBox()
         self.spin_dir_creager_c.setRange(1.0, 150.0)
-        self.spin_dir_creager_c.setValue(30.0)
+        self.spin_dir_creager_c.setValue(5.0)
         f_dir.addRow("Coeficiente envolvente de Creager (calibrar regionalmente):", self.spin_dir_creager_c)
         v_dir.addLayout(f_dir)
 
@@ -6869,13 +6870,13 @@ class HydroAndinaProDialog(QDialog):
         v.addWidget(gb_directos)
 
         gb_envolventes = QGroupBox(
-            "Fórmulas envolventes / regionales adicionales (Dicken, Ryves, Inglis, Myer, Kresnik, "
+            "Fórmulas envolventes / regionales adicionales (Dicken, Ryves, Myer, Kresnik, "
             "Francou-Rodier, Ventura, Bürkli-Ziegler, Crippen & Bue, Iszkowski)"
         )
         v_env = QVBoxLayout(gb_envolventes)
         lbl_env_info = QLabel(
             "Catálogo de fórmulas ENVOLVENTES de distintas escuelas regionales: India/Commonwealth "
-            "(Dicken, Ryves, Inglis), global/IAHS (Francou-Rodier), EE. UU. (Myer, Crippen & Bue/USGS), "
+            "(Dicken, Ryves), global/IAHS (Francou-Rodier), EE. UU. (Myer, Crippen & Bue/USGS), "
             "Europa central/alpina (Kresnik), Iberoamericana/Europa del Este (Ventura, Iszkowski) y "
             "drenaje urbano suizo (Bürkli-Ziegler). A diferencia de Témez/Mac Math/Creager de arriba, "
             "son en su mayoría curvas ajustadas contra crecidas MÁXIMAS OBSERVADAS de una región "
@@ -6957,24 +6958,22 @@ class HydroAndinaProDialog(QDialog):
 
         # ---------- Escuelas regionales adicionales ----------
         gb_escuelas = QGroupBox(
-            "Escuelas regionales adicionales — Latinoamérica, Europa clásica y Norteamérica histórica "
-            "(Santa María, Springall, Rocha, Lauterburg, Turazza, Murphy)"
+            "Escuelas regionales adicionales — Latinoamérica y Europa clásica "
+            "(Springall, Rocha, Lauterburg, Turazza)"
         )
         v_esc = QVBoxLayout(gb_escuelas)
         lbl_esc_info = QLabel(
-            "<b>Santa María (Chile)</b> y <b>Rocha (Brasil)</b> son las escuelas más cercanas al contexto de "
-            "este plugin (vertiente andina / sudamericana) — aun así su coeficiente regional es justamente "
-            "lo que absorbe la diferencia entre una cuenca chilena o brasileña y una altoandina peruana, "
-            "así que deben calibrarse. <b>Turazza (Italia)</b> es la precursora del método racional: su "
+            "<b>Rocha (Brasil)</b> es la escuela más cercana al contexto de este plugin (vertiente andina "
+            "/ sudamericana) — aun así su coeficiente regional es justamente lo que absorbe la diferencia "
+            "entre una cuenca brasileña y una altoandina peruana, así que debe calibrarse. "
+            "<b>Turazza (Italia)</b> es la precursora del método racional: su "
             "factor 1/(1+0.05·Tc) REDUCE el caudal, al revés que la K de Témez que lo aumenta — compare "
-            "ambos. <b>Murphy</b> NO tiene coeficiente regional: es una envolvente fija calibrada contra "
-            "crecidas históricas del este de EE. UU., por lo que fuera de esa región es solo un techo "
-            "histórico ajeno (esperable que salga muy por encima del resto, no lo tome como estimación "
-            "transferible). Reutilizan A, S, C, I y Tc ya ingresados arriba.<br><br>"
+            "ambos. Reutilizan A, S, C, I y Tc ya ingresados arriba.<br><br>"
             "<i>Possenti (Italia) y Kuichling (Nueva York) se retiraron de este cálculo: Possenti exige "
             "repartir el área entre zona montañosa y de valle, un dato que rara vez se tiene con soltura "
             "en una cuenca altoandina sin levantamiento de detalle, y Kuichling es una envolvente fija sin "
-            "ningún coeficiente que la adapte fuera de Nueva York.</i>"
+            "ningún coeficiente que la adapte fuera de Nueva York. Santa María (Chile) y Murphy (este de "
+            "EE. UU.) se retiraron de este cálculo y del plugin.</i>"
         )
         lbl_esc_info.setWordWrap(True)
         v_esc.addWidget(lbl_esc_info)
@@ -6990,10 +6989,6 @@ class HydroAndinaProDialog(QDialog):
         self.spin_esc_p24.setRange(1.0, 1000.0)
         self.spin_esc_p24.setValue(80.0)
         f_esc.addRow("Precipitación máxima en 24h P24 (mm, para Springall):", self.spin_esc_p24)
-        self.spin_esc_santa_maria = QDoubleSpinBox()
-        self.spin_esc_santa_maria.setRange(1.0, 80.0)
-        self.spin_esc_santa_maria.setValue(25.0)
-        f_esc.addRow("Coef. de Santa María C_s (15-40, vertiente andina):", self.spin_esc_santa_maria)
         self.spin_esc_springall = QDoubleSpinBox()
         self.spin_esc_springall.setRange(0.05, 1.0)
         self.spin_esc_springall.setDecimals(3)
@@ -7231,7 +7226,7 @@ class HydroAndinaProDialog(QDialog):
                 f"Creager = {directos['Creager_Q_m3s']} m³/s</p><hr>"
             )
         envolventes = self.resultados_hidraulica_drenaje.get(
-            "Caudales envolventes (10 fórmulas regionales)"
+            "Caudales envolventes (9 fórmulas regionales)"
         )
         if envolventes:
             hay_algo = True
@@ -7239,7 +7234,6 @@ class HydroAndinaProDialog(QDialog):
                 "<p><b>Fórmulas envolventes / regionales (verificación cruzada)</b><br>"
                 f"Dicken = {envolventes['dicken_Q_m3s']} m³/s &nbsp;|&nbsp; "
                 f"Ryves = {envolventes['ryves_Q_m3s']} m³/s &nbsp;|&nbsp; "
-                f"Inglis = {envolventes['inglis_Q_m3s']} m³/s &nbsp;|&nbsp; "
                 f"Myer = {envolventes['myer_Q_m3s']} m³/s<br>"
                 f"Kresnik = {envolventes['kresnik_Q_m3s']} m³/s &nbsp;|&nbsp; "
                 f"Francou-Rodier = {envolventes['francou_rodier_Q_m3s']} m³/s &nbsp;|&nbsp; "
@@ -7248,17 +7242,15 @@ class HydroAndinaProDialog(QDialog):
                 f"Crippen & Bue = {envolventes['crippen_bue_Q_m3s']} m³/s &nbsp;|&nbsp; "
                 f"Iszkowski = {envolventes['iszkowski_Q_m3s']} m³/s</p><hr>"
             )
-        escuelas = self.resultados_hidraulica_drenaje.get("Caudales escuelas regionales (6 fórmulas)")
+        escuelas = self.resultados_hidraulica_drenaje.get("Caudales escuelas regionales (4 fórmulas)")
         if escuelas:
             hay_algo = True
             html += (
-                "<p><b>Escuelas regionales (Latinoamérica / Europa clásica / Norteamérica histórica)</b><br>"
-                f"Santa María = {escuelas['santa_maria_Q_m3s']} m³/s &nbsp;|&nbsp; "
+                "<p><b>Escuelas regionales (Latinoamérica / Europa clásica)</b><br>"
                 f"Springall = {escuelas['springall_Q_m3s']} m³/s &nbsp;|&nbsp; "
-                f"Rocha = {escuelas['rocha_Q_m3s']} m³/s<br>"
+                f"Rocha = {escuelas['rocha_Q_m3s']} m³/s &nbsp;|&nbsp; "
                 f"Lauterburg = {escuelas['lauterburg_Q_m3s']} m³/s &nbsp;|&nbsp; "
-                f"Turazza = {escuelas['turazza_Q_m3s']} m³/s &nbsp;|&nbsp; "
-                f"Murphy = {escuelas['murphy_Q_m3s']} m³/s</p><hr>"
+                f"Turazza = {escuelas['turazza_Q_m3s']} m³/s</p><hr>"
             )
         complementarios = self.resultados_hidraulica_drenaje.get(
             "Caudales complementarios (Giandotti/Sokolovsky/...)")
@@ -7509,7 +7501,7 @@ class HydroAndinaProDialog(QDialog):
                 factor_forma_iszkowski=self.spin_env_iszkowski_m.value(),
             )
             self.resultados_hidraulica_drenaje[
-                "Caudales envolventes (10 fórmulas regionales)"
+                "Caudales envolventes (9 fórmulas regionales)"
             ] = {
                 "tipo": "Caudales envolventes",
                 **{f"{clave}_Q_m3s": datos["Q_m3_s"] for clave, datos in r.items()},
@@ -7517,7 +7509,6 @@ class HydroAndinaProDialog(QDialog):
             filas_env = [
                 ("Dicken", r["dicken"]["Q_m3_s"], "m³/s", r["dicken"]["nota"]),
                 ("Ryves", r["ryves"]["Q_m3_s"], "m³/s", r["ryves"]["nota"]),
-                ("Inglis", r["inglis"]["Q_m3_s"], "m³/s", r["inglis"]["nota"]),
                 ("Myer", r["myer"]["Q_m3_s"], "m³/s", r["myer"]["nota"]),
                 ("Kresnik", r["kresnik"]["Q_m3_s"], "m³/s", r["kresnik"]["nota"]),
                 ("Francou-Rodier", r["francou_rodier"]["Q_m3_s"], "m³/s", r["francou_rodier"]["nota"]),
@@ -7868,23 +7859,20 @@ class HydroAndinaProDialog(QDialog):
                 pendiente_pct=self.spin_dir_s.value(), p24_mm=self.spin_esc_p24.value(),
                 coef_escorrentia_c=self.spin_dir_c.value(), intensidad_mm_h=self.spin_dir_i.value(),
                 tc_horas=self.spin_dir_tc.value(),
-                coeficiente_santa_maria=self.spin_esc_santa_maria.value(),
                 coeficiente_springall=self.spin_esc_springall.value(),
                 coeficiente_rocha=self.spin_esc_rocha.value(),
                 coeficiente_lauterburg=self.spin_esc_lauterburg.value(),
             )
-            self.resultados_hidraulica_drenaje["Caudales escuelas regionales (6 fórmulas)"] = {
+            self.resultados_hidraulica_drenaje["Caudales escuelas regionales (4 fórmulas)"] = {
                 "tipo": "Caudales escuelas regionales",
                 **{f"{clave}_Q_m3s": datos["Q_m3_s"] for clave, datos in r.items()},
             }
             poblar_tabla_parametros(self.tabla_resultado_escuelas, [
-                ("Santa María (Chile)", r["santa_maria"]["Q_m3_s"], "m³/s", r["santa_maria"]["nota"]),
                 ("Springall (México)", r["springall"]["Q_m3_s"], "m³/s", r["springall"]["nota"]),
                 ("Rocha (Brasil)", r["rocha"]["Q_m3_s"], "m³/s", r["rocha"]["nota"]),
                 ("Lauterburg (Suiza)", r["lauterburg"]["Q_m3_s"], "m³/s", r["lauterburg"]["nota"]),
                 ("Turazza (Italia)", r["turazza"]["Q_m3_s"], "m³/s",
                  f"factor de amortiguamiento = {r['turazza']['factor_amortiguamiento']} — {r['turazza']['nota']}"),
-                ("Murphy (este de EE. UU.)", r["murphy"]["Q_m3_s"], "m³/s", r["murphy"]["nota"]),
             ])
             self._actualizar_grafico_comparacion_caudales()
             self._actualizar_texto_resumen_caudales()
@@ -8034,7 +8022,7 @@ class HydroAndinaProDialog(QDialog):
     def _actualizar_grafico_comparacion_caudales(self):
         """Gráfico de barras ÚNICO (Pestaña 7) que compara el caudal pico
         de TODOS los métodos ya calculados en esta pestaña -- SCS/Snyder/
-        Clark, Racional/Témez/Mac Math/Creager, las 10 fórmulas
+        Clark, Racional/Témez/Mac Math/Creager, las 9 fórmulas
         envolventes/regionales y Sección-Pendiente/caudal crítico si se
         calcularon -- sin excepción y sin importar el orden en que el
         usuario los haya calculado (se llama al final de los botones de
@@ -8055,20 +8043,18 @@ class HydroAndinaProDialog(QDialog):
             for etiqueta, clave in [("Racional", "Racional_Q_m3s"), ("Témez", "Temez_Q_m3s"),
                                      ("Mac Math", "MacMath_Q_m3s"), ("Creager", "Creager_Q_m3s")]:
                 _agregar(etiqueta, directos[clave], "Directo")
-        envolventes = self.resultados_hidraulica_drenaje.get("Caudales envolventes (10 fórmulas regionales)")
+        envolventes = self.resultados_hidraulica_drenaje.get("Caudales envolventes (9 fórmulas regionales)")
         if envolventes:
-            for etiqueta, clave in [("Dicken", "dicken"), ("Ryves", "ryves"), ("Inglis", "inglis"),
+            for etiqueta, clave in [("Dicken", "dicken"), ("Ryves", "ryves"),
                                      ("Myer", "myer"), ("Kresnik", "kresnik"),
                                      ("Francou-Rodier", "francou_rodier"), ("Ventura", "ventura"),
                                      ("Bürkli-Ziegler", "burkli_ziegler"), ("Crippen & Bue", "crippen_bue"),
                                      ("Iszkowski", "iszkowski")]:
                 _agregar(etiqueta, envolventes[f"{clave}_Q_m3s"], "Envolvente")
-        escuelas = self.resultados_hidraulica_drenaje.get("Caudales escuelas regionales (6 fórmulas)")
+        escuelas = self.resultados_hidraulica_drenaje.get("Caudales escuelas regionales (4 fórmulas)")
         if escuelas:
-            for etiqueta, clave in [("Santa María", "santa_maria"), ("Springall", "springall"),
-                                     ("Rocha", "rocha"),
-                                     ("Lauterburg", "lauterburg"), ("Turazza", "turazza"),
-                                     ("Murphy", "murphy")]:
+            for etiqueta, clave in [("Springall", "springall"), ("Rocha", "rocha"),
+                                     ("Lauterburg", "lauterburg"), ("Turazza", "turazza")]:
                 _agregar(etiqueta, escuelas[f"{clave}_Q_m3s"], "Escuela regional")
         complementarios = self.resultados_hidraulica_drenaje.get(
             "Caudales complementarios (Giandotti/Sokolovsky/...)")

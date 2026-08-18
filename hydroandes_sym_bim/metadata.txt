@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.4.11
+version=0.4.12
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,27 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.4.12: Pestaña 6 (Caudales Máximos), a pedido expreso: (1)
+      coeficiente envolvente de Creager por defecto ahora es 5.0 (antes
+      30.0) -- tanto en el spin box de la UI como en el valor por
+      defecto de core/direct_discharge_methods.py::caudal_creager() /
+      comparar_metodos_directos(). (2) Lca (distancia al centroide,
+      "solo Snyder") ahora tiene un valor por defecto de 0.3 km en vez
+      de arrancar en el mínimo del campo (0.001). (3) Se eliminaron del
+      plugin -- núcleo y UI -- los métodos de caudal máximo directo
+      Inglis (1930), Santa María (Chile) y Murphy (este de EE. UU.):
+      core/direct_discharge_methods.py ya no define caudal_inglis(),
+      caudal_santa_maria() ni caudal_murphy(), y
+      comparar_metodos_envolventes()/comparar_escuelas_regionales()
+      pasan de 10/6 a 9/4 fórmulas respectivamente (el parámetro
+      coeficiente_santa_maria también se retiró de la firma). En
+      plugin_dialog.py se quitó el spin box de Santa María, sus filas
+      en las tablas de resultados, el cuadro resumen y el gráfico
+      comparativo de la Pestaña 6.
+      Verificado: 18/18 (QGIS headless -- defaults en la UI, funciones
+      ausentes del core, conteo de métodos devueltos, TypeError al
+      pasar coeficiente_santa_maria, y los dos botones de cálculo
+      corriendo sin error con las tablas resultantes sin esas filas).
     - v0.4.11: NUEVO -- LULC manual (archivo local/URL) como alternativa
       a la búsqueda STAC en la Pestaña 3, a pedido explícito del
       usuario ("o puedo descargar el archivo y tenerlo en la carpeta

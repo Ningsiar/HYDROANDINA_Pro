@@ -45,7 +45,7 @@ todos los métodos empíricos históricos de este plugin) los coeficientes
 pueden variar ligeramente entre fuentes; verifique contra la referencia
 que use su institución antes de un diseño definitivo.
 
-FÓRMULAS ENVOLVENTES ADICIONALES (Dicken, Ryves, Inglis, Myer, Kresnik,
+FÓRMULAS ENVOLVENTES ADICIONALES (Dicken, Ryves, Myer, Kresnik,
 Francou-Rodier, Ventura, Bürkli-Ziegler): a diferencia de Témez/Mac Math/
 Creager (que combinan intensidad de lluvia de diseño + tiempo de
 concentración), estas son en su mayoría curvas ENVOLVENTES puramente
@@ -63,11 +63,6 @@ de diseño final sin calibración local.
 
   RYVES (1884, sur de India, zonas costeras): Q = C_R * A^(2/3) (A en km²).
   C_R = 6.8 en zonas llanas interiores, hasta 10.2 en zonas costeras/montaña.
-
-  INGLIS (1930, Ghats occidentales, cuencas montañosas de respuesta
-  rápida): Q = 123.7*A / sqrt(A + 10.4) (A en km²). Sin coeficiente
-  regional -- es una curva fija, calibrada específicamente para esas
-  cuencas; úsela solo como referencia de orden de magnitud fuera de ellas.
 
   MYER / MYER-JARVIS (EE. UU., techo histórico de crecidas):
   Q = 176 * C_M * sqrt(A) (A en km²). C_M en fracción decimal (0.005-1.0);
@@ -94,7 +89,7 @@ de diseño final sin calibración local.
 
   Fuentes: catálogo compilado de fórmulas envolventes de cobertura global/
   continental (Francou-Rodier, Myer, Kresnik) y de la escuela empírica
-  asiática/Commonwealth (Dicken, Ryves, Inglis), ampliamente reproducidas
+  asiática/Commonwealth (Dicken, Ryves), ampliamente reproducidas
   en manuales de hidrología aplicada e ingeniería de crecidas.
 
   NOTA: Mac Math YA estaba implementado en este módulo (caudal_mac_math,
@@ -139,7 +134,7 @@ def caudal_mac_math(coef_escorrentia_c: float, intensidad_mm_h: float, area_km2:
     }
 
 
-def caudal_creager(area_km2: float, coeficiente_envolvente_c: float = 30.0) -> dict:
+def caudal_creager(area_km2: float, coeficiente_envolvente_c: float = 5.0) -> dict:
     if area_km2 <= 0:
         raise DirectDischargeError("El área debe ser mayor que 0.")
     exponente = 0.936 * (area_km2 ** -0.048)
@@ -181,7 +176,7 @@ def caudal_racional(coef_escorrentia_c: float, intensidad_mm_h: float, area_km2:
 
 def comparar_metodos_directos(coef_escorrentia_c: float, intensidad_mm_h: float, area_km2: float,
                                tc_horas: float, pendiente_cauce_pct: float,
-                               coeficiente_creager: float = 30.0) -> dict:
+                               coeficiente_creager: float = 5.0) -> dict:
     """Calcula los métodos directos con los mismos datos de entrada, para
     comparar contra el caudal de diseño obtenido por SCS/Snyder/Clark
     (Pestaña 6)."""
@@ -212,16 +207,6 @@ def caudal_ryves(area_km2: float, coeficiente_ryves: float = 8.5) -> dict:
         "metodo": "Ryves (1884)", "Q_m3_s": round(q, 3),
         "A_km2": area_km2, "C_R": coeficiente_ryves,
         "nota": "Envolvente India sur/costera: C_R=6.8 interior, hasta 10.2 costero/montaña.",
-    }
-
-
-def caudal_inglis(area_km2: float) -> dict:
-    if area_km2 <= 0:
-        raise DirectDischargeError("El área debe ser mayor que 0.")
-    q = (123.7 * area_km2) / math.sqrt(area_km2 + 10.4)
-    return {
-        "metodo": "Inglis (1930)", "Q_m3_s": round(q, 3), "A_km2": area_km2,
-        "nota": "Curva fija (sin coeficiente regional), calibrada para los Ghats occidentales (India).",
     }
 
 
@@ -338,14 +323,15 @@ def comparar_metodos_envolventes(area_km2: float, pendiente_m_m: float, coef_esc
                                   coeficiente_ventura: float = 20.0, k_regional_usgs: float = 10.0,
                                   exponente_b_usgs: float = 0.55, coeficiente_iszkowski: float = 1.0,
                                   factor_forma_iszkowski: float = 0.3) -> dict:
-    """Calcula las 10 fórmulas envolventes/regionales adicionales con los
+    """Calcula las 9 fórmulas envolventes/regionales adicionales con los
     mismos datos de entrada (reutiliza A, S, C, I ya usados por
     comparar_metodos_directos), para comparar contra el caudal de diseño
-    SCS/Snyder/Clark y contra Témez/Mac Math/Creager/Racional (Pestaña 7)."""
+    SCS/Snyder/Clark y contra Témez/Mac Math/Creager/Racional (Pestaña 7).
+
+    Inglis se retiró del cálculo y del plugin (v0.4.x) a pedido expreso."""
     return {
         "dicken": caudal_dicken(area_km2, coeficiente_dicken),
         "ryves": caudal_ryves(area_km2, coeficiente_ryves),
-        "inglis": caudal_inglis(area_km2),
         "myer": caudal_myer(area_km2, coeficiente_myer),
         "kresnik": caudal_kresnik(area_km2, coeficiente_kresnik),
         "francou_rodier": caudal_francou_rodier(area_km2, k_francou_rodier),
@@ -412,32 +398,19 @@ def caudal_critico(area_critica_m2: float, ancho_superficial_m: float, gravedad_
 # ==============================================================================
 # Mismo carácter y las mismas advertencias que el bloque de envolventes de
 # arriba: son curvas ajustadas históricamente contra crecidas máximas
-# OBSERVADAS de una región concreta. Las de Santa María (Chile) y Rocha
-# (Brasil) son las más cercanas al contexto de este plugin (vertiente
-# andina / sudamericana), pero AUN ASÍ requieren calibración local: el
-# coeficiente regional es el que absorbe toda la diferencia entre una
-# cuenca chilena/brasileña y una cuenca altoandina peruana.
+# OBSERVADAS de una región concreta. La de Rocha (Brasil) es la más
+# cercana al contexto de este plugin (vertiente andina / sudamericana),
+# pero AUN ASÍ requiere calibración local: el coeficiente regional es el
+# que absorbe toda la diferencia entre una cuenca brasileña y una cuenca
+# altoandina peruana.
 #
-# NOTA sobre Kuichling y Murphy: no tienen coeficiente regional -- son
-# curvas envolventes FIJAS, calibradas contra las crecidas históricas del
-# estado de Nueva York y del este de EE. UU. respectivamente. Fuera de
-# esas regiones son solo una referencia de "techo histórico" de otra
-# parte del mundo, no una estimación transferible; se incluyen por
-# completitud del catálogo comparativo, y sus valores suelen quedar muy
-# por encima del resto (es lo esperable de una envolvente superior).
-
-def caudal_santa_maria(area_km2: float, coeficiente_cs: float = 25.0) -> dict:
-    """Fórmula de Santa María (Chile, cuencas andinas de alta pendiente y
-    respuesta muy rápida): Q = Cs * A^0.60."""
-    if area_km2 <= 0:
-        raise DirectDischargeError("El área debe ser mayor que 0.")
-    q = coeficiente_cs * (area_km2 ** 0.60)
-    return {
-        "metodo": "Santa María (Chile)", "Q_m3_s": round(q, 3),
-        "A_km2": area_km2, "Cs": coeficiente_cs,
-        "nota": "Vertiente andina: Cs=15-40 según latitud y torrencialidad. Escuela regional más cercana a los Andes peruanos.",
-    }
-
+# NOTA sobre Kuichling: no tiene coeficiente regional -- es una curva
+# envolvente FIJA, calibrada contra las crecidas históricas del estado de
+# Nueva York. Fuera de esa región es solo una referencia de "techo
+# histórico" de otra parte del mundo, no una estimación transferible; se
+# incluye por completitud del catálogo comparativo, y su valor suele
+# quedar muy por encima del resto (es lo esperable de una envolvente
+# superior).
 
 def caudal_springall(area_km2: float, p24_mm: float, coeficiente_csp: float = 0.50) -> dict:
     """Fórmula de Springall (México, cuencas medianas áridas/semiáridas):
@@ -539,27 +512,14 @@ def caudal_kuichling(area_km2: float) -> dict:
     }
 
 
-def caudal_murphy(area_km2: float) -> dict:
-    """Fórmula de Murphy (ríos del este de EE. UU., primera mitad del
-    siglo XX): Q = 1351*A/(A+93). Curva envolvente FIJA, sin coeficiente
-    regional."""
-    if area_km2 <= 0:
-        raise DirectDischargeError("El área debe ser mayor que 0.")
-    q = (1351.0 * area_km2) / (area_km2 + 93.0)
-    return {
-        "metodo": "Murphy (este de EE. UU.)", "Q_m3_s": round(q, 3), "A_km2": area_km2,
-        "nota": "Envolvente FIJA (sin coeficiente) del este de EE. UU. Fuera de esa región es solo un techo histórico ajeno, no transferible.",
-    }
-
-
 def comparar_escuelas_regionales(area_km2: float, pendiente_pct: float,
                                   p24_mm: float, coef_escorrentia_c: float, intensidad_mm_h: float,
-                                  tc_horas: float, coeficiente_santa_maria: float = 25.0,
+                                  tc_horas: float,
                                   coeficiente_springall: float = 0.50, coeficiente_rocha: float = 2.5,
                                   coeficiente_lauterburg: float = 1.0) -> dict:
-    """Calcula las 6 fórmulas de escuelas regionales adicionales
-    (latinoamericana, europea clásica y norteamericana histórica) con los
-    mismos datos ya ingresados en la Pestaña 6.
+    """Calcula las 4 fórmulas de escuelas regionales adicionales
+    (latinoamericana y europea clásica) con los mismos datos ya
+    ingresados en la Pestaña 6.
 
     Possenti y Kuichling se retiraron del cálculo (v0.3.x) a pedido
     expreso: Possenti exige repartir el área entre zona montañosa y de
@@ -568,15 +528,15 @@ def comparar_escuelas_regionales(area_km2: float, pendiente_pct: float,
     envolvente FIJA calibrada contra crecidas históricas de Nueva York,
     sin ningún coeficiente regional que la adapte a otro contexto -- fuera
     de esa región es solo un techo ajeno, no una estimación transferible.
-    Las funciones caudal_possenti() y caudal_kuichling() se conservan en
-    este módulo por si se necesitan de forma puntual."""
+    Santa María (Chile) y Murphy (este de EE. UU.) se retiraron del cálculo
+    y del plugin (v0.4.x) a pedido expreso. Las funciones caudal_possenti()
+    y caudal_kuichling() se conservan en este módulo por si se necesitan de
+    forma puntual."""
     return {
-        "santa_maria": caudal_santa_maria(area_km2, coeficiente_santa_maria),
         "springall": caudal_springall(area_km2, p24_mm, coeficiente_springall),
         "rocha": caudal_rocha(area_km2, pendiente_pct * 10.0, coeficiente_rocha),
         "lauterburg": caudal_lauterburg(area_km2, coeficiente_lauterburg),
         "turazza": caudal_turazza(coef_escorrentia_c, intensidad_mm_h, area_km2, tc_horas),
-        "murphy": caudal_murphy(area_km2),
     }
 
 
