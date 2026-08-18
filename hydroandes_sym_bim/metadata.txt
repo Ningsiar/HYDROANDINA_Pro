@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.4.15
+version=0.4.16
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,43 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.4.16: Pestaña 19 (Flujo Subterráneo) -- Fase 1 de la mejora
+      hidrogeológica pedida por el usuario (aportó material propio de
+      un curso de modelamiento MODFLOW 6/FloPy en
+      COLAB_Hidrogeologia_modflow/, comparado contra el solver 2D
+      propio ya existente; el usuario eligió avanzar en 2 frentes: (1)
+      integrar MODFLOW 6 real vía FloPy -- pendiente, fases
+      posteriores -- y (2) extender el solver propio -- esta versión).
+      core/groundwater_flow.py::resolver_flujo_2d_permanente() ahora
+      acepta condiciones tipo RÍO (RIV) y DREN (DRN), la misma
+      formulación que esos paquetes de MODFLOW: el caudal intercambiado
+      DEPENDE de la carga simulada (no es fijo), tratado como un vecino
+      virtual de conductancia C dentro de cada iteración de
+      Gauss-Seidel (esquema de Picard). El río se DESCONECTA del
+      acuífero (deja de depender de la carga, entrega un goteo fijo)
+      si la carga simulada cae bajo el fondo del lecho; el dren solo
+      EXTRAE agua (nunca inyecta) y se desactiva si la carga cae a su
+      nivel o por debajo. Nueva conductancia_lecho() (fórmula estándar
+      C=K_lecho·L·W/espesor). CORRECCIÓN DE ESTABILIDAD NUMÉRICA
+      encontrada durante la verificación: aplicar la sobre-relajación
+      SOR (factor_sor, por defecto 1.8) a celdas RIV/DRN -- que pueden
+      tener una conductancia mucho mayor que sus vecinas y cambiar de
+      régimen (conectado/desconectado) entre iteraciones -- amplificaba
+      el sobresalto de cada cambio de régimen en vez de amortiguarlo,
+      y podía diverger; se corrigió usando Gauss-Seidel puro (factor
+      1.0, sin sobre-relajación) específicamente en esas celdas, sin
+      afectar la velocidad de convergencia del resto de la malla.
+      plugin_dialog.py: nuevas tablas "Celdas tipo río (RIV)" y
+      "Celdas tipo dren (DRN)" en la sección 3 de la Pestaña 19,
+      conectadas a _on_resolver_flujo_2d(); el cuadro resumen final
+      ahora reporta el intercambio río-acuífero y la extracción por
+      drenes cuando hay alguno definido.
+      Verificado: 18/18 (núcleo -- regresión 1D exacta sin RIV/DRN,
+      río conectado con conductancia alta arrastra la carga a su
+      nivel, río desconectado entrega el goteo fijo exacto sin alterar
+      la carga natural, dren solo extrae y nunca inyecta, dren que
+      nunca se activa reproduce EXACTO el caso sin dren) + 12/12
+      (integración UI real en QGIS headless) -- 30/30.
     - v0.4.15: Renombrado a pedido del usuario -- el método agregado en
       v0.4.14 pasa a llamarse "Patrón Tormenta Cusco - Estación Kayra"
       (antes "Patrón Cusco — Astete, E. (2015), KAYRA"), en el combo de

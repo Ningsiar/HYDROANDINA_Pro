@@ -21,6 +21,20 @@ magnitud, y fines didácticos. Para estudios definitivos con recarga
 variable en el tiempo, drenanaje libre, o acuíferos multicapa, use
 MODFLOW/FEFLOW calibrado con piezómetros de campo.
 
+CONDICIONES TIPO RÍO (RIV) Y DREN (DRN): además de la carga fija
+(Dirichlet) y las fuentes/sumideros puntuales de caudal fijo (pozos,
+recarga), `resolver_flujo_2d_permanente()` acepta condiciones RIV y DRN
+-- la misma formulación que los paquetes RIV/DRN de MODFLOW: el
+intercambio de caudal DEPENDE de la carga simulada en la celda (no es
+un caudal fijo), así que el solver los trata como un "vecino virtual"
+de conductancia C y carga h_río/h_dren dentro de cada iteración de
+Gauss-Seidel -- el mismo esquema de Picard (linealización iterativa)
+que usa MODFLOW para estas condiciones no lineales. RIV se desconecta
+del acuífero (deja de depender de h) cuando la carga simulada cae por
+debajo del fondo del lecho del río; DRN solo EXTRAE agua (nunca
+inyecta) y se desactiva cuando la carga simulada cae por debajo del
+nivel del dren.
+
 La hidráulica de POZOS específica (Thiem, Theis, Cooper-Jacob, radio de
 influencia) se trata en el módulo "Hidráulica de Pozos" -- este módulo
 se enfoca en el flujo GENERAL del acuífero.
@@ -93,25 +107,61 @@ def caudal_1d_dupuit(k_m_s: float, h1_m: float, h2_m: float, longitud_m: float,
 #    (diferencias finitas, 5 puntos, Gauss-Seidel con SOR)
 # ============================================================================
 
+def conductancia_lecho(k_lecho_m_s: float, longitud_m: float, ancho_m: float,
+                        espesor_lecho_m: float) -> float:
+    """Conductancia de un lecho de río/dren (m²/s): C = K_lecho*L*W/M,
+    la misma fórmula estándar de los paquetes RIV/DRN de MODFLOW.
+    k_lecho_m_s: conductividad hidráulica vertical del material del
+    lecho (limo/arena/grava depositados), casi siempre distinta de la K
+    del acuífero. L, W: largo y ancho del tramo dentro de la celda (m).
+    espesor_lecho_m: espesor del lecho semipermeable (m)."""
+    if espesor_lecho_m <= 0:
+        raise GroundwaterError("El espesor del lecho debe ser mayor que 0.")
+    if longitud_m <= 0 or ancho_m <= 0:
+        raise GroundwaterError("El largo y el ancho del tramo deben ser mayores que 0.")
+    return k_lecho_m_s * longitud_m * ancho_m / espesor_lecho_m
+
+
 def resolver_flujo_2d_permanente(n_filas: int, n_columnas: int, dx_m: float, dy_m: float,
                                   transmisividad_m2_s, condiciones_borde: Dict[Tuple[int, int], float],
                                   fuentes_sumideros: Optional[Dict[Tuple[int, int], float]] = None,
+                                  condiciones_rio: Optional[Dict[Tuple[int, int], Dict[str, float]]] = None,
+                                  condiciones_dren: Optional[Dict[Tuple[int, int], Dict[str, float]]] = None,
                                   h_inicial_m: float = 0.0, tol_m: float = 1e-5, max_iter: int = 20000,
                                   factor_sor: float = 1.8) -> Dict:
     """Resuelve T*∇²h + Q/(dx·dy) = 0 en una malla rectangular de
     n_filas x n_columnas, con condiciones de carga fija (Dirichlet) en
     las celdas indicadas por condiciones_borde={(fila,col): h_fijo_m},
-    fuentes/sumideros (recarga positiva, bombeo negativo, m³/s) en
-    fuentes_sumideros={(fila,col): Q_m3s}, y borde SIN FLUJO (Neumann
-    cero, reflexión) en cualquier otra celda del perímetro no fijada
-    explícitamente. transmisividad_m2_s puede ser un escalar (acuífero
-    homogéneo) o un array (n_filas,n_columnas) para T variable por celda
-    (se usa la media aritmética entre celdas vecinas en la interfaz,
-    aproximación estándar cuando no se dispone de la media armónica
-    exacta de Harbaugh/MODFLOW)."""
+    fuentes/sumideros de caudal FIJO (recarga positiva, bombeo negativo,
+    m³/s) en fuentes_sumideros={(fila,col): Q_m3s}, y borde SIN FLUJO
+    (Neumann cero, reflexión) en cualquier otra celda del perímetro no
+    fijada explícitamente. transmisividad_m2_s puede ser un escalar
+    (acuífero homogéneo) o un array (n_filas,n_columnas) para T variable
+    por celda (se usa la media aritmética entre celdas vecinas en la
+    interfaz, aproximación estándar cuando no se dispone de la media
+    armónica exacta de Harbaugh/MODFLOW).
+
+    condiciones_rio (paquete RIV de MODFLOW): {(fila,col): {"conductancia":
+    C_m2_s, "nivel": h_rio_m, "fondo": fondo_lecho_m}} -- el caudal
+    intercambiado depende de la carga simulada: mientras h_simulada >=
+    fondo, el río se comporta como un vecino de carga fija h_rio a
+    través de la conductancia C (puede tanto recargar como drenar el
+    acuífero); si h_simulada cae por debajo del fondo del lecho, el río
+    se DESCONECTA del acuífero y entrega un caudal FIJO
+    C*(h_rio - fondo) (ya no depende de la carga -- el mismo
+    comportamiento de "goteo" del RIV package cuando el nivel freático
+    baja del lecho).
+
+    condiciones_dren (paquete DRN de MODFLOW): {(fila,col): {"conductancia":
+    C_m2_s, "nivel": h_dren_m}} -- solo EXTRAE agua del acuífero
+    (nunca inyecta): actúa como un vecino de carga fija h_dren mientras
+    h_simulada > h_dren, y se desactiva por completo (conductancia 0)
+    en cuanto h_simulada <= h_dren."""
     if n_filas < 2 or n_columnas < 2:
         raise GroundwaterError("La malla debe tener al menos 2x2 celdas.")
     fuentes_sumideros = fuentes_sumideros or {}
+    condiciones_rio = condiciones_rio or {}
+    condiciones_dren = condiciones_dren or {}
     h = np.full((n_filas, n_columnas), h_inicial_m, dtype=float)
     for (i, j), valor in condiciones_borde.items():
         h[i, j] = valor
@@ -148,12 +198,43 @@ def resolver_flujo_2d_permanente(n_filas: int, n_columnas: int, dx_m: float, dy_
                         c = t_interfaz(i, j, ni, j) * dx_m / dy_m
                         suma_c += c
                         suma_ch += c * h[ni, j]
+                q_celda = fuentes_sumideros.get((i, j), 0.0)
+                h_actual = h[i, j]  # criterio de conexión/activación EN LA ITERACIÓN ANTERIOR (Picard)
+                celda_no_lineal = False  # RIV/DRN activos -- ver nota de factor_sor más abajo
+                riv = condiciones_rio.get((i, j))
+                if riv is not None:
+                    c_riv = riv["conductancia"]
+                    celda_no_lineal = True
+                    if h_actual >= riv["fondo"]:
+                        suma_c += c_riv
+                        suma_ch += c_riv * riv["nivel"]
+                    else:
+                        # Río desconectado del acuífero: entrega un goteo FIJO,
+                        # ya no depende de la carga simulada.
+                        q_celda += c_riv * (riv["nivel"] - riv["fondo"])
+                dren = condiciones_dren.get((i, j))
+                if dren is not None:
+                    celda_no_lineal = True
+                    if h_actual > dren["nivel"]:
+                        suma_c += dren["conductancia"]
+                        suma_ch += dren["conductancia"] * dren["nivel"]
                 if suma_c <= 0:
                     continue
-                q_celda = fuentes_sumideros.get((i, j), 0.0)
                 h_nuevo_gs = (suma_ch + q_celda) / suma_c
                 h_anterior = h[i, j]
-                h_sor = h_anterior + factor_sor * (h_nuevo_gs - h_anterior)
+                # SIN sobre-relajación (factor 1.0, Gauss-Seidel puro) en
+                # celdas RIV/DRN: son condiciones NO LINEALES que pueden
+                # cambiar de régimen (conectado/desconectado, activo/
+                # inactivo) de una iteración a otra, y su conductancia
+                # puede ser mucho mayor que la de las celdas vecinas
+                # "normales" -- aplicarles el mismo factor_sor>1 de las
+                # celdas lineales amplifica el sobresalto de cada cambio
+                # de régimen en vez de amortiguarlo, y puede diverger
+                # (verificado: con factor_sor=1.8 y una condición de
+                # borde inicial lejos del equilibrio, el residuo se
+                # disparaba a valores de millones en vez de converger).
+                factor_efectivo = 1.0 if celda_no_lineal else factor_sor
+                h_sor = h_anterior + factor_efectivo * (h_nuevo_gs - h_anterior)
                 residuo_max = max(residuo_max, abs(h_sor - h_anterior))
                 h[i, j] = h_sor
         historial_residuo.append(residuo_max)
@@ -163,8 +244,21 @@ def resolver_flujo_2d_permanente(n_filas: int, n_columnas: int, dx_m: float, dy_
         pass  # se alcanzó max_iter sin converger del todo; se reporta igualmente con advertencia
 
     convergio = historial_residuo[-1] < tol_m if historial_residuo else True
+
+    caudal_rio_total = 0.0
+    for (i, j), riv in condiciones_rio.items():
+        if h[i, j] >= riv["fondo"]:
+            caudal_rio_total += riv["conductancia"] * (riv["nivel"] - h[i, j])
+        else:
+            caudal_rio_total += riv["conductancia"] * (riv["nivel"] - riv["fondo"])
+    caudal_dren_total = 0.0
+    for (i, j), dren in condiciones_dren.items():
+        if h[i, j] > dren["nivel"]:
+            caudal_dren_total += dren["conductancia"] * (dren["nivel"] - h[i, j])  # siempre <= 0 (sale del acuífero)
+
     return {"cargas_h": h, "iteraciones": len(historial_residuo), "residuo_final_m": historial_residuo[-1] if historial_residuo else 0.0,
-            "convergio": convergio, "historial_residuo": historial_residuo}
+            "convergio": convergio, "historial_residuo": historial_residuo,
+            "caudal_rio_total_m3s": caudal_rio_total, "caudal_dren_total_m3s": caudal_dren_total}
 
 
 def calcular_velocidades_darcy_2d(cargas_h: np.ndarray, transmisividad_m2_s, espesor_m: float,

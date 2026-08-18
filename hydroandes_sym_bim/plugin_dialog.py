@@ -17321,10 +17321,13 @@ class HydroAndinaProDialog(QDialog):
             "<b>Flujo Subterráneo</b> — Ley de Darcy, flujo 1D entre dos puntos (confinado y no "
             "confinado/Dupuit), y un <b>solver 2D real</b> de flujo subterráneo en régimen permanente "
             "(diferencias finitas, Gauss-Seidel/SOR) para acuíferos confinados homogéneos o con "
-            "transmisividad variable por celda. <i>No reemplaza a MODFLOW/FEFLOW para modelos 3D "
-            "transitorios y heterogéneos — para eso siga las fases: modelo conceptual, discretización, "
-            "selección de software, calibración con piezómetros de campo. La hidráulica de POZOS "
-            "específica (Thiem, Theis, radio de influencia) está en la siguiente pestaña.</i>"
+            "transmisividad variable por celda, con condiciones de carga fija, pozos/recarga puntual, "
+            "y celdas tipo <b>río (RIV)</b> y <b>dren (DRN)</b> -- la misma formulación que esos paquetes "
+            "de MODFLOW, con el mismo comportamiento no lineal (el río se desconecta si la carga cae "
+            "bajo su lecho; el dren solo extrae, nunca inyecta). <i>Sigue sin ser un reemplazo de MODFLOW "
+            "para modelos 3D transitorios y multicapa — para eso siga las fases: modelo conceptual, "
+            "discretización, selección de software, calibración con piezómetros de campo. La hidráulica "
+            "de POZOS específica (Thiem, Theis, radio de influencia) está en la siguiente pestaña.</i>"
         )
         _lbl_auto_41.setWordWrap(True)
         v.addWidget(_lbl_auto_41)
@@ -17416,6 +17419,36 @@ class HydroAndinaProDialog(QDialog):
         self.tabla_fuentes_2d.setMinimumHeight(160)
         v.addWidget(self.tabla_fuentes_2d)
 
+        lbl_riv = QLabel(
+            "Celdas tipo <b>río</b> (paquete RIV) — el caudal intercambiado depende de la carga simulada: "
+            "mientras la carga esté por encima del fondo del lecho, el río recarga o drena el acuífero según "
+            "la diferencia con su nivel; si la carga cae por debajo del fondo, el río se DESCONECTA y entrega "
+            "un goteo fijo. Fila, columna (0-index), conductancia C (m²/s, use "
+            "conductancia_lecho=K_lecho·L·W/espesor), nivel del río (m), fondo del lecho (m):"
+        )
+        lbl_riv.setWordWrap(True)
+        v.addWidget(lbl_riv)
+        self.tabla_rio_2d = TablaPegable(6, 5)
+        self.tabla_rio_2d.setHorizontalHeaderLabels(
+            ["Fila", "Columna", "Conductancia C (m²/s)", "Nivel río (m)", "Fondo lecho (m)"])
+        self.tabla_rio_2d.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.tabla_rio_2d.setMinimumHeight(120)
+        v.addWidget(self.tabla_rio_2d)
+
+        lbl_dren = QLabel(
+            "Celdas tipo <b>dren</b> (paquete DRN) — solo EXTRAE agua del acuífero (nunca inyecta): se "
+            "activa mientras la carga simulada esté por encima del nivel del dren, y se desactiva por "
+            "completo en cuanto la carga cae a su nivel o por debajo. Fila, columna (0-index), "
+            "conductancia C (m²/s), nivel del dren (m):"
+        )
+        lbl_dren.setWordWrap(True)
+        v.addWidget(lbl_dren)
+        self.tabla_dren_2d = TablaPegable(6, 4)
+        self.tabla_dren_2d.setHorizontalHeaderLabels(["Fila", "Columna", "Conductancia C (m²/s)", "Nivel dren (m)"])
+        self.tabla_dren_2d.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.tabla_dren_2d.setMinimumHeight(120)
+        v.addWidget(self.tabla_dren_2d)
+
         btn_resolver_2d = QPushButton("Resolver flujo subterráneo 2D")
         btn_resolver_2d.clicked.connect(self._on_resolver_flujo_2d)
         v.addWidget(btn_resolver_2d)
@@ -17489,6 +17522,46 @@ class HydroAndinaProDialog(QDialog):
                     continue
         return pares
 
+    def _leer_tabla_rio_2d(self):
+        condiciones_rio = {}
+        for i in range(self.tabla_rio_2d.rowCount()):
+            item_f = self.tabla_rio_2d.item(i, 0)
+            item_c = self.tabla_rio_2d.item(i, 1)
+            item_cond = self.tabla_rio_2d.item(i, 2)
+            item_nivel = self.tabla_rio_2d.item(i, 3)
+            item_fondo = self.tabla_rio_2d.item(i, 4)
+            if item_f and item_c and item_cond and item_nivel and item_fondo and item_f.text().strip():
+                try:
+                    fila = int(float(item_f.text().replace(",", ".")))
+                    col = int(float(item_c.text().replace(",", ".")))
+                    condiciones_rio[(fila, col)] = {
+                        "conductancia": float(item_cond.text().replace(",", ".")),
+                        "nivel": float(item_nivel.text().replace(",", ".")),
+                        "fondo": float(item_fondo.text().replace(",", ".")),
+                    }
+                except ValueError:
+                    continue
+        return condiciones_rio
+
+    def _leer_tabla_dren_2d(self):
+        condiciones_dren = {}
+        for i in range(self.tabla_dren_2d.rowCount()):
+            item_f = self.tabla_dren_2d.item(i, 0)
+            item_c = self.tabla_dren_2d.item(i, 1)
+            item_cond = self.tabla_dren_2d.item(i, 2)
+            item_nivel = self.tabla_dren_2d.item(i, 3)
+            if item_f and item_c and item_cond and item_nivel and item_f.text().strip():
+                try:
+                    fila = int(float(item_f.text().replace(",", ".")))
+                    col = int(float(item_c.text().replace(",", ".")))
+                    condiciones_dren[(fila, col)] = {
+                        "conductancia": float(item_cond.text().replace(",", ".")),
+                        "nivel": float(item_nivel.text().replace(",", ".")),
+                    }
+                except ValueError:
+                    continue
+        return condiciones_dren
+
     def _on_resolver_flujo_2d(self):
         try:
             n_filas = self.spin_filas_2d.value()
@@ -17515,9 +17588,13 @@ class HydroAndinaProDialog(QDialog):
                 return
 
             fuentes = self._leer_tabla_fila_col_valor(self.tabla_fuentes_2d)
+            condiciones_rio = self._leer_tabla_rio_2d()
+            condiciones_dren = self._leer_tabla_dren_2d()
 
             resultado = groundwater_flow.resolver_flujo_2d_permanente(
-                n_filas, n_columnas, dx, dy, t, condiciones, fuentes, tol_m=1e-6, max_iter=20000)
+                n_filas, n_columnas, dx, dy, t, condiciones, fuentes,
+                condiciones_rio=condiciones_rio, condiciones_dren=condiciones_dren,
+                tol_m=1e-6, max_iter=20000)
             h = resultado["cargas_h"]
             velocidades = groundwater_flow.calcular_velocidades_darcy_2d(h, t, self.spin_espesor_2d.value(), dx, dy)
             pozos_coords = [((fila, col), f"Q={valor:+.3f}") for (fila, col), valor in fuentes.items()]
@@ -17573,6 +17650,14 @@ class HydroAndinaProDialog(QDialog):
                  f"Convergencia: {'Sí' if r['resultado']['convergio'] else 'NO — revisar'} "
                  f"en {r['resultado']['iteraciones']} iteraciones (residuo final = {r['resultado']['residuo_final_m']:.2e} m)<br>"
                  f"Carga mínima simulada: {h.min():.3f} m &nbsp;|&nbsp; Carga máxima: {h.max():.3f} m</p>")
+        caudal_rio = r["resultado"].get("caudal_rio_total_m3s", 0.0)
+        caudal_dren = r["resultado"].get("caudal_dren_total_m3s", 0.0)
+        if caudal_rio != 0.0 or caudal_dren != 0.0:
+            html += (
+                f"<p><b>Intercambio río-acuífero (RIV):</b> {caudal_rio:+.5f} m³/s "
+                f"({'el río RECARGA al acuífero' if caudal_rio > 0 else 'el río DRENA al acuífero'})<br>"
+                f"<b>Extracción por drenes (DRN):</b> {caudal_dren:+.5f} m³/s</p>"
+            )
         if r.get("calibracion"):
             html += f"<p><b>RMSE de calibración:</b> {r['calibracion']['rmse_m']:.4f} m</p>"
         html += ("<p style='color:#666666'>NOTA: este solver resuelve el flujo subterráneo GENERAL en "
