@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.4.16
+version=0.4.17
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,41 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.4.17: Pestaña 19 (Flujo Subterráneo) -- Fase 2 de la mejora
+      hidrogeológica pedida por el usuario: MULTICAPA (núcleo) y
+      RÉGIMEN TRANSITORIO (núcleo + UI).
+      core/groundwater_flow.py: nueva resolver_flujo_multicapa_permanente()
+      -- extensión "cuasi-3D" (esquema BCF/LPF de MODFLOW): n capas 2D
+      acopladas por goteo vertical (leakance/VCONT) entre capas
+      adyacentes, con su propia RIV/DRN por capa; nueva
+      leakance_entre_capas() (fórmula estándar VCONT = 1/(b1/2Kv1 +
+      b2/2Kv2)). Por ahora es de núcleo únicamente -- la UI multicapa
+      (selector de capas, tabla de leakance) queda para una fase
+      posterior; el núcleo ya está completo y verificado.
+      Nueva resolver_flujo_2d_transitorio() -- simulación en el TIEMPO
+      (1 capa), esquema implícito (backward Euler, incondicionalmente
+      estable): el término de almacenamiento S actúa como una
+      conductancia adicional S·dx·dy/Δt contra la carga del paso
+      anterior, mismo criterio de "vecino virtual" ya usado para
+      RIV/DRN/goteo. Acepta bombeo/recarga variable en el tiempo (lista
+      de diccionarios, uno por paso). Verificada con la solución
+      ANALÍTICA EXACTA de un acuífero semi-infinito con escalón de
+      carga en el borde (h = h0 + (h1-h0)·erfc(x/2√(Dt))) -- coincide
+      dentro de 0.16 m sobre un rango de 10 m (< 2% de error) en los 4
+      puntos (x,t) verificados.
+      plugin_dialog.py: nueva sección "5. Régimen transitorio (1 capa)"
+      en la Pestaña 19 -- reutiliza la MISMA malla/bordes/RIV/DRN ya
+      configurados en la sección 3 (nuevo _construir_condiciones_borde_2d()
+      compartido), agrega solo S/Δt/n° de pasos/punto de observación;
+      mapa de cargas del último paso + gráfico de evolución temporal en
+      el punto de observación (nuevo GroundwaterCanvas.plot_serie_temporal()).
+      Verificado: 21/21 (núcleo -- multicapa: la capa sin condición de
+      borde propia converge EXACTO a la de arriba cuando no hay
+      bombeo, balance de masa exacto entre goteo y bombeo con pozo
+      activo; transitorio: verificación analítica erfc, límite de
+      largo plazo igual al solver permanente, bombeo variable en el
+      tiempo) + 12/12 (integración UI real en QGIS headless de la
+      sección transitoria) -- 33/33.
     - v0.4.16: Pestaña 19 (Flujo Subterráneo) -- Fase 1 de la mejora
       hidrogeológica pedida por el usuario (aportó material propio de
       un curso de modelamiento MODFLOW 6/FloPy en

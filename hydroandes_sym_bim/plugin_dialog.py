@@ -419,6 +419,7 @@ class HydroAndinaProDialog(QDialog):
         self.resultado_curva_phabsim = None   # dict devuelto por phabsim.curva_caudal_wua + puntos notables
         # --- Pestaña Flujo Subterráneo ---
         self.resultado_flujo_subterraneo = None  # dict con cargas h, velocidades, convergencia
+        self.resultado_flujo_transitorio = None  # dict con la serie temporal del régimen transitorio (sección 5)
         # --- Pestaña Hidráulica de Pozos ---
         self.resultado_pozo = {}  # dict con resultados de las distintas secciones (Theis, Cooper-Jacob, perdidas, radios)
         # --- gestor de cuencas delimitadas (varias en la misma sesión) ---
@@ -17474,6 +17475,55 @@ class HydroAndinaProDialog(QDialog):
         v_calib.addWidget(self.canvas_calibracion_2d)
         v.addWidget(gb_calib)
 
+        # ---------------- Régimen transitorio ----------------
+        gb_transitorio = QGroupBox("5. Régimen transitorio (1 capa) — esquema implícito")
+        v_trans = QVBoxLayout(gb_transitorio)
+        lbl_trans = QLabel(
+            "Simula la evolución de las cargas en el TIEMPO (no solo el estado final de equilibrio), con "
+            "esquema implícito (backward Euler, incondicionalmente estable). Reutiliza la MISMA malla, "
+            "bordes, T, fuentes/sumideros y celdas RIV/DRN ya configurados arriba (sección 3) — aquí solo "
+            "se agregan el almacenamiento S, el paso de tiempo, y el número de pasos."
+        )
+        lbl_trans.setWordWrap(True)
+        v_trans.addWidget(lbl_trans)
+        f_trans = QFormLayout()
+        f_trans.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.spin_s_transitorio = QDoubleSpinBox()
+        self.spin_s_transitorio.setRange(1e-6, 0.5); self.spin_s_transitorio.setDecimals(6)
+        self.spin_s_transitorio.setValue(0.001)
+        f_trans.addRow("Coeficiente de almacenamiento S (Ss·b confinado, o Sy libre):", self.spin_s_transitorio)
+        self.spin_h_inicial_transitorio = QDoubleSpinBox()
+        self.spin_h_inicial_transitorio.setRange(-1000, 9000); self.spin_h_inicial_transitorio.setDecimals(2)
+        self.spin_h_inicial_transitorio.setValue(50.0)
+        f_trans.addRow("Carga inicial h en t=0 (m, uniforme en toda la malla):", self.spin_h_inicial_transitorio)
+        self.spin_dt_dias_transitorio = QDoubleSpinBox()
+        self.spin_dt_dias_transitorio.setRange(0.001, 3650.0); self.spin_dt_dias_transitorio.setDecimals(3)
+        self.spin_dt_dias_transitorio.setValue(1.0)
+        f_trans.addRow("Duración de cada paso de tiempo Δt (días):", self.spin_dt_dias_transitorio)
+        self.spin_n_pasos_transitorio = QSpinBox()
+        self.spin_n_pasos_transitorio.setRange(1, 1000); self.spin_n_pasos_transitorio.setValue(30)
+        f_trans.addRow("Número de pasos de tiempo:", self.spin_n_pasos_transitorio)
+        self.spin_fila_obs_transitorio = QSpinBox()
+        self.spin_fila_obs_transitorio.setRange(0, 99)
+        f_trans.addRow("Punto de observación — fila:", self.spin_fila_obs_transitorio)
+        self.spin_col_obs_transitorio = QSpinBox()
+        self.spin_col_obs_transitorio.setRange(0, 99)
+        f_trans.addRow("Punto de observación — columna:", self.spin_col_obs_transitorio)
+        v_trans.addLayout(f_trans)
+
+        btn_resolver_transitorio = QPushButton("Ejecutar simulación transitoria")
+        btn_resolver_transitorio.clicked.connect(self._on_resolver_flujo_transitorio)
+        v_trans.addWidget(btn_resolver_transitorio)
+
+        self.canvas_mapa_transitorio = GroundwaterCanvas(width=7.6, height=5.4)
+        v_trans.addWidget(self.canvas_mapa_transitorio)
+        self.canvas_serie_transitorio = GroundwaterCanvas(width=7.6, height=3.6)
+        v_trans.addWidget(self.canvas_serie_transitorio)
+        self.lbl_estado_transitorio = QLabel("Estado: en espera.")
+        self.lbl_estado_transitorio.setWordWrap(True)
+        v_trans.addWidget(self.lbl_estado_transitorio)
+        v.addWidget(gb_transitorio)
+
         v.addWidget(QLabel("<b>Cuadro resumen final:</b>"))
         self.texto_resumen_flujo_subterraneo = ResumenFinal()
         v.addWidget(self.texto_resumen_flujo_subterraneo)
@@ -17562,6 +17612,26 @@ class HydroAndinaProDialog(QDialog):
                     continue
         return condiciones_dren
 
+    def _construir_condiciones_borde_2d(self, n_filas, n_columnas):
+        """Bordes Dirichlet configurados en la sección 3 -- compartido
+        entre el solver permanente y el transitorio (sección 5), para
+        que ambos usen SIEMPRE la misma malla/bordes sin dos juegos de
+        campos que puedan divergir."""
+        condiciones = {}
+        if self.chk_borde_izq.isChecked():
+            for i in range(n_filas):
+                condiciones[(i, 0)] = self.spin_h_borde_izq.value()
+        if self.chk_borde_der.isChecked():
+            for i in range(n_filas):
+                condiciones[(i, n_columnas - 1)] = self.spin_h_borde_der.value()
+        if self.chk_borde_sup.isChecked():
+            for j in range(n_columnas):
+                condiciones[(0, j)] = self.spin_h_borde_sup.value()
+        if self.chk_borde_inf.isChecked():
+            for j in range(n_columnas):
+                condiciones[(n_filas - 1, j)] = self.spin_h_borde_inf.value()
+        return condiciones
+
     def _on_resolver_flujo_2d(self):
         try:
             n_filas = self.spin_filas_2d.value()
@@ -17569,19 +17639,7 @@ class HydroAndinaProDialog(QDialog):
             dx, dy = self.spin_dx_2d.value(), self.spin_dy_2d.value()
             t = self.spin_t_2d.value()
 
-            condiciones = {}
-            if self.chk_borde_izq.isChecked():
-                for i in range(n_filas):
-                    condiciones[(i, 0)] = self.spin_h_borde_izq.value()
-            if self.chk_borde_der.isChecked():
-                for i in range(n_filas):
-                    condiciones[(i, n_columnas - 1)] = self.spin_h_borde_der.value()
-            if self.chk_borde_sup.isChecked():
-                for j in range(n_columnas):
-                    condiciones[(0, j)] = self.spin_h_borde_sup.value()
-            if self.chk_borde_inf.isChecked():
-                for j in range(n_columnas):
-                    condiciones[(n_filas - 1, j)] = self.spin_h_borde_inf.value()
+            condiciones = self._construir_condiciones_borde_2d(n_filas, n_columnas)
             if not condiciones:
                 QMessageBox.warning(self, "Faltan condiciones de borde",
                                      "Fije al menos un borde con carga conocida (Dirichlet).")
@@ -17639,6 +17697,67 @@ class HydroAndinaProDialog(QDialog):
             self._actualizar_texto_resumen_flujo_subterraneo()
         except groundwater_flow.GroundwaterError as e:
             QMessageBox.warning(self, "No se pudo calibrar", str(e))
+
+    def _on_resolver_flujo_transitorio(self):
+        try:
+            n_filas = self.spin_filas_2d.value()
+            n_columnas = self.spin_columnas_2d.value()
+            dx, dy = self.spin_dx_2d.value(), self.spin_dy_2d.value()
+            t = self.spin_t_2d.value()
+
+            condiciones = self._construir_condiciones_borde_2d(n_filas, n_columnas)
+            if not condiciones:
+                QMessageBox.warning(self, "Faltan condiciones de borde",
+                                     "Fije al menos un borde con carga conocida (Dirichlet) en la sección 3.")
+                return
+
+            fila_obs = self.spin_fila_obs_transitorio.value()
+            col_obs = self.spin_col_obs_transitorio.value()
+            if not (0 <= fila_obs < n_filas and 0 <= col_obs < n_columnas):
+                QMessageBox.warning(self, "Punto de observación fuera de la malla",
+                                     "La fila/columna del punto de observación debe estar dentro de la malla.")
+                return
+
+            fuentes = self._leer_tabla_fila_col_valor(self.tabla_fuentes_2d)
+            condiciones_rio = self._leer_tabla_rio_2d()
+            condiciones_dren = self._leer_tabla_dren_2d()
+            dt_s = self.spin_dt_dias_transitorio.value() * 86400.0
+            n_pasos = self.spin_n_pasos_transitorio.value()
+
+            resultado = groundwater_flow.resolver_flujo_2d_transitorio(
+                n_filas, n_columnas, dx, dy, t, self.spin_s_transitorio.value(), condiciones,
+                dt_s=dt_s, n_pasos=n_pasos, fuentes_sumideros=fuentes,
+                condiciones_rio=condiciones_rio, condiciones_dren=condiciones_dren,
+                h_inicial=self.spin_h_inicial_transitorio.value(), tol_m=1e-6, max_iter_por_paso=5000)
+
+            h_final = resultado["cargas_h"]
+            velocidades = groundwater_flow.calcular_velocidades_darcy_2d(
+                h_final, t, self.spin_espesor_2d.value(), dx, dy)
+            pozos_coords = [((fila, col), f"Q={valor:+.3f}") for (fila, col), valor in fuentes.items()]
+            self.canvas_mapa_transitorio.plot_mapa_cargas(
+                h_final, dx, dy, velocidades["vx"], velocidades["vy"], pozos_coords)
+
+            serie_obs = [float(paso[fila_obs, col_obs]) for paso in resultado["cargas_por_paso"]]
+            self.canvas_serie_transitorio.plot_serie_temporal(resultado["tiempos_s"], serie_obs, fila_obs, col_obs)
+
+            self.resultado_flujo_transitorio = {
+                "resultado": resultado, "n_filas": n_filas, "n_columnas": n_columnas, "dx": dx, "dy": dy,
+                "serie_observacion": serie_obs, "fila_obs": fila_obs, "col_obs": col_obs,
+            }
+            tiempo_total_dias = n_pasos * self.spin_dt_dias_transitorio.value()
+            if resultado["convergio"]:
+                self.lbl_estado_transitorio.setText(
+                    f"Estado: simulación completa ({n_pasos} pasos, {tiempo_total_dias:.2f} días totales). "
+                    f"Carga final en el punto de observación: {serie_obs[-1]:.3f} m.")
+            else:
+                self.lbl_estado_transitorio.setText(
+                    "Estado: ADVERTENCIA -- algún paso de tiempo no convergió del todo (ver resultados con cautela).")
+                QMessageBox.warning(self, "No convergió completamente en todos los pasos",
+                                     "Al menos un paso de tiempo alcanzó el máximo de iteraciones sin converger "
+                                     "del todo. Aumente max_iter_por_paso, reduzca Δt, o revise la malla.")
+        except groundwater_flow.GroundwaterError as e:
+            self.lbl_estado_transitorio.setText("Estado: ERROR (ver mensaje).")
+            QMessageBox.critical(self, "Error en la simulación transitoria", str(e))
 
     def _actualizar_texto_resumen_flujo_subterraneo(self):
         r = self.resultado_flujo_subterraneo

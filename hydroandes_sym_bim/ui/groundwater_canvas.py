@@ -7,6 +7,8 @@ Gráficos de alto impacto visual de la Pestaña "Flujo Subterráneo":
      vectores de flujo de Darcy superpuestos.
   2) Curva de convergencia del solver iterativo (Gauss-Seidel/SOR).
   3) Calibración: cargas simuladas vs. observadas en pozos, línea 1:1.
+  4) Serie temporal de carga en un punto de observación (régimen
+     transitorio, core/groundwater_flow.py::resolver_flujo_2d_transitorio).
 """
 import numpy as np
 
@@ -98,5 +100,19 @@ class GroundwaterCanvas(FigureCanvas):
         ax.grid(True, linestyle=":", linewidth=0.5)
         ax.legend(fontsize=8.5, loc="upper left", frameon=False)
         ax.set_aspect("equal", adjustable="box")
+        self.fig.tight_layout()
+        self.draw()
+
+    # ------------------------------------------------------------------
+    def plot_serie_temporal(self, tiempos_s, cargas, fila, columna):
+        self.fig.clear()
+        ax = self.fig.add_subplot(111)
+        tiempos_dias = [t / 86400.0 for t in tiempos_s]
+        ax.plot(tiempos_dias, cargas, "-o", color="#1F6FB2", linewidth=1.8, markersize=4)
+        ax.set_xlabel("Tiempo (días)")
+        ax.set_ylabel("Carga hidráulica h (m)")
+        ax.set_title(f"Evolución de la carga en el punto de observación (fila {fila}, col {columna})",
+                    pad=14, fontsize=11, fontweight="bold")
+        ax.grid(True, linestyle=":", linewidth=0.5)
         self.fig.tight_layout()
         self.draw()
