@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.4.12
+version=0.4.13
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,47 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.4.13: NUEVO -- visor 3D "workspace view" del relieve en la
+      Pestaña 1 (DEM y Delimitación), a pedido explícito del usuario:
+      subventana a la DERECHA con un render 3D de alto impacto,
+      rotable libremente en 360° con el mouse (arrastre), del MDE de
+      la cuenca activa (o del MDE completo cargado, si aún no se
+      delimitó ninguna cuenca). El relieve se sombrea con hillshade
+      (factor Z=1 por defecto) y se mezcla con un color base mediante
+      el modo MULTIPLICAR -- la misma técnica que el propio proyecto
+      QGIS de referencia del usuario ("PRUEBA_HYDROANDINA"), cuyo
+      archivo se localizó y leyó a pedido suyo: su capa
+      "DEM_COMBINADO_RELLENO" usa un renderizador hillshade con
+      zfactor=1, azimuth=42, angle=45, un efecto Colorize (RGB
+      178,223,138 al 100% de intensidad) y blendMode=6 (Multiply en
+      QGIS) -- esos son exactamente los valores por defecto de este
+      visor (factor Z, azimut, altitud y color base #B2DF8A),
+      ajustables desde la interfaz.
+      Nuevo ui/dem_relief_3d_canvas.py::DemRelieve3DCanvas -- reutiliza
+      el mismo mecanismo de rotación libre por arrastre de Axes3D que
+      ya usaba TerrenoCalado3DCanvas (Pestaña 8), calcula el hillshade
+      con matplotlib.colors.LightSource (mismo modelo Lambertiano que
+      gdal:hillshade, sin pasar por Processing) y aplica la mezcla
+      MULTIPLICAR a mano (color_final = color_base × hillshade, canal a
+      canal) como `facecolors` de plot_surface(). Incluye giro
+      automático opcional (efecto cinemático) vía QTimer.
+      Nuevo core/raster_stats.py::leer_elevacion_2d() -- lee la malla
+      2D completa de un ráster (con NODATA como np.nan) y su tamaño de
+      celda, para alimentar el visor. plugin_dialog.py: la Pestaña 1
+      pasó de una columna a un layout horizontal de 2 (panel izquierdo
+      = el mismo contenido de siempre, panel derecho = el nuevo visor
+      3D con controles de factor Z/azimut/altitud/exageración
+      vertical/color base/giro automático); el visor se actualiza
+      AUTOMÁTICAMENTE al completar una delimitación exitosa (mismo
+      criterio que el auto-render de BIM en la Pestaña 8 -- nunca
+      interrumpe el flujo principal si el render 3D falla).
+      Verificado: 21/21 (núcleo -- valores por defecto extraídos del
+      proyecto de referencia, lectura de MDE sintético real con GDAL,
+      hillshade+mezcla MULTIPLICAR verificados a mano contra un plano
+      horizontal, giro automático, validaciones de error) + 18/18
+      (integración UI real en QGIS headless -- estructura de 2
+      columnas, defaults de los widgets, render sin/con MDE cargado,
+      cambio de color, giro automático desde el checkbox) -- 39/39.
     - v0.4.12: Pestaña 6 (Caudales Máximos), a pedido expreso: (1)
       coeficiente envolvente de Creager por defecto ahora es 5.0 (antes
       30.0) -- tanto en el spin box de la UI como en el valor por

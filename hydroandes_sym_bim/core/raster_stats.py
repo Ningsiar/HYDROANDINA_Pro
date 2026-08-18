@@ -11,6 +11,29 @@ import numpy as np
 from osgeo import gdal
 
 
+def leer_elevacion_2d(ruta_raster: str):
+    """Devuelve (array_2d, dx, dy) del ráster indicado: la matriz 2D de
+    elevación completa (con np.nan en las celdas sin dato) y el tamaño
+    de celda en X e Y (m), leído de la geotransformada -- para
+    alimentar visores 3D (ui/dem_relief_3d_canvas.py,
+    ui/swe2d_canvas.py) que necesitan la malla completa, a diferencia
+    de leer_array_valido() (que aplana y descarta la posición de cada
+    celda)."""
+    ds = gdal.Open(ruta_raster)
+    if ds is None:
+        raise RuntimeError(f"No se pudo abrir el ráster: {ruta_raster}")
+    banda = ds.GetRasterBand(1)
+    nodata = banda.GetNoDataValue()
+    arr = banda.ReadAsArray().astype("float64")
+    gt = ds.GetGeoTransform()
+    ds = None
+    if nodata is not None:
+        arr = np.where(arr == nodata, np.nan, arr)
+    dx = abs(gt[1])
+    dy = abs(gt[5])
+    return arr, dx, dy
+
+
 def leer_array_valido(ruta_raster: str) -> np.ndarray:
     """Devuelve un array 1D con todos los píxeles válidos (sin nodata)
     de la banda 1 del ráster indicado."""

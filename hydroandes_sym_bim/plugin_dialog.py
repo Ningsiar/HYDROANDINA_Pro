@@ -78,6 +78,7 @@ from .ui.regionalization_canvas import RegionalizacionCanvas, ValidacionGrillada
 from .ui.swe2d_canvas import (MapaCalado2DCanvas, MapaPeligrosidadCanvas,
                                HidrogramasSwe2DCanvas, PerfilSwe2DCanvas,
                                TerrenoCalado3DCanvas)
+from .ui.dem_relief_3d_canvas import DemRelieve3DCanvas, DemRelieveCanvasError
 from .ui.swe2d_runner import SimulacionSwe2DWorker, estimar_coste
 from .ui import swe2d_animation
 from .ui.bim_canvas import Estructura3DCanvas, GeometriaNoDisponibleError, LONGITUD_POR_DEFECTO_M
@@ -348,6 +349,7 @@ class HydroAndinaProDialog(QDialog):
         self.utm_crs = None
         self.dem_layer = None
         self.dem_clip_path = None
+        self._dem_relieve3d_activo = None  # ruta del MDE usado en el último render del visor 3D (Pestaña 1)
         self.cuenca_layer = None
         self.red_drenaje_layer = None
         self.morfometria_resultados = {}
@@ -511,7 +513,11 @@ class HydroAndinaProDialog(QDialog):
 
     def _build_tab1(self):
         tab = QWidget()
-        v = QVBoxLayout(tab)
+        h_raiz = QHBoxLayout(tab)
+
+        panel_izq = QWidget()
+        v = QVBoxLayout(panel_izq)
+        v.setContentsMargins(0, 0, 0, 0)
 
         # --- Adquisición del MDE ---
         gb_dem = QGroupBox("1. MDE (Modelo Digital de Elevación)")
@@ -742,8 +748,137 @@ class HydroAndinaProDialog(QDialog):
         v.addWidget(gb_cuencas)
 
         v.addStretch()
+        h_raiz.addWidget(panel_izq, 3)
+
+        h_raiz.addWidget(self._build_panel_relieve_3d(), 2)
 
         self._agregar_pestaña_con_scroll(tab, "1. DEM y Delimitación")
+
+    def _build_panel_relieve_3d(self) -> QWidget:
+        """
+        Subventana "workspace view" a la derecha de la Pestaña 1: render
+        3D de alto impacto del MDE (relieve sombreado + mezcla
+        MULTIPLICAR sobre un color base, rotable libremente en 360° con
+        el mouse -- ver ui/dem_relief_3d_canvas.py para el detalle
+        completo, incluida la procedencia de los valores por defecto).
+        """
+        panel = QGroupBox("Visor 3D del relieve (workspace view)")
+        vp = QVBoxLayout(panel)
+        lbl_3d = QLabel(
+            "Render 3D del MDE de la cuenca activa (o del MDE cargado si aún no delimitó ninguna "
+            "cuenca): sombreado de relieve (hillshade) con mezcla <b>Multiplicar</b> sobre un color "
+            "base, la misma técnica del proyecto QGIS de referencia (factor Z=1). Arrastre con el "
+            "mouse para rotar 360°."
+        )
+        lbl_3d.setWordWrap(True)
+        vp.addWidget(lbl_3d)
+
+        self.canvas_relieve_3d = DemRelieve3DCanvas(panel, width=5.0, height=4.4)
+        vp.addWidget(self.canvas_relieve_3d)
+
+        f_3d = QFormLayout()
+        f_3d.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.spin_relieve3d_zfactor = QDoubleSpinBox()
+        self.spin_relieve3d_zfactor.setRange(0.1, 10.0)
+        self.spin_relieve3d_zfactor.setDecimals(2)
+        self.spin_relieve3d_zfactor.setValue(1.0)
+        f_3d.addRow("Factor Z (hillshade):", self.spin_relieve3d_zfactor)
+        self.spin_relieve3d_azimut = QDoubleSpinBox()
+        self.spin_relieve3d_azimut.setRange(0.0, 360.0)
+        self.spin_relieve3d_azimut.setValue(42.0)
+        f_3d.addRow("Azimut de la luz (°):", self.spin_relieve3d_azimut)
+        self.spin_relieve3d_altitud = QDoubleSpinBox()
+        self.spin_relieve3d_altitud.setRange(1.0, 90.0)
+        self.spin_relieve3d_altitud.setValue(45.0)
+        f_3d.addRow("Altitud de la luz (°):", self.spin_relieve3d_altitud)
+        self.spin_relieve3d_exageracion = QDoubleSpinBox()
+        self.spin_relieve3d_exageracion.setRange(0.1, 10.0)
+        self.spin_relieve3d_exageracion.setDecimals(2)
+        self.spin_relieve3d_exageracion.setValue(1.5)
+        f_3d.addRow("Exageración vertical (relieve 3D):", self.spin_relieve3d_exageracion)
+        vp.addLayout(f_3d)
+
+        h_color_3d = QHBoxLayout()
+        h_color_3d.addWidget(QLabel("Color base:"))
+        self.btn_relieve3d_color = QPushButton()
+        self._color_relieve3d_actual = QColor(178, 223, 138)
+        self._actualizar_boton_color_relieve3d()
+        self.btn_relieve3d_color.clicked.connect(self._on_elegir_color_relieve3d)
+        h_color_3d.addWidget(self.btn_relieve3d_color)
+        vp.addLayout(h_color_3d)
+
+        self.check_relieve3d_giro = QCheckBox("Girar automáticamente (360°)")
+        self.check_relieve3d_giro.toggled.connect(self._on_toggle_giro_relieve3d)
+        vp.addWidget(self.check_relieve3d_giro)
+
+        self.btn_relieve3d_render = QPushButton("Renderizar / Actualizar vista 3D")
+        self.btn_relieve3d_render.clicked.connect(self._on_renderizar_relieve_3d)
+        vp.addWidget(self.btn_relieve3d_render)
+
+        self.lbl_estado_relieve3d = QLabel("Estado: en espera de un MDE (cargado o cuenca delimitada).")
+        self.lbl_estado_relieve3d.setWordWrap(True)
+        vp.addWidget(self.lbl_estado_relieve3d)
+
+        vp.addStretch()
+        return panel
+
+    def _actualizar_boton_color_relieve3d(self):
+        c = self._color_relieve3d_actual
+        self.btn_relieve3d_color.setStyleSheet(
+            f"background-color: rgb({c.red()},{c.green()},{c.blue()}); min-width: 60px;")
+        self.btn_relieve3d_color.setText(c.name())
+
+    def _on_elegir_color_relieve3d(self):
+        from qgis.PyQt.QtWidgets import QColorDialog
+        color = QColorDialog.getColor(self._color_relieve3d_actual, self, "Color base del relieve 3D")
+        if color.isValid():
+            self._color_relieve3d_actual = color
+            self._actualizar_boton_color_relieve3d()
+            if getattr(self, "_dem_relieve3d_activo", None) is not None:
+                self._on_renderizar_relieve_3d()
+
+    def _on_toggle_giro_relieve3d(self, activo: bool):
+        if activo:
+            self.canvas_relieve_3d.iniciar_giro_automatico()
+        else:
+            self.canvas_relieve_3d.detener_giro_automatico()
+
+    def _obtener_ruta_dem_para_relieve_3d(self):
+        """Prioriza el MDE ya recortado a la cuenca activa (más liviano y
+        más relevante en el contexto de "Delimitación de Cuenca"); si
+        todavía no se delimitó ninguna cuenca, usa el MDE completo
+        seleccionado en la sección 1 de esta misma pestaña."""
+        if self.dem_clip_path:
+            return self.dem_clip_path
+        capa = self.combo_dem.currentLayer()
+        if capa is not None and capa.isValid():
+            return capa.source()
+        return None
+
+    def _on_renderizar_relieve_3d(self):
+        ruta_dem = self._obtener_ruta_dem_para_relieve_3d()
+        if not ruta_dem:
+            QMessageBox.warning(
+                self, "Falta el MDE",
+                "Cargue un MDE (sección 1) o delimite una cuenca antes de renderizar el visor 3D.")
+            return
+        try:
+            elevacion, dx, dy = raster_stats.leer_elevacion_2d(ruta_dem)
+            self.canvas_relieve_3d.establecer_color_base(
+                (self._color_relieve3d_actual.red(), self._color_relieve3d_actual.green(),
+                 self._color_relieve3d_actual.blue()))
+            self.canvas_relieve_3d.plot_dem(
+                elevacion, dx, dy,
+                azimut=self.spin_relieve3d_azimut.value(), altitud=self.spin_relieve3d_altitud.value(),
+                z_factor=self.spin_relieve3d_zfactor.value(),
+                exageracion_vertical=self.spin_relieve3d_exageracion.value(),
+            )
+            self._dem_relieve3d_activo = ruta_dem
+            self.lbl_estado_relieve3d.setText(
+                f"Estado: renderizado ({'cuenca activa' if ruta_dem == self.dem_clip_path else 'MDE completo'}).")
+        except (DemRelieveCanvasError, RuntimeError) as e:
+            self.lbl_estado_relieve3d.setText("Estado: ERROR al renderizar (ver mensaje).")
+            QMessageBox.critical(self, "Error al renderizar el visor 3D", str(e))
 
     def _on_examinar_bp_archivo(self):
         ruta, _ = QFileDialog.getOpenFileName(
@@ -1380,6 +1515,16 @@ class HydroAndinaProDialog(QDialog):
                                                       context=context, feedback=feedback)
             dem_clip_layer = obtener_capa(dem_clip, context, es_raster=True, nombre="dem_clip")
             self.dem_clip_path = dem_clip_layer.source()
+
+            # Actualiza automáticamente el visor 3D con el MDE recién
+            # recortado a la cuenca -- igual criterio que el auto-render
+            # de BIM (Pestaña 8): nunca debe interrumpir el flujo
+            # principal de la delimitación si el render 3D falla por
+            # cualquier motivo (p.ej. una cuenca con muy pocas celdas).
+            try:
+                self._on_renderizar_relieve_3d()
+            except Exception:
+                pass
 
             # Cada delimitación exitosa se guarda como una nueva cuenca
             # numerada secuencialmente (Cuenca 1, Cuenca 2, ...) y queda
