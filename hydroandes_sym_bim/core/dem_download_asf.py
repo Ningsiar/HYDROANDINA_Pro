@@ -136,7 +136,7 @@ def descargar_dem_asf(bbox_wgs84, token: str, dataset: str = _DATASET_DEM_DEFAUL
 
     urls = buscar_granulos_dem(bbox_wgs84, dataset=dataset, timeout_seg=timeout_seg)
 
-    carpeta_tmp = tempfile.mkdtemp(prefix="hydroandina_asf_dem_")
+    carpeta_tmp = tempfile.mkdtemp(prefix="hydroandes_asf_dem_")
     rutas_tiles = []
     for i, url in enumerate(urls):
         destino_tile = os.path.join(carpeta_tmp, f"tile_{i}.tif")
@@ -144,7 +144,7 @@ def descargar_dem_asf(bbox_wgs84, token: str, dataset: str = _DATASET_DEM_DEFAUL
         rutas_tiles.append(destino_tile)
 
     if destino_tif is None:
-        destino_tif = os.path.join(tempfile.gettempdir(), "hydroandina_dem_asf_copdem30.tif")
+        destino_tif = os.path.join(tempfile.gettempdir(), "hydroandes_dem_asf_copdem30.tif")
 
     if len(rutas_tiles) == 1:
         import shutil

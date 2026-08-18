@@ -2,7 +2,7 @@
 """
 plugin_dialog.py
 
-Interfaz principal de HydroAndina Pro: QDialog con un QTabWidget de 4
+Interfaz principal de HydroAndes Sym BIM: QDialog con un QTabWidget de 4
 pestañas, tal como lo especifica el encargo. Cada pestaña delega el
 trabajo pesado a los módulos de core/; este archivo se limita a
 recolectar inputs de los widgets, llamar al core, y volcar resultados
@@ -276,12 +276,12 @@ INTERPRETACIONES_GENERALES_MORFOMETRIA = {
 }
 
 
-class HydroAndinaProDialog(QDialog):
+class HydroAndesSymBimDialog(QDialog):
 
     def __init__(self, iface, parent=None):
         super().__init__(parent)
         self.iface = iface
-        self.setWindowTitle("HydroAndes Pro - Análisis Hidrológico Integral")
+        self.setWindowTitle("HydroAndes Sym BIM - Análisis Hidrológico Integral")
         # Por defecto, un QDialog de Qt solo trae el botón de cerrar (sin
         # minimizar/maximizar), a diferencia de una ventana normal. Se
         # habilitan explícitamente esos botones para poder minimizar la
@@ -7268,7 +7268,7 @@ class HydroAndinaProDialog(QDialog):
             "para flujo que se desborda del cauce y se reparte lateralmente, y para el análisis de "
             "riesgo por calado y velocidad.<br><br>"
             "El motor de cálculo es el plugin independiente <b>HYDRA2DGPU</b> (Aaron Sprague, "
-            "licencia MIT). HydroAndina Pro no copia su código: lo usa como dependencia externa y le "
+            "licencia MIT). HydroAndes Sym BIM no copia su código: lo usa como dependencia externa y le "
             "entrega los insumos ya calculados en las pestañas anteriores."
         )
         lbl_intro.setWordWrap(True)
@@ -7420,9 +7420,9 @@ class HydroAndinaProDialog(QDialog):
             ventana_qgis.raise_()
             ventana_qgis.activateWindow()
             self.iface.messageBar().pushMessage(
-                "HydroAndina Pro",
+                "HydroAndes Sym BIM",
                 "Banco de trabajo de HYDRA2DGPU abierto como panel acoplado. La ventana de "
-                "HydroAndina Pro se minimizó para dejarlo a la vista; recupérela desde la barra "
+                "HydroAndes Sym BIM se minimizó para dejarlo a la vista; recupérela desde la barra "
                 "de tareas cuando termine.",
                 level=0, duration=12)
         except Exception:
@@ -11563,7 +11563,7 @@ class HydroAndinaProDialog(QDialog):
         texto.setHtml(
             """
             <div style="text-align:center; font-family: sans-serif;">
-                <h2 style="color:#1F3864;">HydroAndes Pro</h2>
+                <h2 style="color:#1F3864;">HydroAndes Sym BIM</h2>
                 <p style="font-size:11pt;">Plugin de análisis hidrológico integral de caudales máximos
                 para cuencas andinas del Perú.</p>
                 <p style="font-size:9pt; color:#888;">Versión 0.2.6</p>
@@ -11652,7 +11652,7 @@ class HydroAndinaProDialog(QDialog):
         if not ruta:
             return
         try:
-            carpeta_tmp = tempfile.mkdtemp(prefix="hydroandina_reporte_")
+            carpeta_tmp = tempfile.mkdtemp(prefix="hydroandes_reporte_")
             contexto = self._construir_contexto_reporte(carpeta_tmp)
             report_generator.generar_reporte_word(ruta, contexto)
             QMessageBox.information(self, "Reporte generado", f"Reporte Word guardado en:\n{ruta}")
@@ -11668,7 +11668,7 @@ class HydroAndinaProDialog(QDialog):
         if not carpeta:
             return
         try:
-            carpeta_tmp = tempfile.mkdtemp(prefix="hydroandina_reporte_")
+            carpeta_tmp = tempfile.mkdtemp(prefix="hydroandes_reporte_")
             contexto = self._construir_contexto_reporte(carpeta_tmp)
             nombre_proyecto = (self.nombre_cuenca_activa or "proyecto_hydroandes").replace(" ", "_")
 

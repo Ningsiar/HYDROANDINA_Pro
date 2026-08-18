@@ -196,7 +196,7 @@ def obtener_lulc_esa_worldcover_recortado(cuenca_layer, context, feedback,
         raise LandcoverSoilsError("Ningún tile de ESA WorldCover pudo recortarse a la cuenca.")
 
     if destino_tif is None:
-        destino_tif = os.path.join(tempfile.gettempdir(), "hydroandina_lulc_esa_worldcover.tif")
+        destino_tif = os.path.join(tempfile.gettempdir(), "hydroandes_lulc_esa_worldcover.tif")
 
     if len(rutas_recortadas) == 1:
         import shutil
@@ -231,7 +231,7 @@ def obtener_hsg_recortado(ruta_o_url_hsg: str, cuenca_layer, context, feedback,
         entrada = f"/vsicurl/{entrada}"
 
     if destino_tif is None:
-        destino_tif = os.path.join(tempfile.gettempdir(), "hydroandina_hsg_recortado.tif")
+        destino_tif = os.path.join(tempfile.gettempdir(), "hydroandes_hsg_recortado.tif")
 
     resultado = processing.run(
         "gdal:cliprasterbymasklayer",

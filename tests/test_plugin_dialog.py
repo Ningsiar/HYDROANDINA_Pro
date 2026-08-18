@@ -4,7 +4,7 @@ import types
 
 def _inject_dummy_qgis():
     """Inyecta módulos mínimos de `qgis` en sys.modules para permitir importar
-    `hydroandina_pro.plugin_dialog` en entornos de test sin QGIS.
+    `hydroandes_sym_bim.plugin_dialog` en entornos de test sin QGIS.
     """
     qgis = types.ModuleType("qgis")
     core = types.ModuleType("qgis.core")
@@ -60,7 +60,7 @@ def _inject_dummy_qgis():
 
 def test_utm_epsg_for_lonlat_basic():
     _inject_dummy_qgis()
-    from hydroandina_pro.plugin_dialog import utm_epsg_for_lonlat
+    from hydroandes_sym_bim.plugin_dialog import utm_epsg_for_lonlat
 
     # Zona esperada para Perú central/occidental
     assert utm_epsg_for_lonlat(-75.0, -10.0) == 32717
@@ -70,7 +70,7 @@ def test_utm_epsg_for_lonlat_basic():
 
 def test_utm_epsg_for_lonlat_edges():
     _inject_dummy_qgis()
-    from hydroandina_pro.plugin_dialog import utm_epsg_for_lonlat
+    from hydroandes_sym_bim.plugin_dialog import utm_epsg_for_lonlat
 
     # Valores extremos y límites de zona
     assert utm_epsg_for_lonlat(179.9, 0.0) == 32760

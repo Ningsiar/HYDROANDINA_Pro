@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-HydroAndina Pro - clase principal del plugin.
+HydroAndes Sym BIM - clase principal del plugin.
 Responsable únicamente del ciclo de vida QGIS (registro de menú/toolbar
 y apertura del diálogo). Toda la lógica de negocio vive en core/ y toda
 la interfaz en plugin_dialog.py.
@@ -10,18 +10,18 @@ from qgis.PyQt.QtWidgets import QAction
 from qgis.PyQt.QtGui import QIcon
 
 
-class HydroAndinaProPlugin:
+class HydroAndesSymBimPlugin:
 
     def __init__(self, iface):
         self.iface = iface
         self.plugin_dir = os.path.dirname(__file__)
         self.actions = []
-        self.menu = "&HydroAndina Pro"
+        self.menu = "&HydroAndes Sym BIM"
         self.dialog = None
 
     def initGui(self):
         icon_path = os.path.join(self.plugin_dir, "icon.png")
-        action = QAction(QIcon(icon_path), "HydroAndina Pro - Análisis Hidrológico", self.iface.mainWindow())
+        action = QAction(QIcon(icon_path), "HydroAndes Sym BIM - Análisis Hidrológico", self.iface.mainWindow())
         action.triggered.connect(self.run)
         self.iface.addPluginToMenu(self.menu, action)
         self.iface.addToolBarIcon(action)
@@ -38,10 +38,10 @@ class HydroAndinaProPlugin:
     def run(self):
         # Import diferido: evita cargar PyQt/matplotlib hasta que el
         # usuario realmente abre el plugin (arranque de QGIS más rápido).
-        from .plugin_dialog import HydroAndinaProDialog
+        from .plugin_dialog import HydroAndesSymBimDialog
         self._mostrar_splash_si_es_posible()
         if self.dialog is None:
-            self.dialog = HydroAndinaProDialog(self.iface)
+            self.dialog = HydroAndesSymBimDialog(self.iface)
         self.dialog.show()
         self.dialog.raise_()
         self.dialog.activateWindow()
@@ -54,7 +54,7 @@ class HydroAndinaProPlugin:
         continúa abriendo el diálogo principal con normalidad — un
         splash roto nunca debe impedir usar el plugin), pero SÍ se deja
         registrado en el panel "Registro de mensajes" de QGIS (categoría
-        "HydroAndes Pro") para poder diagnosticar sin adivinar si algo
+        "HydroAndes Sym BIM") para poder diagnosticar sin adivinar si algo
         no funciona."""
         from qgis.core import Qgis, QgsMessageLog
         try:
@@ -64,7 +64,7 @@ class HydroAndinaProPlugin:
             if not os.path.exists(ruta_gif):
                 QgsMessageLog.logMessage(
                     f"No se encontró el GIF del splash en: {ruta_gif}",
-                    "HydroAndes Pro", level=Qgis.Warning
+                    "HydroAndes Sym BIM", level=Qgis.Warning
                 )
                 return
 
@@ -78,5 +78,5 @@ class HydroAndinaProPlugin:
             QgsMessageLog.logMessage(
                 f"El splash de introducción no pudo mostrarse (se omite y se abre el plugin "
                 f"normalmente): {type(e).__name__}: {e}",
-                "HydroAndes Pro", level=Qgis.Warning
+                "HydroAndes Sym BIM", level=Qgis.Warning
             )

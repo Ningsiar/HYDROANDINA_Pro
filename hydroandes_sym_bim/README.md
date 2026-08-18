@@ -1,4 +1,31 @@
-# HydroAndina Pro - Plugin QGIS
+# HydroAndes Sym BIM - Plugin QGIS
+
+## v0.2.71: renombrado del proyecto — "HydroAndina Pro" / "HydroAndes Pro" pasan a llamarse "HydroAndes Sym BIM"
+
+El nombre anterior del proyecto queda descontinuado. Este cambio es de
+branding/identificador únicamente — **no altera ninguna lógica de cálculo**:
+
+- Carpeta del plugin renombrada de `hydroandina_pro/` a `hydroandes_sym_bim/`
+  (es el nombre por el que QGIS identifica el plugin instalado).
+- Clases principales `HydroAndinaProPlugin` / `HydroAndinaProDialog` →
+  `HydroAndesSymBimPlugin` / `HydroAndesSymBimDialog`.
+- `metadata.txt`: `name=HydroAndes Sym BIM`, `version=0.2.71`.
+- Título de ventana, texto del menú/acción de QGIS, categoría del panel
+  "Registro de mensajes" de QGIS, y textos del reporte Word (encabezado, pie
+  de página) actualizados de forma consistente en `plugin.py`,
+  `plugin_dialog.py`, `ui/splash_intro.py` y `core/report_generator.py`.
+- Prefijos de archivos temporales internos (MDE descargado, LULC/HSG
+  recortados, reporte Word) actualizados de `hydroandina_*` a `hydroandes_*`
+  en `core/dem_download.py`, `core/dem_download_asf.py`,
+  `core/landcover_soils.py` y `plugin_dialog.py`.
+- `tests/test_plugin_dialog.py` actualizado al nuevo path de import
+  (`hydroandes_sym_bim.plugin_dialog`).
+
+**No modificado a propósito**: las URLs `tracker=`/`repository=`/`homepage=`
+de `metadata.txt` siguen apuntando al repositorio de GitHub existente
+(`Ningsiar/HYDROANDINA_Pro`) — cambiarlas ahí rompería los enlaces mientras
+el repositorio remoto no se renombre también. Si se renombra el repositorio
+en GitHub, actualizar esas tres líneas por separado.
 
 ## v0.2.66: control de calidad, completación y regionalización ampliados; validación de grillas (CHIRPS/IMERG) vs. estación (núcleo, aún sin pestaña propia en la interfaz)
 
@@ -437,7 +464,7 @@ fuentes independientes (no se completaron de memoria):
 
 ## Instalación
 
-Copie la carpeta `hydroandina_pro/` al directorio de plugins de QGIS (ver
+Copie la carpeta `hydroandes_sym_bim/` al directorio de plugins de QGIS (ver
 rutas típicas en el README del plugin anterior de este mismo proyecto) y
 habilite "complementos experimentales" antes de activarlo.
 

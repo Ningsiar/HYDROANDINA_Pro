@@ -66,7 +66,7 @@ def descargar_dem(bbox_wgs84, api_key: str, demtype: str = "SRTMGL1",
 
     if destino_tif is None:
         import tempfile
-        destino_tif = os.path.join(tempfile.gettempdir(), f"hydroandina_dem_{demtype}.tif")
+        destino_tif = os.path.join(tempfile.gettempdir(), f"hydroandes_dem_{demtype}.tif")
 
     try:
         with urllib.request.urlopen(url, timeout=timeout_seg) as respuesta:

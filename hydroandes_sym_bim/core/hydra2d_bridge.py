@@ -13,7 +13,7 @@ HYDRA2DGPU se mantiene como una dependencia externa instalada por el
 usuario, de modo que (a) no se duplica un solucionador de decenas de
 miles de líneas que habría que mantener sincronizado, (b) las mejoras y
 correcciones de su autor llegan solas, y (c) no se asumen las
-obligaciones de redistribución de su licencia. HydroAndina Pro aporta la
+obligaciones de redistribución de su licencia. HydroAndes Sym BIM aporta la
 integración: alimentar el modelo con lo que ya calculó (MDE delineado,
 hidrograma de diseño, número de curva) y presentar los resultados con su
 propio formato.
@@ -33,7 +33,7 @@ hace es:
      funciona" son dos cosas distintas que hay que comprobar por
      separado -- si no, el usuario recibiría un fallo incomprensible al
      lanzar la simulación).
-  2. PREPARAR los insumos desde los resultados de HydroAndina Pro.
+  2. PREPARAR los insumos desde los resultados de HydroAndes Sym BIM.
   3. LANZAR su ventana de trabajo.
   4. LEER los resultados que deja en disco para mostrarlos con el
      formato del resto del plugin.
@@ -146,7 +146,7 @@ def mensaje_estado(estado: dict) -> str:
     if not estado["instalado"]:
         return (
             f"{NOMBRE_PLUGIN} no está instalado.\n\n"
-            "Es un plugin independiente (Aaron Sprague, licencia MIT) que HydroAndina Pro utiliza "
+            "Es un plugin independiente (Aaron Sprague, licencia MIT) que HydroAndes Sym BIM utiliza "
             "como motor de cálculo 2D, sin incorporar su código.\n\n"
             f"Descárguelo de {URL_PROYECTO} e instálelo desde «Complementos → Administrar e instalar "
             "complementos → Instalar a partir de un ZIP»."
@@ -181,7 +181,7 @@ def mensaje_estado(estado: dict) -> str:
         "cálculo (extensión compilada hydra_swe2d) disponible.\n\n"
         "IMPORTANTE — dónde aparece: el banco de trabajo de HYDRA2DGPU NO abre una ventana propia, "
         "se ACOPLA como panel dentro de la ventana principal de QGIS. Al pulsar «Abrir ventana de "
-        "HYDRA2DGPU», esta ventana de HydroAndina Pro se minimiza sola para que pueda verlo; si no, "
+        "HYDRA2DGPU», esta ventana de HydroAndes Sym BIM se minimiza sola para que pueda verlo; si no, "
         "quedaría tapado detrás y parecería que no ocurrió nada."
     )
 
@@ -214,7 +214,7 @@ def resumen_insumos_disponibles(morfometria: dict, cn_resultados: dict,
                                  hidrograma: dict, ruta_dem: str = None) -> dict:
     """
     Revisa qué insumos para el modelo 2D ya están calculados en
-    HydroAndina Pro, para poder decirle al usuario qué le falta ANTES de
+    HydroAndes Sym BIM, para poder decirle al usuario qué le falta ANTES de
     abrir la ventana de HYDRA2DGPU en vez de que lo descubra allí dentro.
 
     Devuelve un dict con cada insumo, si está disponible, su valor
