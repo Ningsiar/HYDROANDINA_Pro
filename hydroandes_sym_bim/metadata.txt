@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.4.22
+version=0.4.23
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,33 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.4.23: dos correcciones pedidas por el usuario en el Módulo
+      BIM. 1) El canal parabólico (badén) no se graficaba nunca: se
+      encontró la causa raíz en core/bim_geometry.py::
+      perfil_canal_desde_datos() -- comparaba `forma == "Parabólico"`
+      contra el valor REAL que guarda
+      core/hydraulic_structures.py::canal_parabolico(), que es
+      "Parabólico (aprox. Chow)" (con sufijo), así que la comparación
+      exacta nunca coincidía y el canal caía siempre en el
+      GeometriaNoDisponibleError genérico del final (mismo patrón que
+      Rectangular/Triangular/Trapezoidal ya usaban correctamente con
+      `.startswith()`, menos Parabólico). Corregido a `.startswith(
+      "Parabólico")`; la forma computacional en sí (aproximación
+      estándar de Chow para parábolas someras -- A=(2/3)Ty,
+      P≈T+8y²/(3T) -- ya estaba implementada y correcta, el bug era
+      solo el enrutamiento hacia el graficador 3D. 2) Al seleccionar
+      otra estructura en el combo del Módulo BIM, el modelo 3D no se
+      actualizaba solo -- había que pulsar "Generar/Actualizar modelo
+      3D" a mano cada vez, así que el visor se quedaba mostrando la
+      estructura anterior (o vacío) hasta ese clic extra. Ahora
+      _on_cambiar_estructura_bim() regenera el modelo 3D
+      automáticamente al cambiar la selección, igual que el resto de
+      combos de selección del plugin. Verificado con prueba
+      real-QGIS-headless (11/11 checks OK): perfil_canal_desde_datos()
+      ya no lanza el error con la forma real guardada por Pestaña 7,
+      el canal parabólico se grafica de punta a punta (Pestaña 7 ->
+      Módulo BIM), y cambiar el índice del combo -- sin pulsar ningún
+      botón -- regenera el modelo 3D solo.
     - v0.4.22: mejoras pedidas por el usuario al visor 3D "workspace
       view" de la Pestaña 1 (Delimitación de Cuenca). 1) Zoom con la
       rueda del mouse: Axes3D ya rotaba 360° arrastrando con el mouse

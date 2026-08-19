@@ -11957,9 +11957,15 @@ class HydroAndinaProDialog(QDialog):
                                  "Tekla o BIM Vision.")
 
     def _on_cambiar_estructura_bim(self):
-        """Autocompleta la altura de muro/losa sugerida al cambiar de
-        estructura -- el usuario la puede ajustar libremente antes de
-        calcular el refuerzo."""
+        """Autocompleta la altura de muro/losa sugerida y REGENERA el
+        modelo 3D al cambiar de estructura en el combo -- antes había
+        que volver a pulsar "Generar/Actualizar modelo 3D" a mano cada
+        vez que se seleccionaba otra estructura, así que el visor se
+        quedaba mostrando la estructura anterior (o vacío) hasta ese
+        clic extra. Ahora carga sola, como el resto de combos de
+        selección del plugin."""
+        if hasattr(self, "canvas_bim_3d") and self.combo_bim_estructura.count() > 0:
+            self._on_generar_bim_3d()
         if not hasattr(self, "spin_bim_altura_muro") or self.combo_bim_estructura.count() == 0:
             return
         nombre = self.combo_bim_estructura.currentText()

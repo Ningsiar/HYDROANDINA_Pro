@@ -125,7 +125,14 @@ def perfil_canal_desde_datos(datos: dict):
         if b is None or z is None or y is None:
             raise GeometriaNoDisponibleError("faltan b_m/z/tirante_normal_m para el trapecio")
         return (*perfil_trapezoidal(b, z, y), f"b = {b:.2f} m, z = {z:.2f}, y = {y:.2f} m")
-    if forma == "Parabólico":
+    if forma.startswith("Parabólico"):
+        # startswith (no ==): core.hydraulic_structures.canal_parabolico()
+        # guarda la forma como "Parabólico (aprox. Chow)", no "Parabólico"
+        # a secas -- con el "==" anterior la comparación nunca coincidía y
+        # el canal parabólico caía siempre en el GeometriaNoDisponibleError
+        # de más abajo, así que jamás se graficaba en el Módulo BIM (el
+        # mismo patrón .startswith() que ya usan Rectangular/Triangular/
+        # Trapezoidal arriba, por la misma razón).
         t = datos.get("T_m")
         if t is None or y is None:
             raise GeometriaNoDisponibleError("faltan T_m/tirante_normal_m para la parábola")
