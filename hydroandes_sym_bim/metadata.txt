@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.4.23
+version=0.4.24
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,43 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.4.24: mejoras de realismo pedidas por el usuario en la
+      Pestaña 7 (Diseño de Estructuras Hidráulicas) y en el Módulo
+      BIM. 1) Pontón/Puente: el gráfico era solo dos líneas de cota
+      (agua y estructura); ahora dibuja los DOS ESTRIBOS y el TABLERO
+      (espesor editable, ilustrativo) apoyado sobre ellos, con el
+      N.A.M.E. (Nivel de Aguas Máximas Extraordinarias) entre los
+      estribos y el GÁLIBO -- la distancia vertical libre entre el
+      N.A.M.E. y la cara inferior del tablero -- acotado y coloreado
+      en verde/rojo según cumpla. El gálibo mínimo por defecto para
+      Puente pasó de 1.00 a 2.00 m (valor típico MTC/AASHTO para
+      puentes vehiculares, con nota explicativa en la pestaña); se
+      agregó un campo de caudal de diseño Q (opcional, con botón "Usar
+      Qp de la pestaña 6") que se rotula en el propio gráfico, y un
+      campo de "luz libre entre estribos" para que el esquema se
+      acerque más a las proporciones reales del proyecto. 2) Defensa
+      Ribereña: el gráfico de borde libre también era solo dos líneas
+      de cota; ahora dibuja el MURO con su CIMENTACIÓN (zapata)
+      esquemática, el nivel de agua, el borde libre acotado, el
+      caudal de diseño (mismo campo opcional), y una nota que remite
+      a la pestaña «Estabilidad de Muros de Contención» para el
+      diseño estructural real (volteo, deslizamiento, excentricidad,
+      capacidad portante) -- esta página solo verifica la cota de
+      corona, no reemplaza esa verificación. El enrocado (RipRap) de
+      protección del talud se sigue calculando y graficando aparte,
+      sin cambios. 3) Módulo BIM (Estructura3DCanvas): se agregó zoom
+      con la rueda del mouse (Axes3D ya rotaba 360° arrastrando con el
+      mouse, pero no traía zoom, igual que se corrigió en v0.4.22 para
+      el visor de la Pestaña 1) -- pedido explícitamente porque con
+      estructuras pequeñas y varias cotas/etiquetas de refuerzo juntas,
+      acercar la vista es la forma más directa de separarlas
+      visualmente. Verificado con prueba real-QGIS-headless (32/32
+      checks OK): los nuevos gráficos de gálibo y de muro+cimentación
+      (con y sin caudal, casos CUMPLE/NO CUMPLE), el flujo completo
+      desde los widgets reales de la Pestaña 7 (Puente y Defensa
+      Ribereña) hasta los canvas, y el zoom con la rueda del mouse en
+      el visor 3D del Módulo BIM (acotado, con simulación de evento de
+      scroll real).
     - v0.4.23: dos correcciones pedidas por el usuario en el Módulo
       BIM. 1) El canal parabólico (badén) no se graficaba nunca: se
       encontró la causa raíz en core/bim_geometry.py::

@@ -71,6 +71,15 @@ class Estructura3DCanvas(FigureCanvas):
         self.setParent(parent)
         self.setMinimumSize(int(width * dpi), int(height * dpi))
         self._ultima_geometria_refuerzo = None  # dict de geometria_barras_refuerzo(), si se superpuso
+        # Zoom con la rueda del mouse: igual que en
+        # ui/dem_relief_3d_canvas.py::DemRelieve3DCanvas (matplotlib
+        # Axes3D no trae scroll-zoom por defecto, solo arrastre-para-
+        # rotar). Se pidió explícitamente para este visor porque, con
+        # estructuras pequeñas y muchas cotas/etiquetas de refuerzo
+        # juntas, hacer zoom es la forma más directa de separarlas
+        # visualmente sin tocar el dibujo.
+        self._limites_originales = None
+        self.mpl_connect("scroll_event", self._on_scroll)
 
     # ------------------------------------------------------------
     # Primitivas de dibujo
@@ -122,7 +131,41 @@ class Estructura3DCanvas(FigureCanvas):
         self.ax.set_xlabel("Ancho (m)")
         self.ax.set_ylabel("Longitud (m)")
         self.ax.set_zlabel("Altura / cota (m)")
-        self.ax.set_title(f"{titulo} — vista 3D (arrastre para rotar)", pad=12)
+        self.ax.set_title(f"{titulo} — vista 3D (arrastre: rotar | rueda del mouse: zoom)", pad=12)
+        # Límites recién fijados por _ajustar_limites() (llamado por cada
+        # _graficar_*() antes de _rotular()): referencia para acotar el
+        # zoom con la rueda del mouse (_aplicar_zoom), igual que en
+        # ui/dem_relief_3d_canvas.py.
+        self._limites_originales = (self.ax.get_xlim3d(), self.ax.get_ylim3d(), self.ax.get_zlim3d())
+
+    # ---------------- Zoom con la rueda del mouse ----------------
+    def _on_scroll(self, event):
+        if self._limites_originales is None or event.inaxes != self.ax:
+            return
+        factor = 0.85 if event.button == "up" else (1.0 / 0.85)
+        self._aplicar_zoom(factor)
+
+    def _aplicar_zoom(self, factor: float):
+        """Reescala xlim/ylim/zlim3d alrededor de su centro actual,
+        acotado entre 3% y 400% del semirrango ORIGINAL (justo después
+        del último graficar_desde_pestana7/8()) -- misma técnica que
+        ui/dem_relief_3d_canvas.py::DemRelieve3DCanvas._aplicar_zoom()
+        (ver ese docstring para por qué no se usa Axes3D.dist)."""
+        if self._limites_originales is None:
+            return
+        ejes = (
+            (self.ax.get_xlim3d, self.ax.set_xlim3d, self._limites_originales[0]),
+            (self.ax.get_ylim3d, self.ax.set_ylim3d, self._limites_originales[1]),
+            (self.ax.get_zlim3d, self.ax.set_zlim3d, self._limites_originales[2]),
+        )
+        for obtener, establecer, (lo0, hi0) in ejes:
+            lo, hi = obtener()
+            centro = (lo + hi) / 2.0
+            semirrango_original = (hi0 - lo0) / 2.0 or 1.0
+            semirrango = (hi - lo) / 2.0 * factor
+            semirrango = min(max(semirrango, semirrango_original * 0.03), semirrango_original * 4.0)
+            establecer(centro - semirrango, centro + semirrango)
+        self.draw_idle()
 
     # ------------------------------------------------------------
     # Fuente 1 -- Pestaña 7 (self.resultados_hidraulica_drenaje)

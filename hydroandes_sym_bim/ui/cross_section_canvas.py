@@ -256,6 +256,167 @@ class SeccionTransversalCanvas(FigureCanvas):
         self.fig.tight_layout()
         self.draw()
 
+    def plot_galibo_puente(self, cota_agua, cota_inferior_tablero, galibo_min, nombre_estructura, cumple,
+                            luz_libre_m=8.0, espesor_tablero_m=0.40, caudal_m3_s=None):
+        """
+        Esquema del pontón/puente con sus DOS estribos y el tablero (no
+        solo la cota inferior como línea plana): N.A.M.E. (Nivel de
+        Aguas Máximas Extraordinarias) bajo el tablero, y el GÁLIBO --
+        la distancia vertical libre entre el N.A.M.E. y la cara inferior
+        del tablero -- acotado y coloreado en verde/rojo según cumpla o
+        no el mínimo requerido (2.00 m es el valor típico MTC/AASHTO
+        para puentes vehiculares; para pontones suele aceptarse un valor
+        menor, editable en la pestaña).
+
+        `luz_libre_m` (vano libre entre estribos) y `espesor_tablero_m`
+        son ILUSTRATIVOS para el dibujo -- esta página solo verifica
+        cotas (borde libre/gálibo), no calcula la luz estructural del
+        puente; edítelos en la pestaña para que el esquema se parezca
+        más a su proyecto real.
+        """
+        self.ax.clear()
+        self.ax.set_xlabel("Distancia horizontal (m, esquemático)")
+        self.ax.set_ylabel("Cota (m s.n.m.)")
+        self.ax.set_aspect("equal", adjustable="datalim")
+        estado = "CUMPLE" if cumple else "NO CUMPLE"
+        color_estado = "#1E8449" if cumple else "#B3261E"
+        self.ax.set_title(f"{nombre_estructura} — estribos + tablero + gálibo  [{estado}]",
+                           pad=14, color=color_estado)
+        self.ax.grid(True, linestyle=":", linewidth=0.5)
+
+        galibo_disponible = cota_inferior_tablero - cota_agua
+        ancho_estribo = max(0.6, 0.08 * luz_libre_m)
+        z_base = cota_agua - max(0.6, 0.4 * abs(galibo_disponible))
+        x_izq0, x_izq1 = 0.0, ancho_estribo
+        x_der0, x_der1 = ancho_estribo + luz_libre_m, 2 * ancho_estribo + luz_libre_m
+        x_total = x_der1
+
+        # Estribos (concreto), desde la base esquemática hasta la cara inferior del tablero
+        for x0, x1 in ((x_izq0, x_izq1), (x_der0, x_der1)):
+            self.ax.fill([x0, x1, x1, x0], [z_base, z_base, cota_inferior_tablero, cota_inferior_tablero],
+                         color="#B5B2AC", edgecolor="#3B3B3B", linewidth=1.0, zorder=3)
+
+        # Tablero (losa), apoyado sobre ambos estribos
+        z_top_tablero = cota_inferior_tablero + espesor_tablero_m
+        self.ax.fill([x_izq0, x_total, x_total, x_izq0],
+                     [cota_inferior_tablero, cota_inferior_tablero, z_top_tablero, z_top_tablero],
+                     color="#8C8C8C", edgecolor="#3B3B3B", linewidth=1.0, zorder=3)
+
+        # Agua entre estribos, hasta el N.A.M.E.
+        self.ax.fill_between([x_izq1, x_der0], [z_base, z_base], [cota_agua, cota_agua],
+                              color="#8FCBEA", alpha=0.6, zorder=1)
+        self.ax.plot([x_izq1, x_der0], [cota_agua, cota_agua], "--", color="#1F6FB2", linewidth=1.6, zorder=2)
+        self.ax.annotate(f"N.A.M.E. = {cota_agua:.2f} m s.n.m.\n(Nivel de Aguas Máximas Extraordinarias)",
+                          (x_izq1, cota_agua), xytext=(ancho_estribo * 0.3, z_base + 0.05 * abs(galibo_disponible)),
+                          va="bottom", ha="left", fontsize=8, color="#1F6FB2")
+
+        # Gálibo: doble flecha vertical entre el N.A.M.E. y la cara inferior del tablero
+        x_flecha = (x_izq1 + x_der0) / 2
+        self.ax.annotate(
+            "", xy=(x_flecha, cota_inferior_tablero), xytext=(x_flecha, cota_agua),
+            arrowprops=dict(arrowstyle="<->", color=color_estado, linewidth=1.6),
+        )
+        self.ax.annotate(
+            f"GÁLIBO = {galibo_disponible:.2f} m\n(mínimo = {galibo_min:.2f} m)",
+            (x_flecha, (cota_agua + cota_inferior_tablero) / 2), ha="center", va="center", fontsize=8.5,
+            xytext=(x_flecha + 0.08 * luz_libre_m, (cota_agua + cota_inferior_tablero) / 2),
+            bbox=dict(boxstyle="round", fc="white", ec=color_estado, alpha=0.92), zorder=5)
+
+        if caudal_m3_s:
+            self.ax.annotate(f"Q diseño = {caudal_m3_s:.2f} m³/s", (x_total / 2, z_top_tablero),
+                              xytext=(x_total / 2, z_top_tablero + 0.12 * abs(galibo_disponible) + 0.15),
+                              ha="center", va="bottom", fontsize=8.5, color="#1F1F1F",
+                              bbox=dict(boxstyle="round", fc="#FFF6D8", ec="#8a5a00", alpha=0.9))
+
+        self.ax.annotate(
+            "Esquema ilustrativo: vano libre y espesor de tablero editables en la pestaña; NO reemplaza "
+            "el diseño estructural del tablero/estribos.", (0.0, z_base),
+            xytext=(0.0, z_base - 0.12 * abs(galibo_disponible) - 0.15), ha="left", va="top", fontsize=7,
+            color="#6a6a6a")
+
+        self.ax.set_xlim(-0.05 * x_total, x_total * 1.05)
+        self.fig.tight_layout()
+        self.draw()
+
+    def plot_defensa_muro(self, cota_agua, cota_corona, borde_libre_min, cumple, caudal_m3_s=None):
+        """
+        Esquema de la defensa ribereña como MURO con cimentación (zapata)
+        -- en vez de solo dos líneas de cota -- con el nivel de agua a un
+        lado, el borde libre acotado entre el agua y la corona, y una
+        nota que remite a la pestaña «Estabilidad de Muros de
+        Contención» para el diseño estructural real (volteo,
+        deslizamiento, excentricidad, capacidad portante) -- esta
+        página solo verifica la cota de corona, no la estabilidad del
+        muro.
+
+        Las proporciones del muro/zapata son ILUSTRATIVAS (derivadas de
+        la altura visible), no un dimensionamiento estructural.
+        """
+        self.ax.clear()
+        self.ax.set_xlabel("Distancia horizontal (m, esquemático)")
+        self.ax.set_ylabel("Cota (m s.n.m.)")
+        self.ax.set_aspect("equal", adjustable="datalim")
+        estado = "CUMPLE" if cumple else "NO CUMPLE"
+        color_estado = "#1E8449" if cumple else "#B3261E"
+        self.ax.set_title(f"Defensa Ribereña — muro con cimentación  [{estado}]", pad=14, color=color_estado)
+        self.ax.grid(True, linestyle=":", linewidth=0.5)
+
+        borde_libre_disponible = cota_corona - cota_agua
+        altura_bajo_agua = max(1.0, 0.5 * abs(borde_libre_disponible))
+        z_base_muro = cota_agua - altura_bajo_agua  # base del vástago / tope de la zapata (ilustrativo)
+        altura_muro_total = cota_corona - z_base_muro
+        espesor_muro = max(0.3, 0.10 * altura_muro_total)
+        espesor_zapata = max(0.4, 0.18 * altura_muro_total)
+        ancho_zapata = 2.3 * espesor_muro
+        z_fondo_zapata = z_base_muro - espesor_zapata
+
+        x_muro0, x_muro1 = 0.0, espesor_muro
+        x_zapata0, x_zapata1 = -0.35 * ancho_zapata, x_muro1 + 0.65 * ancho_zapata
+
+        # Cimentación (zapata)
+        self.ax.fill([x_zapata0, x_zapata1, x_zapata1, x_zapata0],
+                     [z_fondo_zapata, z_fondo_zapata, z_base_muro, z_base_muro],
+                     color="#B5B2AC", edgecolor="#3B3B3B", linewidth=1.0, zorder=3)
+        # Vástago del muro
+        self.ax.fill([x_muro0, x_muro1, x_muro1, x_muro0],
+                     [z_base_muro, z_base_muro, cota_corona, cota_corona],
+                     color="#B5B2AC", edgecolor="#3B3B3B", linewidth=1.0, zorder=3)
+
+        # Agua del lado del río (izquierda del muro), hasta el nivel de diseño
+        self.ax.fill_between([x_zapata0, x_muro0], [z_fondo_zapata, z_fondo_zapata], [cota_agua, cota_agua],
+                              color="#8FCBEA", alpha=0.6, zorder=1)
+        self.ax.plot([x_zapata0, x_muro0], [cota_agua, cota_agua], "--", color="#1F6FB2", linewidth=1.6, zorder=2)
+        self.ax.annotate(f"Nivel de agua de diseño = {cota_agua:.2f} m s.n.m.",
+                          (x_zapata0, cota_agua), va="bottom", ha="left", fontsize=8, color="#1F6FB2")
+
+        # Borde libre: doble flecha entre el agua y la corona
+        x_flecha = x_muro1 + 0.3 * ancho_zapata
+        self.ax.annotate(
+            "", xy=(x_flecha, cota_corona), xytext=(x_flecha, cota_agua),
+            arrowprops=dict(arrowstyle="<->", color=color_estado, linewidth=1.6),
+        )
+        self.ax.annotate(
+            f"BL = {borde_libre_disponible:.2f} m\n(mínimo = {borde_libre_min:.2f} m)\n"
+            f"corona = {cota_corona:.2f} m s.n.m.",
+            (x_flecha, (cota_agua + cota_corona) / 2), ha="left", va="center", fontsize=8.5,
+            xytext=(x_flecha + 0.15 * ancho_zapata, (cota_agua + cota_corona) / 2),
+            bbox=dict(boxstyle="round", fc="white", ec=color_estado, alpha=0.92), zorder=5)
+
+        if caudal_m3_s:
+            self.ax.annotate(f"Q diseño = {caudal_m3_s:.2f} m³/s", ((x_zapata0 + x_muro0) / 2, cota_corona),
+                              ha="center", va="bottom", fontsize=8.5, color="#1F1F1F",
+                              bbox=dict(boxstyle="round", fc="#FFF6D8", ec="#8a5a00", alpha=0.9))
+
+        self.ax.annotate(
+            "Esquema ilustrativo (muro/zapata): para el diseño estructural real (volteo, deslizamiento, "
+            "excentricidad, capacidad portante) vea la pestaña «Estabilidad de Muros de Contención».",
+            (x_zapata0, z_fondo_zapata), xytext=(x_zapata0, z_fondo_zapata - 0.15 * altura_muro_total - 0.15),
+            ha="left", va="top", fontsize=7, color="#6a6a6a")
+
+        self.ax.set_xlim(x_zapata0 - 0.1 * ancho_zapata, x_flecha + 0.6 * ancho_zapata)
+        self.fig.tight_layout()
+        self.draw()
+
     def plot_borde_libre(self, cota_agua, cota_estructura, borde_libre_min, nombre_estructura, cumple):
         """Esquema vertical de la verificación de borde libre: nivel de agua
         de diseño, cota inferior de la estructura (o corona, para defensas

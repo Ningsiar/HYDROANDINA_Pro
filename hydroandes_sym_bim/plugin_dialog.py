@@ -9296,10 +9296,13 @@ class HydroAndinaProDialog(QDialog):
 
     # ---------------- Página: Pontón / Puente (verificación de borde libre) ----------------
     def _pagina_borde_libre(self, nombre_estructura: str) -> QWidget:
+        prefijo = "puente" if nombre_estructura == "Puente" else "ponton"
+        es_puente = nombre_estructura == "Puente"
         pagina = QWidget()
         v = QVBoxLayout(pagina)
         _lbl_auto_20 = QLabel(
-            f"<b>{nombre_estructura}</b> — verificación hidráulica básica (borde libre/revancha). "
+            f"<b>{nombre_estructura}</b> — verificación hidráulica básica del "
+            f"{'gálibo (distancia vertical libre bajo el tablero)' if es_puente else 'borde libre'}. "
             "NO es un diseño estructural, geotécnico ni de cimentación; eso requiere un análisis "
             "adicional fuera del alcance de este plugin."
         )
@@ -9308,14 +9311,34 @@ class HydroAndinaProDialog(QDialog):
         f = QFormLayout()
         f.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
         spin_cota_agua = QDoubleSpinBox(); spin_cota_agua.setRange(0.0, 8000.0); spin_cota_agua.setDecimals(2); spin_cota_agua.setValue(0.0)
-        f.addRow("Cota de agua de diseño (m s.n.m.):", spin_cota_agua)
+        f.addRow("Cota de agua de diseño / N.A.M.E. (m s.n.m.):", spin_cota_agua)
         spin_cota_estructura = QDoubleSpinBox(); spin_cota_estructura.setRange(0.0, 8000.0); spin_cota_estructura.setDecimals(2); spin_cota_estructura.setValue(0.0)
-        f.addRow(f"Cota inferior de la superestructura ({nombre_estructura.lower()}) (m s.n.m.):", spin_cota_estructura)
-        spin_bl_min = QDoubleSpinBox(); spin_bl_min.setRange(0.1, 5.0); spin_bl_min.setDecimals(2); spin_bl_min.setValue(1.0 if nombre_estructura == "Puente" else 0.6)
-        f.addRow("Borde libre mínimo requerido (m):", spin_bl_min)
+        f.addRow(f"Cota inferior del tablero ({nombre_estructura.lower()}) (m s.n.m.):", spin_cota_estructura)
+        spin_bl_min = QDoubleSpinBox(); spin_bl_min.setRange(0.1, 5.0); spin_bl_min.setDecimals(2); spin_bl_min.setValue(2.0 if es_puente else 0.6)
+        f.addRow("Gálibo mínimo requerido (m):" if es_puente else "Borde libre mínimo requerido (m):", spin_bl_min)
+        if es_puente:
+            lbl_galibo_norma = QLabel(
+                "El valor por defecto (2.00 m) es el gálibo mínimo típico MTC/AASHTO para puentes "
+                "vehiculares sobre cursos de agua; ajústelo según la norma o el estudio que le "
+                "corresponda a su proyecto."
+            )
+            lbl_galibo_norma.setWordWrap(True)
+            f.addRow(lbl_galibo_norma)
+
+        spin_q = QDoubleSpinBox(); spin_q.setRange(0.0, 100000.0); spin_q.setDecimals(3); spin_q.setValue(0.0)
+        setattr(self, f"spin_{prefijo}_q", spin_q)
+        f.addRow("Caudal de diseño Q (m³/s, opcional -- solo se rotula en el gráfico):", spin_q)
+        btn_q = QPushButton("Usar Qp de la pestaña 6 (caudal pico)")
+        btn_q.clicked.connect(lambda: self._usar_qp_pestaña6(prefijo))
+        f.addRow(btn_q)
+
+        spin_luz = QDoubleSpinBox(); spin_luz.setRange(1.0, 300.0); spin_luz.setDecimals(2); spin_luz.setValue(8.0)
+        f.addRow("Luz libre entre estribos (m, ilustrativa para el dibujo):", spin_luz)
+        spin_espesor_tablero = QDoubleSpinBox(); spin_espesor_tablero.setRange(0.10, 2.0); spin_espesor_tablero.setDecimals(2); spin_espesor_tablero.setValue(0.40)
+        f.addRow("Espesor del tablero (m, ilustrativo para el dibujo):", spin_espesor_tablero)
         v.addLayout(f)
 
-        btn = QPushButton("Verificar borde libre")
+        btn = QPushButton("Verificar gálibo" if es_puente else "Verificar borde libre")
         v.addWidget(btn)
         lbl_estado = QLabel("Estado: sin calcular.")
         lbl_estado.setWordWrap(True)
@@ -9335,16 +9358,22 @@ class HydroAndinaProDialog(QDialog):
                 estado = "✔ CUMPLE" if r["cumple"] else "✘ NO CUMPLE"
                 lbl_estado.setText(f"Estado: {estado} -- {r['mensaje']}")
                 poblar_tabla_parametros(tabla_resultado, [
-                    ("Borde libre disponible", r["borde_libre_disponible_m"], "m"),
-                    ("Borde libre mínimo requerido", r["borde_libre_minimo_requerido_m"], "m"),
+                    ("Gálibo disponible" if es_puente else "Borde libre disponible",
+                     r["borde_libre_disponible_m"], "m"),
+                    ("Gálibo mínimo requerido" if es_puente else "Borde libre mínimo requerido",
+                     r["borde_libre_minimo_requerido_m"], "m"),
                     ("¿Cumple?", "Sí" if r["cumple"] else "No", "", r["nota"]),
                 ])
-                canvas_bl.plot_borde_libre(spin_cota_agua.value(), spin_cota_estructura.value(),
-                                            spin_bl_min.value(), nombre_estructura, r["cumple"])
+                canvas_bl.plot_galibo_puente(
+                    spin_cota_agua.value(), spin_cota_estructura.value(), spin_bl_min.value(),
+                    nombre_estructura, r["cumple"], luz_libre_m=spin_luz.value(),
+                    espesor_tablero_m=spin_espesor_tablero.value(), caudal_m3_s=spin_q.value() or None)
                 self.resultados_hidraulica_drenaje[nombre_estructura] = {
                     "tipo": nombre_estructura, "cota_agua_m": spin_cota_agua.value(),
                     "cota_estructura_m": spin_cota_estructura.value(),
                     "borde_libre_disponible_m": r["borde_libre_disponible_m"], "cumple": r["cumple"],
+                    "caudal_m3s": spin_q.value() or None, "luz_libre_m": spin_luz.value(),
+                    "espesor_tablero_m": spin_espesor_tablero.value(),
                 }
                 self._actualizar_texto_resumen_hidraulica()
             except Exception as e:
@@ -9359,8 +9388,11 @@ class HydroAndinaProDialog(QDialog):
         v = QVBoxLayout(pagina)
         _lbl_auto_21 = QLabel(
             "<b>Defensa Ribereña</b> — verificación de borde libre de la corona respecto al nivel de "
-            "agua de diseño, y dimensionamiento del enrocado de protección del talud (Isbash). NO "
-            "reemplaza el diseño geotécnico/estructural de la defensa."
+            "agua de diseño (con el muro y su cimentación graficados, para referencia visual), y "
+            "dimensionamiento del enrocado de protección del talud (Isbash). NO reemplaza el diseño "
+            "geotécnico/estructural de la defensa -- para eso, calcule la estabilidad (volteo, "
+            "deslizamiento, excentricidad, capacidad portante) en la pestaña «Estabilidad de Muros "
+            "de Contención»."
         )
         _lbl_auto_21.setWordWrap(True)
         v.addWidget(_lbl_auto_21)
@@ -9376,6 +9408,12 @@ class HydroAndinaProDialog(QDialog):
         f.addRow("Velocidad de diseño junto al talud V (m/s):", spin_v)
         spin_peso = QDoubleSpinBox(); spin_peso.setRange(20.0, 30.0); spin_peso.setDecimals(2); spin_peso.setValue(26.0)
         f.addRow("Peso específico de la roca (kN/m³):", spin_peso)
+        self.spin_defensa_q = QDoubleSpinBox(); self.spin_defensa_q.setRange(0.0, 100000.0)
+        self.spin_defensa_q.setDecimals(3); self.spin_defensa_q.setValue(0.0)
+        f.addRow("Caudal de diseño Q (m³/s, opcional -- solo se rotula en el gráfico):", self.spin_defensa_q)
+        btn_q = QPushButton("Usar Qp de la pestaña 6 (caudal pico)")
+        btn_q.clicked.connect(lambda: self._usar_qp_pestaña6("defensa"))
+        f.addRow(btn_q)
         v.addLayout(f)
 
         btn = QPushButton("Verificar")
@@ -9405,8 +9443,9 @@ class HydroAndinaProDialog(QDialog):
                     ("D50 del enrocado de protección", r_rip["D50_m"], "m"),
                     ("D50 del enrocado de protección", r_rip["D50_cm"], "cm", r_rip["nota"]),
                 ])
-                self.canvas_defensa_bl.plot_borde_libre(spin_cota_agua.value(), spin_cota_corona.value(),
-                                                         spin_bl_min.value(), "Defensa Ribereña (corona)", r_bl["cumple"])
+                self.canvas_defensa_bl.plot_defensa_muro(
+                    spin_cota_agua.value(), spin_cota_corona.value(), spin_bl_min.value(), r_bl["cumple"],
+                    caudal_m3_s=self.spin_defensa_q.value() or None)
                 self.canvas_defensa_riprap.plot_riprap_talud(spin_v.value(), r_rip["D50_m"])
                 self.resultados_hidraulica_drenaje["Defensa Ribereña"] = {
                     "tipo": "Defensa Ribereña", "cota_agua_m": spin_cota_agua.value(),
