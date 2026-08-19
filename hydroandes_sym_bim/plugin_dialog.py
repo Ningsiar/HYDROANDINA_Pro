@@ -360,6 +360,7 @@ class HydroAndinaProDialog(QDialog):
         self.tc_resultados = {}
         self.hidrograma_resultado = {}
         self.serie_precip_anual = None
+        self._serie_precip_original = None  # serie SIN corrección por número de lecturas, ver _on_aplicar_correccion_lecturas
         self.resultado_serie_areal_multi_p24 = None  # último resultado de serie_anual_ponderada() (multi-estación)
         self.resultado_outliers_p24 = None   # último resultado de detectar_outliers_grubbs_beck()
         self.datos_precip_ajustados = None   # serie REALMENTE usada en el último ajuste (con/sin outliers excluidos)
@@ -4192,6 +4193,74 @@ class HydroAndinaProDialog(QDialog):
         f.addRow(self.lbl_estado_serie)
         v.addWidget(gb_fuente)
 
+        # ------------------------------------------------------------
+        # 1a. Corrección por número de lecturas diarias (WMO/NOAA) --
+        # pedida explícitamente por el usuario: un pluviómetro leído a
+        # intervalos FIJOS (p.ej. 1 vez al día) subestima la verdadera
+        # PMAX de 24 h MÓVILES continuas. Se aplica DESPUÉS de cargar la
+        # serie (por cualquiera de las 3 vías de arriba), sobre
+        # self._serie_precip_original -- así cambiar el factor y volver
+        # a aplicar siempre parte de la serie SIN corrección, sin
+        # acumular correcciones por error.
+        # ------------------------------------------------------------
+        gb_correccion = QGroupBox("1a. Corrección por número de lecturas diarias (WMO/NOAA)")
+        v_correccion = QVBoxLayout(gb_correccion)
+        lbl_correccion = QLabel(
+            "Un pluviómetro leído a intervalos FIJOS (p.ej. una vez al día, siempre a la misma hora) "
+            "subestima sistemáticamente el verdadero máximo de 24 h MÓVILES continuas -- el evento más "
+            "intenso casi nunca cae exactamente dentro de la ventana fija de observación. El factor de "
+            "corrección Cf multiplica el valor observado para estimar el máximo de ventana móvil "
+            "continua (Weiss 1964; WMO-No. 1045; NOAA Technical Paper 40). Elija el tipo de registro de "
+            "su estación; el Cf sugerido se rellena solo y queda editable."
+        )
+        lbl_correccion.setWordWrap(True)
+        v_correccion.addWidget(lbl_correccion)
+
+        f_correccion = QFormLayout()
+        f_correccion.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        self.combo_tipo_registro_lecturas = QComboBox()
+        for etiqueta, cf_min, _cf_max, _desc in precip_source.FACTORES_CORRECCION_LECTURAS:
+            self.combo_tipo_registro_lecturas.addItem(etiqueta, cf_min)
+        self.combo_tipo_registro_lecturas.setCurrentIndex(
+            len(precip_source.FACTORES_CORRECCION_LECTURAS) - 1)  # "Registro continuo" -- Cf=1.00 por defecto
+        f_correccion.addRow("Tipo de registro / lecturas:", self.combo_tipo_registro_lecturas)
+
+        self.lbl_desc_correccion_lecturas = QLabel("")
+        self.lbl_desc_correccion_lecturas.setWordWrap(True)
+        self.lbl_desc_correccion_lecturas.setStyleSheet("color: #555; font-style: italic;")
+        f_correccion.addRow(self.lbl_desc_correccion_lecturas)
+
+        self.spin_factor_correccion_lecturas = QDoubleSpinBox()
+        self.spin_factor_correccion_lecturas.setRange(1.00, 1.20)
+        self.spin_factor_correccion_lecturas.setDecimals(3)
+        self.spin_factor_correccion_lecturas.setSingleStep(0.01)
+        self.spin_factor_correccion_lecturas.setValue(1.00)
+        f_correccion.addRow("Factor de corrección Cf (editable):", self.spin_factor_correccion_lecturas)
+
+        def _al_cambiar_tipo_registro(indice):
+            cf_sugerido = self.combo_tipo_registro_lecturas.itemData(indice)
+            if cf_sugerido is not None:
+                self.spin_factor_correccion_lecturas.setValue(cf_sugerido)
+            if 0 <= indice < len(precip_source.FACTORES_CORRECCION_LECTURAS):
+                _, cf_min, cf_max, desc = precip_source.FACTORES_CORRECCION_LECTURAS[indice]
+                rango = f"Cf = {cf_min:.2f}" if cf_min == cf_max else f"Cf = {cf_min:.2f}-{cf_max:.2f}"
+                self.lbl_desc_correccion_lecturas.setText(f"{rango}. {desc}")
+
+        self.combo_tipo_registro_lecturas.currentIndexChanged.connect(_al_cambiar_tipo_registro)
+        _al_cambiar_tipo_registro(self.combo_tipo_registro_lecturas.currentIndex())
+        v_correccion.addLayout(f_correccion)
+
+        btn_aplicar_correccion = QPushButton("Aplicar corrección a la serie cargada")
+        btn_aplicar_correccion.clicked.connect(self._on_aplicar_correccion_lecturas)
+        limitar_ancho_boton(btn_aplicar_correccion)
+        v_correccion.addWidget(btn_aplicar_correccion)
+
+        self.lbl_estado_correccion_lecturas = QLabel("Estado: sin corrección aplicada (serie tal como se cargó).")
+        self.lbl_estado_correccion_lecturas.setWordWrap(True)
+        v_correccion.addWidget(self.lbl_estado_correccion_lecturas)
+
+        v.addWidget(gb_correccion)
+
         gb_manual = QGroupBox("1b. O ingrese/pegue los datos directamente en esta tabla")
         v_manual = QVBoxLayout(gb_manual)
         _lbl_auto_6 = QLabel(
@@ -5382,6 +5451,7 @@ class HydroAndinaProDialog(QDialog):
         try:
             serie = precip_source.cargar_csv_serie_anual(ruta)
             self.serie_precip_anual = serie
+            self._serie_precip_original = serie
             self.lbl_estado_serie.setText(
                 f"Estado: serie cargada ({len(serie.valores_mm)} años, {min(serie.anios)}-{max(serie.anios)}). "
                 f"Fuente: {serie.fuente}"
@@ -5403,6 +5473,7 @@ class HydroAndinaProDialog(QDialog):
             lon, lat = self.break_point_lonlat
             serie = precip_source.extraer_serie_anual_desde_netcdf(ruta, lon, lat)
             self.serie_precip_anual = serie
+            self._serie_precip_original = serie
             self.lbl_estado_serie.setText(
                 f"Estado: serie extraída de PISCOp ({len(serie.valores_mm)} años, "
                 f"{min(serie.anios)}-{max(serie.anios)}). Fuente: {serie.fuente}"
@@ -5427,12 +5498,60 @@ class HydroAndinaProDialog(QDialog):
                 ])
             serie = precip_source.construir_serie_desde_tabla(filas_texto)
             self.serie_precip_anual = serie
+            self._serie_precip_original = serie
             self.lbl_estado_serie.setText(
                 f"Estado: serie tomada de la tabla manual ({len(serie.valores_mm)} años, "
                 f"{min(serie.anios)}-{max(serie.anios)})."
             )
         except Exception as e:
             QMessageBox.critical(self, "Error en la tabla de datos", str(e))
+
+    def _on_aplicar_correccion_lecturas(self):
+        """
+        Aplica el factor de corrección Cf (número de lecturas diarias,
+        WMO/NOAA) a la serie de P24 -- SIEMPRE partiendo de
+        self._serie_precip_original (la serie tal como se cargó, sin
+        ninguna corrección previa), para que cambiar el tipo de
+        registro y volver a pulsar el botón no acumule correcciones por
+        error.
+        """
+        original = getattr(self, "_serie_precip_original", None) or self.serie_precip_anual
+        if original is None:
+            QMessageBox.warning(
+                self, "Falta la serie",
+                "Cargue primero una serie de P24 (CSV, PISCOp, tabla manual o serie areal ponderada) "
+                "antes de aplicar la corrección.")
+            return
+        factor = self.spin_factor_correccion_lecturas.value()
+        etiqueta = self.combo_tipo_registro_lecturas.currentText()
+        try:
+            serie_corregida = precip_source.aplicar_factor_correccion_lecturas(original, factor, etiqueta)
+        except ValueError as e:
+            QMessageBox.warning(self, "Factor inválido", str(e))
+            return
+        self.serie_precip_anual = serie_corregida
+        # La serie activa cambió de valores -- cualquier resultado de
+        # outliers/ajuste de frecuencia ya calculado con la serie
+        # anterior queda obsoleto (mismo criterio que al adoptar una
+        # serie areal ponderada nueva).
+        self.resultado_outliers_p24 = None
+        self.datos_precip_ajustados = None
+        self.anios_precip_ajustados = None
+        if factor == 1.0:
+            self.lbl_estado_correccion_lecturas.setText(
+                f"Estado: «{etiqueta}» no requiere corrección (Cf = 1.00) -- la serie activa quedó "
+                "igual a la original.")
+        else:
+            v_min_antes, v_max_antes = min(original.valores_mm), max(original.valores_mm)
+            v_min_desp, v_max_desp = min(serie_corregida.valores_mm), max(serie_corregida.valores_mm)
+            self.lbl_estado_correccion_lecturas.setText(
+                f"Estado: corrección aplicada -- «{etiqueta}», Cf = {factor:.3f}. "
+                f"Rango de la serie: {v_min_antes:.1f}-{v_max_antes:.1f} mm (original) → "
+                f"{v_min_desp:.1f}-{v_max_desp:.1f} mm (corregida). Recalcule outliers/frecuencia con "
+                "la serie ya corregida.")
+        self.lbl_estado_serie.setText(
+            f"Estado: serie activa = «{etiqueta}» (Cf = {factor:.3f}), {len(serie_corregida.valores_mm)} años, "
+            f"{min(serie_corregida.anios)}-{max(serie_corregida.anios)}. Fuente: {serie_corregida.fuente}")
 
     def _obtener_serie_activa(self):
         if getattr(self, "serie_qc_activa", None):
@@ -6347,6 +6466,7 @@ class HydroAndinaProDialog(QDialog):
             self.serie_precip_anual = precip_source.construir_serie_anual(
                 list(resultado["anios"]), list(resultado["valores_mm"]),
                 fuente=f"areal ponderada ({etiqueta_metodo}, {resultado['n_anios']} años)")
+            self._serie_precip_original = self.serie_precip_anual
         except ValueError as e:
             QMessageBox.warning(self, "No se pudo adoptar la serie", str(e))
             return

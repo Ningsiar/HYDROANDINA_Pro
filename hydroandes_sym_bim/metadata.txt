@@ -2,7 +2,7 @@
 name=HydroAndes SYM BIM
 qgisMinimumVersion=3.28
 description=Suite integral de análisis hidrológico, hidráulico y de diseño de estructuras de drenaje para cuencas andinas: delineación desde MDE, morfometría avanzada, número de curva SCS, análisis de frecuencia (9 distribuciones), 14 métodos de tiempo de concentración, curvas IDF (incluido IILA-SENAMHI-UNI por P24 del sitio o por zona/subzona regional), estimación de caudales de crecida (SCS/Snyder/Clark) y por más de 20 fórmulas empíricas/regionales, dimensionamiento comparativo de estructuras hidráulicas, simulación hidrodinámica 2D con video y visualización 3D, y exportación multi-formato (SHP/KML/GeoJSON/GeoTIFF/Excel/CSV/Word) lista para integrarse a flujos de trabajo de proyecto.
-version=0.4.24
+version=0.4.25
 author=Msc. Ing. Ningsiar Lima Usnayo
 email=ningsiar.lima@unsaac.edu.pe
 
@@ -23,6 +23,38 @@ about=Plugin de análisis hidrológico e hidráulico integral orientado a cuenca
     - Exportación de resultados a shapefile, KML, GeoJSON, GeoTIFF, Excel y CSV, manteniendo los mismos valores en todos los formatos.
 
     Historial de versiones:
+    - v0.4.25: Pestaña 5 (Precipitación Máxima 24h) -- nueva sección
+      "1a. Corrección por número de lecturas diarias (WMO/NOAA)",
+      pedida explícitamente por el usuario con la tabla completa de
+      factores: un pluviómetro leído a intervalos FIJOS subestima
+      sistemáticamente el verdadero máximo de 24 h MÓVILES continuas,
+      así que se corrige multiplicando por un factor Cf (Weiss 1964;
+      WMO-No. 1045; NOAA Technical Paper 40). Nuevo
+      core/precip_source.py::FACTORES_CORRECCION_LECTURAS (las 5
+      categorías pedidas: 1 lectura/día Cf=1.13-1.14, 2 lecturas/día
+      Cf=1.06-1.07, 3-4 lecturas/día Cf=1.03-1.05, 24 lecturas/
+      pluviógrafo horario Cf=1.13, registro continuo/digital Cf=1.00
+      sin corrección) y aplicar_factor_correccion_lecturas() (devuelve
+      una serie NUEVA, no muta la original). En la pestaña: un combo
+      de tipo de registro que autocompleta el Cf sugerido (editable),
+      y un botón "Aplicar corrección a la serie cargada" que SIEMPRE
+      parte de la serie tal como se cargó (self._serie_precip_original,
+      guardada en las 4 vías de carga: CSV, PISCOp, tabla manual y
+      serie areal ponderada) -- así cambiar el factor y volver a
+      aplicar nunca acumula correcciones por error. Al aplicar la
+      corrección se invalidan los resultados de outliers/ajuste de
+      frecuencia ya calculados (quedan obsoletos, mismo criterio que
+      al adoptar una serie nueva), y la serie corregida queda como
+      self.serie_precip_anual -- la misma que ya usan outliers, ajuste
+      de distribuciones, bandas de confianza y curvas IDF, así que la
+      corrección se propaga a todo el análisis aguas abajo sin tocar
+      esos módulos. Verificado con prueba real-QGIS-headless (34/34
+      checks OK): la tabla de factores completa, el flujo end-to-end
+      desde los widgets reales (cargar serie manual -> elegir tipo de
+      registro -> aplicar -> verificar valores escalados e invalidación
+      de resultados obsoletos), que re-aplicar con un Cf distinto NO
+      acumula sobre la corrección anterior, y el caso "registro
+      continuo" (Cf=1.00, sin cambios).
     - v0.4.24: mejoras de realismo pedidas por el usuario en la
       Pestaña 7 (Diseño de Estructuras Hidráulicas) y en el Módulo
       BIM. 1) Pontón/Puente: el gráfico era solo dos líneas de cota

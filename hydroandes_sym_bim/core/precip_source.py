@@ -70,6 +70,55 @@ class SerieDiaria:
     variable_detectada: str
 
 
+# ======================================================================
+# Corrección por número de lecturas diarias (WMO/NOAA)
+# ======================================================================
+# Un pluviómetro leído a intervalos FIJOS (p.ej. una vez al día, siempre
+# a la misma hora) subestima sistemáticamente el verdadero máximo de 24 h
+# MÓVILES continuas: el evento de lluvia más intenso casi nunca cae
+# exactamente dentro de la ventana fija de observación. La corrección
+# clásica (Weiss, 1964; WMO-No. 1045; NOAA Technical Paper 40) multiplica
+# el máximo observado a intervalo fijo por un factor Cf > 1 para
+# estimarlo como si se hubiera medido con una ventana móvil continua.
+# Tabla de factores según el número de lecturas diarias (pedida
+# explícitamente por el usuario):
+#   etiqueta, cf_minimo, cf_maximo, descripcion
+FACTORES_CORRECCION_LECTURAS = [
+    ("1 lectura al día (intervalo fijo 24 h)", 1.13, 1.14,
+     "Factor estándar WMO/NOAA: multiplica la PMAX diaria observada por 1.13-1.14 para "
+     "estimar la PMAX en 24 h móviles continuas."),
+    ("2 lecturas al día (intervalos fijos 12 h)", 1.06, 1.07,
+     "Suma de las 2 lecturas consecutivas más altas, ajustada por el factor de intervalo."),
+    ("3 a 4 lecturas al día (intervalos fijos 6 h a 8 h)", 1.03, 1.05,
+     "Suma de los bloques consecutivos requeridos, corregida."),
+    ("24 lecturas al día (pluviógrafo horario, para la hora máxima)", 1.13, 1.13,
+     "Si se busca la HORA máxima móvil desde datos horarios fijos, la máxima de 1 h fija "
+     "se multiplica por 1.13 (no aplica a la PMAX de 24 h; ver el módulo de PMP-Hershfield "
+     "para el factor horario)."),
+    ("Registro continuo (banda/digital, 5-15 min)", 1.00, 1.00,
+     "No requiere corrección: se mide directamente la ventana móvil continua de 24 h."),
+]
+
+
+def aplicar_factor_correccion_lecturas(serie: SerieAnual, factor: float, etiqueta: str = "") -> SerieAnual:
+    """
+    Devuelve una NUEVA SerieAnual con cada valor multiplicado por el
+    factor de corrección `factor` (ver FACTORES_CORRECCION_LECTURAS) --
+    NO modifica `serie` en el sitio, para que el llamador siempre pueda
+    volver a aplicar un factor distinto partiendo de la serie ORIGINAL
+    sin acumular correcciones por error.
+
+    factor == 1.0 devuelve una copia sin cambios (caso "registro
+    continuo", que no requiere corrección) -- se sigue anotando en
+    `fuente` para dejar constancia de que el paso se revisó.
+    """
+    if factor <= 0:
+        raise ValueError(f"El factor de corrección debe ser positivo (recibido: {factor}).")
+    valores_corregidos = [v * factor for v in serie.valores_mm]
+    nota = f" [corregido ×{factor:.3f}" + (f", {etiqueta}" if etiqueta else "") + "]"
+    return SerieAnual(list(serie.anios), valores_corregidos, serie.fuente + nota)
+
+
 def construir_serie_anual(anios: List[int], valores_mm: List[float], fuente: str,
                            minimo_anios_recomendado: int = 10) -> SerieAnual:
     """
